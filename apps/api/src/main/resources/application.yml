@@ -1,0 +1,24 @@
+spring:
+  application:
+    name: bank-transfer
+  mvc:
+    problemdetails:
+      enabled: true   # 검증 실패(400)도 ProblemDetail 형식으로 응답
+
+bank:
+  gateway:
+    host: localhost
+    port: 9090
+    response-timeout: 3s
+    poll-interval: 30s
+
+account:
+  verification:
+    ttl: 5m
+    max-attempts: 5
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

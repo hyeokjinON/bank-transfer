@@ -1,0 +1,135 @@
+package io.github.hyeokjinon.banktransfer.mockbank
+
+import io.github.hyeokjinon.banktransfer.protocol.BankMessage
+import io.github.hyeokjinon.banktransfer.protocol.NameInquiryRequest
+import io.github.hyeokjinon.banktransfer.protocol.NameInquiryResponse
+import io.github.hyeokjinon.banktransfer.protocol.PollRequest
+import io.github.hyeokjinon.banktransfer.protocol.PollResponse
+import io.github.hyeokjinon.banktransfer.protocol.ResponseCodes
+import io.github.hyeokjinon.banktransfer.protocol.TransferRequest
+import io.github.hyeokjinon.banktransfer.protocol.TransferResponse
+import io.github.hyeokjinon.banktransfer.protocol.netty.addBankCodec
+import io.netty.bootstrap.ServerBootstrap
+import io.netty.channel.Channel
+import io.netty.channel.ChannelHandlerContext
+import io.netty.channel.ChannelInitializer
+import io.netty.channel.MultiThreadIoEventLoopGroup
+import io.netty.channel.SimpleChannelInboundHandler
+import io.netty.channel.nio.NioIoHandler
+import io.netty.channel.socket.SocketChannel
+import io.netty.channel.socket.nio.NioServerSocketChannel
+import org.slf4j.LoggerFactory
+import java.net.InetSocketAddress
+import java.time.Duration
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+
+/**
+ * 모의 은행 FEP. 실제 은행 대신 같은 전문 규격으로 응답한다.
+ *
+ * - 성명조회: 등록된 계좌면 예금주명, 없으면 응답코드 1001
+ * - 이체: 등록된 계좌면 입금 기록을 남기고 0000 (통장 거래내역 역할)
+ * - 폴링: 바로 응답
+ * - silentAccounts: 응답을 보내지 않는다 (타임아웃 테스트용)
+ */
+class MockBankServer(
+    private val port: Int = 0,
+    private val accounts: Map<String, String> = DEFAULT_ACCOUNTS,
+    private val silentAccounts: Set<String> = emptySet(),
+    private val responseDelay: Duration = Duration.ZERO,
+) : AutoCloseable {
+
+    private val log = LoggerFactory.getLogger(javaClass)
+    private val boss = MultiThreadIoEventLoopGroup(1, NioIoHandler.newFactory())
+    private val workers = MultiThreadIoEventLoopGroup(2, NioIoHandler.newFactory())
+    private val deposits = ConcurrentHashMap<String, MutableList<TransferRequest>>()
+    private val pollCounter = AtomicInteger()
+    private lateinit var serverChannel: Channel
+
+    val boundPort: Int get() = (serverChannel.localAddress() as InetSocketAddress).port
+    val pollCount: Int get() = pollCounter.get()
+
+    fun start(): MockBankServer {
+        serverChannel = ServerBootstrap()
+            .group(boss, workers)
+            .channel(NioServerSocketChannel::class.java)
+            .childHandler(object : ChannelInitializer<SocketChannel>() {
+                override fun initChannel(ch: SocketChannel) {
+                    ch.pipeline().addBankCodec().addLast(BankHandler())
+                }
+            })
+            .bind(port).sync().channel()
+        log.info("mock bank listening on {}", boundPort)
+        return this
+    }
+
+    /** 이 계좌로 들어온 입금 내역 (받는 사람이 통장에서 보는 적요 확인용). */
+    fun depositsOf(accountNo: String): List<TransferRequest> = deposits[accountNo]?.toList() ?: emptyList()
+
+    override fun close() {
+        if (::serverChannel.isInitialized) serverChannel.close().awaitUninterruptibly(1, TimeUnit.SECONDS)
+        boss.shutdownGracefully(0, 1, TimeUnit.SECONDS)
+        workers.shutdownGracefully(0, 1, TimeUnit.SECONDS).awaitUninterruptibly(3, TimeUnit.SECONDS)
+    }
+
+    internal fun respond(message: BankMessage): BankMessage? = when (message) {
+        is PollRequest -> {
+            pollCounter.incrementAndGet()
+            PollResponse(message.header.toResponse())
+        }
+        is NameInquiryRequest -> when {
+            message.accountNo in silentAccounts -> null
+            else -> {
+                val name = accounts[message.accountNo]
+                val code = if (name == null) ResponseCodes.ACCOUNT_NOT_FOUND else ResponseCodes.OK
+                NameInquiryResponse(message.header.toResponse(code), message.bankCode, message.accountNo, name.orEmpty())
+            }
+        }
+        is TransferRequest -> when {
+            message.accountNo in silentAccounts -> null
+            message.accountNo !in accounts -> message.reply(ResponseCodes.ACCOUNT_NOT_FOUND)
+            else -> {
+                deposits.computeIfAbsent(message.accountNo) { CopyOnWriteArrayList() }.add(message)
+                log.info("[통장] {} 입금 {}원 적요='{}'", message.accountNo, message.amount, message.memo)
+                message.reply(ResponseCodes.OK)
+            }
+        }
+        is PollResponse, is NameInquiryResponse, is TransferResponse -> null
+    }
+
+    private fun TransferRequest.reply(code: String) =
+        TransferResponse(header.toResponse(code), bankCode, accountNo, amount, memo)
+
+    private inner class BankHandler : SimpleChannelInboundHandler<BankMessage>() {
+        override fun channelRead0(ctx: ChannelHandlerContext, msg: BankMessage) {
+            val reply = respond(msg) ?: return
+            if (responseDelay.isZero) {
+                ctx.writeAndFlush(reply)
+            } else {
+                ctx.executor().schedule({ ctx.writeAndFlush(reply) }, responseDelay.toMillis(), TimeUnit.MILLISECONDS)
+            }
+        }
+
+        override fun exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable) {
+            log.warn("closing client channel: {}", cause.message)
+            ctx.close()
+        }
+    }
+
+    companion object {
+        val DEFAULT_ACCOUNTS = mapOf(
+            "1002123456789" to "홍길동",
+            "3333012345678" to "김카뱅",
+            "1101234567890" to "이페이",
+        )
+    }
+}
+
+fun main(args: Array<String>) {
+    val port = args.firstOrNull()?.toIntOrNull() ?: 9090
+    MockBankServer(port).start()
+    println("Mock bank FEP started on port $port. Accounts: ${MockBankServer.DEFAULT_ACCOUNTS}")
+    Thread.currentThread().join()
+}
