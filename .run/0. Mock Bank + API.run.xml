@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="0. Mock Bank + API" type="CompoundRunConfigurationType">
+    <toRun name="1. Mock Bank (9090)" type="GradleRunConfiguration" />
+    <toRun name="2. API (8080)" type="GradleRunConfiguration" />
+    <method v="2" />
+  </configuration>
+</component>

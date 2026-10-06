@@ -66,6 +66,19 @@ sequenceDiagram
 
 ## 실행
 
+### IntelliJ
+1. **JDK 21 지정**: `Settings > Build, Execution, Deployment > Build Tools > Gradle > Gradle JVM` 을 21 로, `File > Project Structure > SDK` 도 21 로.
+2. 오른쪽 위 실행 목록에 `.run/` 의 구성이 자동으로 뜹니다.
+   - `0. Mock Bank + API` : 모의 은행(9090)과 API(8080)를 한 번에 실행
+   - `1. Mock Bank (9090)` / `2. API (8080)` : 하나씩 실행 (벌레 아이콘으로 디버그)
+   - `3. All Tests` : 테스트 29개
+3. `http/account-verification.http` 를 열고 요청 왼쪽 ▶ 버튼으로 호출합니다.
+   1번 요청이 응답의 `id` 를 저장하고, 모의 은행 콘솔의 `적요='BT1234'` 숫자를 2번 요청의 `code` 에 넣으면 `VERIFIED` 가 됩니다.
+
+> 디버깅 추천 위치: `BankGatewayClient.send` (요청 등록), `ClientHandler.channelRead0` (전문번호로 응답 매칭), `AccountVerificationService.request` (성명조회 → 1원 이체 연결).
+
+### 터미널
+
 요구사항: JDK 21 (Gradle 은 래퍼가 내려받습니다)
 
 ```bash

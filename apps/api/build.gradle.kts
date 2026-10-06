@@ -16,3 +16,7 @@ dependencies {
     testImplementation(project(":apps:mock-bank"))
     testImplementation("org.springframework.boot:spring-boot-starter-test")
 }
+
+tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+}

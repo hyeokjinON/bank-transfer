@@ -1,0 +1,59 @@
+### IntelliJ HTTP Client 로 1원 계좌인증 흐름 확인하기
+### 먼저 실행 구성 "0. Mock Bank + API" 를 실행해 두 서버를 띄운다.
+
+### 0) 서버 상태
+GET http://localhost:8080/actuator/health
+
+### 1) 1원 인증 요청 → 응답의 id 를 자동 저장
+POST http://localhost:8080/api/v1/account-verifications
+Content-Type: application/json
+
+{
+  "bankCode": "090",
+  "accountNo": "1002123456789",
+  "holderName": "홍길동"
+}
+
+> {%
+    client.global.set("verificationId", response.body.id);
+    client.log("verificationId = " + response.body.id);
+%}
+
+### 2) 코드 확인
+### "1. Mock Bank" 콘솔의  [통장] 1002123456789 입금 1원 적요='BT6542'  에서 숫자 4자리를 아래 code 에 넣는다.
+POST http://localhost:8080/api/v1/account-verifications/{{verificationId}}/confirm
+Content-Type: application/json
+
+{
+  "code": "0000"
+}
+
+### 3) 예금주명 불일치 → 422 HOLDER_NAME_MISMATCH
+POST http://localhost:8080/api/v1/account-verifications
+Content-Type: application/json
+
+{
+  "bankCode": "090",
+  "accountNo": "3333012345678",
+  "holderName": "홍길동"
+}
+
+### 4) 없는 계좌 → 404 ACCOUNT_NOT_FOUND
+POST http://localhost:8080/api/v1/account-verifications
+Content-Type: application/json
+
+{
+  "bankCode": "090",
+  "accountNo": "1234567890",
+  "holderName": "홍길동"
+}
+
+### 5) 형식 오류 → 400
+POST http://localhost:8080/api/v1/account-verifications
+Content-Type: application/json
+
+{
+  "bankCode": "9",
+  "accountNo": "abc",
+  "holderName": ""
+}
