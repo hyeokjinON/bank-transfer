@@ -77,6 +77,16 @@ sequenceDiagram
 
 > 디버깅 추천 위치: `BankGatewayClient.send` (요청 등록), `ClientHandler.channelRead0` (전문번호로 응답 매칭), `AccountVerificationService.request` (성명조회 → 1원 이체 연결).
 
+### 로컬 인프라 (P3 부터 필요)
+
+Docker Desktop 이 있으면 MySQL · Kafka · Redis 를 한 번에 띄웁니다. 자세한 내용은 [infra/README.md](infra/README.md).
+
+```bash
+cp infra/.env.example infra/.env
+docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait
+bash infra/verify.sh
+```
+
 ### 터미널
 
 요구사항: JDK 21 (Gradle 은 래퍼가 내려받습니다)
@@ -129,6 +139,7 @@ curl -X POST localhost:8080/api/v1/account-verifications/{id}/confirm -H 'Conten
 - [x] **P0** Gradle 멀티모듈, Kotlin, Spring Boot 4, CI
 - [x] **P1** 1원 계좌인증 API (동기 계약, 논블로킹 대기)
 - [x] **P2** Netty 모의 은행, 프레이밍, 폴링, 재접속, 응답 매칭
+- [x] **P3-0** 로컬 인프라: Docker Compose 로 MySQL 8.4 · Kafka 4.1(KRaft) · Redis 7.4, CI 연기 테스트 → [infra/](infra/README.md) · [ADR-0003](docs/adr/0003-local-infra-docker-compose.md)
 - [ ] **P3** 입출금 비동기 처리: Kafka + Transactional Outbox + 멱등키 + DLT
 - [ ] **P4** 잔액 동시성: 비관적 락 vs 낙관적 락 vs Redis 분산락, k6 부하테스트
 - [ ] **P5** Spring Batch 일마감 대사 + 텔레그램 알림
