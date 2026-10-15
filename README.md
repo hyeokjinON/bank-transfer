@@ -79,7 +79,7 @@ sequenceDiagram
 
 ### 로컬 인프라 (P3 부터 필요)
 
-Docker Desktop 이 있으면 MySQL · Kafka · Redis 를 한 번에 띄웁니다. 자세한 내용은 [infra/README.md](infra/README.md).
+Docker Desktop 이 있으면 MySQL · Kafka · Redis 를 한 번에 띄웁니다. Windows 는 **Git Bash** 에서 실행하세요 (PowerShell 의 `bash` 는 WSL 로 연결됩니다). 자세한 내용은 [infra/README.md](infra/README.md).
 
 ```bash
 cp infra/.env.example infra/.env

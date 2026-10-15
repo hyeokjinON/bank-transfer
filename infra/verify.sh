@@ -5,6 +5,8 @@
 #   Redis : SET · GET · TTL
 # 사용: bash infra/verify.sh   (Git Bash · WSL · macOS · Linux · GitHub Actions)
 set -euo pipefail
+# Git Bash(MSYS)는 /opt/... 같은 인자를 C:/Program Files/Git/opt/... 로 바꿔 컨테이너에 넘긴다 → 변환 끄기
+export MSYS_NO_PATHCONV=1
 
 cd "$(dirname "$0")"
 ENV_FILE=.env

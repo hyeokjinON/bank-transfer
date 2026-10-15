@@ -16,6 +16,8 @@
 4. (선택) WSL 메모리 제한: `%UserProfile%\.wslconfig` 에 `[wsl2]` / `memory=4GB`.
 
 ## 매일
+> Windows 는 **Git Bash** 에서 실행한다. PowerShell 의 `bash` 는 WSL 로 연결되어 동작하지 않는다 (아래 "자주 막히는 곳").
+
 ```bash
 cp infra/.env.example infra/.env          # 처음 한 번
 docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait
@@ -45,3 +47,5 @@ docker compose -f infra/docker-compose.yml exec redis redis-cli
 | 앱에서 Kafka 접속은 되는데 메시지가 안 감 | `advertised.listeners` 주소 불일치 | 앱은 `localhost:9092`, 컨테이너는 `kafka:29092` |
 | Kafka 가 `Invalid cluster.id` 로 안 뜸 | `KAFKA_CLUSTER_ID` 를 바꿨는데 예전 볼륨이 남음 | `down -v` 후 다시 `up` |
 | WSL 메모리 부족 · PC 느려짐 | Docker 가 메모리를 많이 씀 | `.wslconfig` 로 제한, 안 쓸 때 `down` |
+| PowerShell 에서 `bash infra/verify.sh` → `execvpe(/bin/bash) failed` | PowerShell 의 `bash` 는 WSL 실행기다. WSL 배포판이 `docker-desktop` 하나뿐이라 bash 가 없다 | Git Bash 로 실행: `& "C:\Program Files\Git\bin\bash.exe" infra/verify.sh` (또는 IntelliJ 터미널을 Git Bash 로) |
+| Git Bash 에서 `docker compose exec kafka /opt/kafka/...` → 파일 없음 | Git Bash 가 `/opt/...` 를 `C:/Program Files/Git/opt/...` 로 바꿔 넘김 | 앞에 `MSYS_NO_PATHCONV=1` 을 붙이거나 `//opt/kafka/...` 로 쓰기 (`verify.sh` 는 이미 처리) |
