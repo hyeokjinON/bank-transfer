@@ -23,3 +23,19 @@ jobs:
         with:
           name: test-reports
           path: '**/build/reports/tests/'
+
+  # 로컬 인프라 파일(infra/docker-compose.yml)이 실제로 뜨고 읽기/쓰기가 되는지 확인 (ADR-0003)
+  infra-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Start MySQL, Kafka (KRaft), Redis
+        run: docker compose -f infra/docker-compose.yml --env-file infra/.env.example up -d --wait --wait-timeout 240
+      - name: Verify read/write
+        run: bash infra/verify.sh
+      - name: Logs on failure
+        if: failure()
+        run: docker compose -f infra/docker-compose.yml --env-file infra/.env.example logs --no-color
+      - name: Stop
+        if: always()
+        run: docker compose -f infra/docker-compose.yml --env-file infra/.env.example down -v
