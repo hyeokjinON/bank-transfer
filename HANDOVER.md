@@ -8,7 +8,7 @@
 |---|---|---|
 | P0 골격 · P1 1원인증 · P2 Netty 모의 은행 | ✅ 완료 (2026-10-01) | 테스트 29개 |
 | P3-0 로컬 인프라 | ✅ 완료 (2026-10-16, PR #1) | 로컬(Windows 11 + Docker Desktop)·CI 모두 `verify.sh` 통과 |
-| P3-1 접수 | ✅ 완료 (PR #N) | ADR-0004(제안), 테스트 67개. `http/transfer.http` 손 확인은 PR 에서 사람이 수행 |
+| P3-1 접수 | 🟡 PR 리뷰 중 ([#3](https://github.com/hyeokjinON/bank-transfer/pull/3)) | ADR-0004(제안), 테스트 73개. `http/transfer.http` 손 확인은 PR 에서 사람이 수행 |
 | P3-2 처리 · P3-3 실패 | ⬜ 다음 | 설계 문서 §5·§6 |
 | P4 ~ P9 | ⬜ 예정 | README 로드맵 |
 
