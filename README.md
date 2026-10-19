@@ -6,6 +6,18 @@
 
 > 회사 코드는 한 줄도 쓰지 않았습니다. 전문 규격과 은행은 모두 이 프로젝트에서 새로 정의한 **모의(Mock)** 입니다.
 
+## 문서
+
+| 문서 | 언제 읽나 |
+|---|---|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 모듈 구조 · 의존 방향 · 런타임 흐름 · 설계 결정 색인 |
+| [SETUP.md](SETUP.md) | 새 PC 에서 개발 환경 만들기 (JDK 21, IntelliJ, Docker, Git Bash) |
+| [OPERATION.md](OPERATION.md) | 실행 · 포트 · 설정 · 모의 은행 시나리오 · 장애 대응 · CI |
+| [HANDOVER.md](HANDOVER.md) | 지금 어디까지 왔고 다음에 무엇을 하는지 |
+| [CHANGELOG.md](CHANGELOG.md) | 단계별 변경 이력 |
+| [docs/database.md](docs/database.md) | DB 모델 · 테이블 정의 · 인덱스 · 시간대(KST) 정책 |
+| [CLAUDE.md](CLAUDE.md) | 이 저장소의 작업 규칙 (AI 에이전트 · 기여자용) |
+
 ## 지금 되는 것 (1단계)
 
 - **1원 계좌인증 API**: 예금주 성명조회 → 인증코드를 적요에 실어 1원 이체 → 사용자가 통장에서 본 코드로 확인
