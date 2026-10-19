@@ -108,7 +108,7 @@ Docker Compose 한 파일로 MySQL 8.4 · Kafka 4.1(KRaft 단일 노드) · Redi
 CI `infra-smoke` 잡이 같은 파일을 띄워 `verify.sh` 로 읽기/쓰기를 확인한다. → [ADR-0003](docs/adr/0003-local-infra-docker-compose.md), [infra/README.md](infra/README.md)
 
 ## 6. 다음 구조: P3 (설계 중)
-합의된 방향 (설계 문서가 확정되면 `docs/superpowers/specs/` 와 ADR 로 옮긴다):
+합의된 방향 요약. 전체는 [P3 설계 문서](docs/superpowers/specs/2026-10-19-p3-transfer-design.md), 단계별 결정은 구현 PR 의 ADR(0004~0006)로 남긴다.
 - P3 는 3단계: **P3-1 접수**(transfer 모듈, JPA/MySQL/Flyway, Idempotency-Key, 아웃박스) → **P3-2 처리**(폴링 퍼블리셔 → Kafka → 컨슈머 → 은행) → **P3-3 실패**(재시도 토픽·DLT, 결과조회 전문).
 - 범위: 서비스 모계좌 → **1원인증을 마친 계좌**로의 출금이체만. 잔액·동시성은 P4.
 - 새 모듈 `modules/transfer` (순수 Kotlin) + 포트 `TransferStore.saveWithEvent`, `VerifiedAccounts`, `BankTransferPort`.
