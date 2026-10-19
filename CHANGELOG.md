@@ -6,6 +6,8 @@
 ## [Unreleased]
 ### Added
 - 프로젝트 안내 문서: `CLAUDE.md`, `ARCHITECTURE.md`, `SETUP.md`, `OPERATION.md`, `HANDOVER.md`, `CHANGELOG.md`.
+- P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
+- DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
 ### 진행 중
 - P3 입출금 비동기 처리 설계 (3단계 분할, 폴링 퍼블리셔, 인증 계좌로만 출금). → [HANDOVER](HANDOVER.md)

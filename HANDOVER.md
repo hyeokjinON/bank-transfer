@@ -26,6 +26,7 @@
 | 멱등 | API: `Idempotency-Key` 필수 + `UNIQUE` + `request_hash` (다른 내용 재사용 422). 컨슈머: **상태 조건부 UPDATE** (`processed_event` 테이블은 쓰지 않기로 수정) |
 | 실패 | 거절 → FAILED / 연결 없음(미전송) → RECEIVED 로 되돌리고 `@RetryableTopic` (1s·10s·60s) → DLT / 타임아웃 → **재전송 금지**, UNKNOWN → 결과조회 |
 | 규격 v0.2 | 이체 전문에 `이용기관 거래번호 AN(20)` 추가, 신규 업무 `INQ` 결과조회 (`0000` 처리됨 / `2001` 원거래 없음) |
+| 시간대 | DB 시각은 **KST** `DATETIME(6)`, 도메인은 `Instant`, 변환은 JDBC·Hibernate 설정 한 곳 ([docs/database.md §2](docs/database.md)) |
 | 정리 작업 | 10초마다: 30초 넘은 SENDING → UNKNOWN, UNKNOWN → 결과조회 |
 | 테스트 | 도메인 단위(가짜 포트) / Testcontainers MySQL 어댑터 / MySQL+Kafka+모의 은행 흐름 통합 + Awaitility. 단계별 '증명 테스트' 목록은 설계 문서 §7 |
 

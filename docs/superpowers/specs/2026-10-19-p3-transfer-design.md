@@ -56,7 +56,7 @@ apps/mock-bank/    P3-3 에서 결과조회 응답 · 무응답 시나리오 추
 
 ## 2. 데이터 모델
 
-Flyway `apps/api/src/main/resources/db/migration/V1__init.sql` (P3-1), 이후 변경은 `V2__...` 로 추가.
+Flyway `apps/api/src/main/resources/db/migration/V1__init.sql` (P3-1), 이후 변경은 `V2__...` 로 추가. 컬럼별 설명 · 인덱스 용도 · 잠금 방식 · 운영 쿼리는 **[docs/database.md](../../database.md)** 가 기준 문서다.
 
 ```sql
 CREATE TABLE account_verification (
@@ -105,7 +105,7 @@ CREATE TABLE outbox_event (
 );
 ```
 
-- 시간은 UTC `Instant` 로 저장한다 (JDBC `connectionTimeZone=UTC`). 화면 표시만 KST.
+- 시각은 **한국시간(KST) 벽시계 값**으로 `DATETIME(6)` 에 저장한다. 도메인은 `Instant`, 변환은 JDBC(`connectionTimeZone=Asia/Seoul`)·Hibernate(`jdbc.time_zone=Asia/Seoul`) 설정에서만 한다. 이유와 계층별 설정은 [database.md §2](../../database.md#2-시간대-정책--한국시간kst으로-저장).
 - `version` 은 JPA `@Version` (낙관적 락). 상태 전이는 별도로 조건부 UPDATE 를 쓰므로 이중 안전장치다.
 - 발행된 아웃박스 행 삭제(보존 기간)는 P5 배치에서 다룬다.
 
@@ -209,7 +209,7 @@ TransferConsumer (group transfer-processor, AckMode.MANUAL_IMMEDIATE)
 
 **규격 v0.2** (`docs/protocol.md` 갱신)
 - 이체 `TRF` 개별부에 `이용기관 거래번호 AN(20)` 추가 (52 → 72바이트).
-  - 출금이체: 접수 시(P3-1) `T` + UTC `yyMMdd` + 무작위 13자(대문자·숫자, `SecureRandom`) = 20자를 발급해 `transfer.reference` 에 저장한다. `uk_transfer_reference` 가 충돌을 막는다 (충돌 시 재발급).
+  - 출금이체: 접수 시(P3-1) `T` + KST `yyMMdd` + 무작위 13자(대문자·숫자, `SecureRandom`) = 20자를 발급해 `transfer.reference` 에 저장한다. `uk_transfer_reference` 가 충돌을 막는다 (충돌 시 재발급).
   - 1원인증 이체: 같은 형식에 접두 `V`. 결과조회 대상이 아니므로 저장하지 않는다.
 - 신규 업무 `INQ` 결과조회: 요청 개별부 `이용기관 거래번호 AN(20)`, 응답 개별부 + `처리결과 AN(4)` (`0000` 처리됨 · `2001` 원거래 없음).
 - 전문번호(8자리)는 세션 내 요청·응답 짝짓기용으로만 쓴다. 업무 키가 아니다.
@@ -236,6 +236,7 @@ TransferConsumer (group transfer-processor, AckMode.MANUAL_IMMEDIATE)
 - [P3-1] 같은 키 동시 10건 → 이체 1건 · 아웃박스 1건
 - [P3-1] 아웃박스 insert 실패 유도 → 이체도 없음
 - [P3-1] 1원인증 confirm 동시 요청 → 시도 횟수 정확, 재시작 후 유지
+- [P3-1] `Instant` 저장 → 네이티브 SQL 로 읽은 `DATETIME` 이 KST 벽시계 시각과 같음 (시간대 설정 고정)
 - [P3-1] 같은 키 다른 내용 → 422, 인증 안 된 계좌 → 422
 - [P3-2] 퍼블리셔 2개 동시 → 이벤트당 발행 1회
 - [P3-2] 같은 메시지 2번 소비 → 모의 은행 입금 1건

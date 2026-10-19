@@ -115,7 +115,11 @@ CI `infra-smoke` 잡이 같은 파일을 띄워 `verify.sh` 로 읽기/쓰기를
 - 상태: `RECEIVED → SENDING → COMPLETED | FAILED | UNKNOWN`, `UNKNOWN → (결과조회) → COMPLETED | FAILED`. **타임아웃은 실패로 확정하지 않는다.**
 - 1원인증 저장소도 메모리 → MySQL(JPA) 로 옮긴다.
 
-## 7. 설계 결정 색인
+## 7. 관련 문서
+- 데이터베이스 모델 · 테이블 정의: [docs/database.md](docs/database.md)
+- 전문 규격: [docs/protocol.md](docs/protocol.md)
+
+## 8. 설계 결정 색인
 | ADR | 결정 |
 |---|---|
 | [0001](docs/adr/0001-modular-monolith-ports.md) | 모듈러 모놀리스 + 포트/어댑터 |

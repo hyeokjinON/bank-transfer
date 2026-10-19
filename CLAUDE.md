@@ -36,6 +36,7 @@ bash infra/verify.sh                              # 인프라 읽기/쓰기 확�
 - 주석·문서·커밋은 한국어. 주석은 "무엇"보다 **"왜"** 를 쓴다. 주변 코드의 밀도와 말투를 따른다.
 - 비동기 결과는 `CompletableFuture` (P6 이후 코루틴 비교). 예외는 `CompletionException` 을 벗겨서 처리한다.
 - 금액은 `Long`(원 단위), 시간은 `Instant` + 주입한 `Clock`. 테스트에서 시간을 고정할 수 있어야 한다.
+- DB 시각은 **KST `DATETIME(6)`** 로 저장한다 (변환은 JDBC·Hibernate 설정에서만). 스키마를 바꾸면 Flyway 새 버전 + [docs/database.md](docs/database.md) 를 같은 PR 에서 고친다.
 - 새 기능은 테스트 먼저(TDD). 도메인은 가짜 포트로 단위 테스트, 어댑터는 Testcontainers/모의 은행으로 통합 테스트.
 - 버전은 정확히 고정한다 (`latest` 금지, 예외: 선택 도구인 kafka-ui).
 
@@ -49,4 +50,5 @@ bash infra/verify.sh                              # 인프라 읽기/쓰기 확�
 | [CHANGELOG.md](CHANGELOG.md) | 단계별 변경 이력 |
 | [docs/adr/](docs/adr) | 설계 결정 기록 |
 | [docs/protocol.md](docs/protocol.md) | 모의 은행 전문 규격 |
+| [docs/database.md](docs/database.md) | DB 모델 · 테이블 정의 · 인덱스 · 잠금 · 시간대 정책 · 마이그레이션 규칙 |
 | [infra/README.md](infra/README.md) | 로컬 인프라 상세 |

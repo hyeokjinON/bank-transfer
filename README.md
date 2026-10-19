@@ -15,6 +15,7 @@
 | [OPERATION.md](OPERATION.md) | 실행 · 포트 · 설정 · 모의 은행 시나리오 · 장애 대응 · CI |
 | [HANDOVER.md](HANDOVER.md) | 지금 어디까지 왔고 다음에 무엇을 하는지 |
 | [CHANGELOG.md](CHANGELOG.md) | 단계별 변경 이력 |
+| [docs/database.md](docs/database.md) | DB 모델 · 테이블 정의 · 인덱스 · 시간대(KST) 정책 |
 | [CLAUDE.md](CLAUDE.md) | 이 저장소의 작업 규칙 (AI 에이전트 · 기여자용) |
 
 ## 지금 되는 것 (1단계)
