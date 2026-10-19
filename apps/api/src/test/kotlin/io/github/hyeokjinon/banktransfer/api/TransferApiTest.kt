@@ -34,6 +34,14 @@ class TransferApiTest : ApiIntegrationTest() {
             .body(body)
             .exchange { _, r -> Response(r.statusCode.value(), r.bodyTo(mapType) ?: emptyMap(), r.headers.location?.toString()) }
 
+    /** 직렬화를 거치지 않고 JSON 문자열을 그대로 보낸다 (소수 · 문자열 금액 같은 잘못된 형식을 재현). */
+    private fun postRaw(key: String, json: String): Response =
+        client.post().uri("/api/v1/transfers")
+            .contentType(MediaType.APPLICATION_JSON)
+            .header("Idempotency-Key", key)
+            .body(json)
+            .exchange { _, r -> Response(r.statusCode.value(), r.bodyTo(mapType) ?: emptyMap(), r.headers.location?.toString()) }
+
     private fun get(id: Any?): Response =
         client.get().uri("/api/v1/transfers/$id")
             .exchange { _, r -> Response(r.statusCode.value(), r.bodyTo(mapType) ?: emptyMap(), null) }
@@ -89,6 +97,16 @@ class TransferApiTest : ApiIntegrationTest() {
         assertEquals(202, lower.status)
         assertEquals(202, upper.status)
         assertNotEquals(lower.body["id"], upper.body["id"])
+    }
+
+    @Test
+    fun `금액이 소수이거나 문자열이면 400`() {
+        val account = verifiedAccount()
+        val fraction = postRaw(UUID.randomUUID().toString(), """{"bankCode":"090","accountNo":"$account","amount":50000.5,"memo":"출금"}""")
+        val text = postRaw(UUID.randomUUID().toString(), """{"bankCode":"090","accountNo":"$account","amount":"70000","memo":"출금"}""")
+
+        assertEquals(400, fraction.status)
+        assertEquals(400, text.status)
     }
 
     @Test

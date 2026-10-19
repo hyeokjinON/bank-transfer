@@ -51,6 +51,7 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 | 은행 연결 없음 | 503 | `BANK_UNAVAILABLE` |
 | `Idempotency-Key` 헤더 없음 · 1~64자 보이는 ASCII 아님 | 400 | `IDEMPOTENCY_KEY_REQUIRED` |
 | 금액이 1 ~ 10,000,000 원 밖 | 400 | `INVALID_AMOUNT` |
+| 금액이 정수가 아님 (소수 · 문자열) | 400 | ProblemDetail (요청 형식) |
 | 적요가 EUC-KR 20바이트 초과 | 400 | `INVALID_MEMO` |
 | 은행코드·계좌번호 형식 오류 | 400 | ProblemDetail (요청 검증). 도메인 검사는 `INVALID_ACCOUNT` |
 | 1원인증을 마치지 않은 계좌 | 422 | `ACCOUNT_NOT_VERIFIED` |
