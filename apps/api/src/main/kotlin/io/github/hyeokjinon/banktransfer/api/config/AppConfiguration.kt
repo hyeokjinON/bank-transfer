@@ -5,10 +5,14 @@ import io.github.hyeokjinon.banktransfer.account.BankPort
 import io.github.hyeokjinon.banktransfer.account.RandomCodeGenerator
 import io.github.hyeokjinon.banktransfer.account.VerificationRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.AccountVerificationJpaRepository
+import io.github.hyeokjinon.banktransfer.api.persistence.JpaTransferStore
 import io.github.hyeokjinon.banktransfer.api.persistence.JpaVerificationRepository
+import io.github.hyeokjinon.banktransfer.api.persistence.OutboxEventJpaRepository
+import io.github.hyeokjinon.banktransfer.api.persistence.TransferJpaRepository
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
 import io.github.hyeokjinon.banktransfer.protocol.ResponseCodes
+import io.github.hyeokjinon.banktransfer.transfer.TransferStore
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.context.annotation.Bean
@@ -80,6 +84,10 @@ class AppConfiguration {
     @Bean
     fun verificationRepository(jpa: AccountVerificationJpaRepository, tx: TransactionTemplate): VerificationRepository =
         JpaVerificationRepository(jpa, tx, Clock.systemUTC())
+
+    @Bean
+    fun transferStore(transfers: TransferJpaRepository, outbox: OutboxEventJpaRepository, tx: TransactionTemplate): TransferStore =
+        JpaTransferStore(transfers, outbox, tx)
 
     @Bean
     fun accountVerificationService(
