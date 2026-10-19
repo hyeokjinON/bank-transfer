@@ -42,6 +42,9 @@ interface VerificationRepository {
 
     /** 원자적으로 바꾼다. 같은 건에 확인 요청이 동시에 와도 시도 횟수가 꼬이지 않게 하려는 것이다. */
     fun update(id: UUID, change: (AccountVerification) -> AccountVerification): AccountVerification?
+
+    /** 이 계좌로 끝난 인증(VERIFIED)이 있는가. 출금 받는 계좌 검증에 쓴다. */
+    fun existsVerified(bankCode: String, accountNo: String): Boolean
 }
 
 fun interface CodeGenerator {

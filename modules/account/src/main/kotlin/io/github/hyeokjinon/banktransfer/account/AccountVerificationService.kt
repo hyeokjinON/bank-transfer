@@ -94,7 +94,7 @@ class RandomCodeGenerator(private val random: SecureRandom = SecureRandom()) : C
     override fun generate(): String = "%04d".format(random.nextInt(10_000))
 }
 
-/** 1단계용 저장소. 다음 단계에서 JPA + MySQL 로 바꾼다. */
+/** 도메인 테스트용 저장소. 앱은 MySQL 저장소(apps/api JpaVerificationRepository)를 쓴다. */
 class InMemoryVerificationRepository : VerificationRepository {
     private val store = ConcurrentHashMap<UUID, AccountVerification>()
 
@@ -105,4 +105,7 @@ class InMemoryVerificationRepository : VerificationRepository {
 
     override fun update(id: UUID, change: (AccountVerification) -> AccountVerification): AccountVerification? =
         store.computeIfPresent(id) { _, current -> change(current) }
+
+    override fun existsVerified(bankCode: String, accountNo: String): Boolean =
+        store.values.any { it.bankCode == bankCode && it.accountNo == accountNo && it.status == VerificationStatus.VERIFIED }
 }
