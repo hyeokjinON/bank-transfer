@@ -4,6 +4,7 @@ rootProject.name = "bank-transfer"
 include(":modules:bank-protocol")   // 고정길이 전문 + Netty 프레이밍 코덱
 include(":modules:bank-gateway")    // 은행 FEP 접속 클라이언트 (폴링, 재접속, 응답 매칭)
 include(":modules:account")         // 1원 계좌인증 도메인 (Spring·Netty 의존 없음)
+include(":modules:transfer")        // 출금이체 도메인 (Spring·JPA·Kafka 의존 없음)
 
 // 실행 모듈
 include(":apps:api")                // Spring Boot REST API
