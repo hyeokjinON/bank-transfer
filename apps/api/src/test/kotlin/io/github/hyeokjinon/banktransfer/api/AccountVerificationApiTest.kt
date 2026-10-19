@@ -1,58 +1,17 @@
 package io.github.hyeokjinon.banktransfer.api
 
-import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
-import io.github.hyeokjinon.banktransfer.mockbank.MockBankServer
-import org.junit.jupiter.api.AfterAll
-import org.junit.jupiter.api.BeforeEach
-import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.beans.factory.annotation.Value
-import org.springframework.boot.test.context.SpringBootTest
+import io.github.hyeokjinon.banktransfer.api.support.ApiIntegrationTest
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.MediaType
-import org.springframework.test.context.DynamicPropertyRegistry
-import org.springframework.test.context.DynamicPropertySource
-import org.springframework.web.client.RestClient
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
  * 실제 HTTP -> Spring MVC -> 도메인 -> Netty 게이트웨이 -> 모의 은행(TCP) 까지 한 번에 검증한다.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AccountVerificationApiTest {
+class AccountVerificationApiTest : ApiIntegrationTest() {
 
-    companion object {
-        private val bank = MockBankServer(silentAccounts = setOf("9990000000001")).start()
-
-        @JvmStatic
-        @DynamicPropertySource
-        fun bankProperties(registry: DynamicPropertyRegistry) {
-            registry.add("bank.gateway.port") { bank.boundPort }
-            registry.add("bank.gateway.response-timeout") { "500ms" }
-        }
-
-        @JvmStatic
-        @AfterAll
-        fun stopBank() = bank.close()
-    }
-
-    @Value("\${local.server.port}")
-    private var port: Int = 0
-
-    @Autowired
-    private lateinit var gateway: BankGatewayClient
-
-    private val client by lazy { RestClient.create("http://localhost:$port") }
     private val mapType = object : ParameterizedTypeReference<Map<String, Any?>>() {}
-
-    @BeforeEach
-    fun waitForBankConnection() {
-        val deadline = System.currentTimeMillis() + 5_000
-        while (!gateway.isConnected) {
-            check(System.currentTimeMillis() < deadline) { "gateway did not connect to mock bank" }
-            Thread.sleep(20)
-        }
-    }
 
     private fun post(path: String, body: Map<String, String>): Pair<Int, Map<String, Any?>> =
         client.post().uri(path)
