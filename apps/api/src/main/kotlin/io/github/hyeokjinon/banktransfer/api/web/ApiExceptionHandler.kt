@@ -53,7 +53,9 @@ class ApiExceptionHandler {
                 HttpStatus.INTERNAL_SERVER_ERROR to "INTERNAL_ERROR"
             }
         }
-        return ProblemDetail.forStatusAndDetail(status, cause.message ?: code).apply {
+        // 500 은 내부 메시지(SQL · 경로 등)를 응답에 싣지 않는다. 원인은 위 log.error 로 남아 있다.
+        val detail = if (status == HttpStatus.INTERNAL_SERVER_ERROR) "internal error" else cause.message ?: code
+        return ProblemDetail.forStatusAndDetail(status, detail).apply {
             setProperty("code", code)
             if (cause is AccountVerificationException.WrongCode) setProperty("remainingAttempts", cause.remainingAttempts)
         }

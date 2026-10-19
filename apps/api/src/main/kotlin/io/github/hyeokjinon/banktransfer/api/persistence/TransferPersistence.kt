@@ -49,6 +49,10 @@ class TransferEntity(
     )
 
     companion object {
+        /**
+         * 도메인 -> 새 엔티티 (INSERT 전용). version 이 null 이라 save 가 항상 persist 한다.
+         * P3-2 의 상태 변경은 이 메서드로 만든 엔티티를 다시 save 하지 말고, 읽어 온 엔티티를 고치거나 조건부 UPDATE 를 쓴다.
+         */
         fun from(t: Transfer) = TransferEntity(
             id = t.id.toString(), idempotencyKey = t.idempotencyKey, reference = t.reference, requestHash = t.requestHash,
             bankCode = t.bankCode, accountNo = t.accountNo, amount = t.amount, memo = t.memo, status = t.status,
@@ -91,6 +95,11 @@ internal fun outboxPayload(event: TransferEvent): String = when (event) {
  * 이체 저장소 (MySQL). saveWithEvent 는 transfer 와 outbox_event 를 한 트랜잭션에 쓴다:
  * 둘 다 커밋되거나 둘 다 롤백되므로 "이체는 있는데 처리 신호가 없는" 상태가 생기지 않는다.
  * UNIQUE 위반은 제약 이름을 보고 도메인 예외([StoreConflict])로 바꿔 던진다.
+ *
+ * 바깥 트랜잭션 안에서 [saveWithEvent] 를 부르면 안 된다. 이 클래스가 자기 트랜잭션을 열고 닫는 것에 기대기 때문이다:
+ * UNIQUE 위반이면 이 트랜잭션이 롤백된 뒤에야 호출자(TransferService)가 이긴 쪽 건을 다시 읽을 수 있다.
+ * 바깥 트랜잭션에 합류(REQUIRED)하면 롤백이 호출자 쪽으로 미뤄져 그 재조회가 깨진다.
+ * 전파는 지금은 REQUIRED(기본값)로 두고, 호출자가 트랜잭션 밖에서 부른다는 전제를 이 문서로 지킨다.
  */
 class JpaTransferStore(
     private val transfers: TransferJpaRepository,
@@ -102,6 +111,7 @@ class JpaTransferStore(
     override fun saveWithEvent(transfer: Transfer, event: TransferEvent): Transfer =
         try {
             tx.execute {
+                // flush 로 UNIQUE 위반을 여기서 터뜨려야 아래 catch 에서 StoreConflict 로 바꿀 수 있다 (커밋 시점까지 미루지 않는다)
                 val saved = transfers.saveAndFlush(TransferEntity.from(transfer))
                 outbox.saveAndFlush(
                     OutboxEventEntity(
