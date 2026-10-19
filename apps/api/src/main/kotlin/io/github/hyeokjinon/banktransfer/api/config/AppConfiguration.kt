@@ -12,7 +12,10 @@ import io.github.hyeokjinon.banktransfer.api.persistence.TransferJpaRepository
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
 import io.github.hyeokjinon.banktransfer.protocol.ResponseCodes
+import io.github.hyeokjinon.banktransfer.transfer.RandomReferenceGenerator
+import io.github.hyeokjinon.banktransfer.transfer.TransferService
 import io.github.hyeokjinon.banktransfer.transfer.TransferStore
+import io.github.hyeokjinon.banktransfer.transfer.VerifiedAccounts
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.context.annotation.Bean
@@ -88,6 +91,15 @@ class AppConfiguration {
     @Bean
     fun transferStore(transfers: TransferJpaRepository, outbox: OutboxEventJpaRepository, tx: TransactionTemplate): TransferStore =
         JpaTransferStore(transfers, outbox, tx)
+
+    /** transfer 모듈은 account 모듈을 모른다. "인증된 계좌인가?"를 1원인증 저장소에 연결하는 곳은 여기뿐이다. */
+    @Bean
+    fun transferService(store: TransferStore, verifications: VerificationRepository) = TransferService(
+        store = store,
+        verifiedAccounts = VerifiedAccounts { bankCode, accountNo -> verifications.existsVerified(bankCode, accountNo) },
+        referenceGenerator = RandomReferenceGenerator(prefix = 'T'),
+        clock = Clock.systemUTC(),
+    )
 
     @Bean
     fun accountVerificationService(
