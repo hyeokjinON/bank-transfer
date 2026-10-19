@@ -115,6 +115,19 @@ class TransferServiceTest {
     }
 
     @Test
+    fun `키가 정확히 64자면 받는다`() {
+        assertTrue(service.request(command(key = "a".repeat(64))).created)
+    }
+
+    @Test
+    fun `키에 공백이나 ASCII 가 아닌 문자가 있으면 IdempotencyKeyRequired`() {
+        for (key in listOf("a b", " key", "key ", "키", "ordér-1", "tab	key")) {
+            assertFailsWith<TransferException.IdempotencyKeyRequired>("key=[$key]") { service.request(command(key = key)) }
+        }
+        assertTrue(store.transfers.isEmpty())
+    }
+
+    @Test
     fun `은행코드는 숫자 3자리, 계좌번호는 숫자 10~16자리`() {
         val invalid = listOf(
             RequestTransfer("b1", "09", "1002123456789", 50_000, "출금"),          // 은행코드 2자리
@@ -143,6 +156,19 @@ class TransferServiceTest {
 
         assertFalse(result.created)
         assertEquals(winner.id, result.transfer.id)
+        assertTrue(store.events.isEmpty())
+    }
+
+    @Test
+    fun `동시 요청에서 졌는데 이긴 쪽의 내용이 다르면 IdempotencyKeyReused`() {
+        val now = clock.instant()
+        store.raceWinner = Transfer(
+            id = UUID.randomUUID(), idempotencyKey = "key-1", reference = "T2610199999999999999",
+            requestHash = TransferService.requestHash(command(amount = 70_000)), bankCode = "090", accountNo = "1002123456789",
+            amount = 70_000, memo = "출금", status = TransferStatus.RECEIVED, createdAt = now, updatedAt = now,
+        )
+
+        assertFailsWith<TransferException.IdempotencyKeyReused> { service.request(command()) }
         assertTrue(store.events.isEmpty())
     }
 

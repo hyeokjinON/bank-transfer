@@ -16,6 +16,7 @@ import java.util.concurrent.Executors
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 
 class TransferApiTest : ApiIntegrationTest() {
 
@@ -76,6 +77,18 @@ class TransferApiTest : ApiIntegrationTest() {
 
         assertEquals(200, again.status)
         assertEquals(first.body["id"], again.body["id"])
+    }
+
+    @Test
+    fun `대소문자만 다른 키는 서로 다른 키다 (바이트 비교)`() {
+        val key = "case-" + UUID.randomUUID()
+        val account = verifiedAccount()
+        val lower = post(key, body(account))
+        val upper = post(key.uppercase(), body(account))
+
+        assertEquals(202, lower.status)
+        assertEquals(202, upper.status)
+        assertNotEquals(lower.body["id"], upper.body["id"])
     }
 
     @Test

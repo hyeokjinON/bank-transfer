@@ -75,8 +75,8 @@ CREATE TABLE account_verification (
 
 CREATE TABLE transfer (
   id                 CHAR(36)     PRIMARY KEY,
-  idempotency_key    VARCHAR(64)  NOT NULL,
-  reference          CHAR(20)     NOT NULL,     -- 이용기관 거래번호 (은행에 보내는 업무 키, §6)
+  idempotency_key    VARCHAR(64)  CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  reference          CHAR(20)     CHARACTER SET ascii COLLATE ascii_bin NOT NULL,     -- 이용기관 거래번호 (은행에 보내는 업무 키, §6)
   request_hash       CHAR(64)     NOT NULL,     -- SHA-256(bankCode|accountNo|amount|memo)
   bank_code          VARCHAR(3)   NOT NULL,
   account_no         VARCHAR(16)  NOT NULL,
@@ -136,7 +136,7 @@ SENDING ──(30초 초과, 정리 작업)──▶ UNKNOWN
 `POST /api/v1/transfers`
 
 ```http
-Idempotency-Key: 8c1f6a2e-...          # 필수, 1~64자
+Idempotency-Key: 8c1f6a2e-...          # 필수, 1~64자 보이는 ASCII
 Content-Type: application/json
 
 {"bankCode": "090", "accountNo": "1002123456789", "amount": 50000, "memo": "출금"}

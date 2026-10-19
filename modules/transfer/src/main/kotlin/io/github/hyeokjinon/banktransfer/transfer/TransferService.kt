@@ -69,9 +69,9 @@ class TransferService(
         else throw TransferException.IdempotencyKeyReused()
 
     private fun validate(command: RequestTransfer) {
-        if (command.idempotencyKey.isBlank() || command.idempotencyKey.length > MAX_KEY_LENGTH) {
-            throw TransferException.IdempotencyKeyRequired()
-        }
+        // 키는 DB 에서 ascii_bin 으로 바이트 단위 비교한다 (대소문자 · 악센트가 다르면 다른 키).
+        // 비 ASCII 는 HTTP 헤더에서도 깨지므로 보이는 ASCII(공백 제외) 1~64자만 받는다.
+        if (!IDEMPOTENCY_KEY.matches(command.idempotencyKey)) throw TransferException.IdempotencyKeyRequired()
         // 계좌 형식은 숫자만 허용한다. 해시가 "|" 로 이어 붙이는데 memo 가 마지막 필드라,
         // 계좌번호에 "|" 가 섞이면 서로 다른 요청이 같은 해시가 된다. 웹 계층 검증에만 기대지 않고 도메인에서 막는다.
         if (!BANK_CODE.matches(command.bankCode) || !ACCOUNT_NO.matches(command.accountNo)) {
@@ -82,9 +82,9 @@ class TransferService(
     }
 
     companion object {
-        private const val MAX_KEY_LENGTH = 64
         private const val MEMO_MAX_BYTES = 20
         private val EUC_KR: Charset = Charset.forName("EUC-KR")
+        private val IDEMPOTENCY_KEY = Regex("[\\x21-\\x7E]{1,64}")
         private val BANK_CODE = Regex("\\d{3}")
         private val ACCOUNT_NO = Regex("\\d{10,16}")
 

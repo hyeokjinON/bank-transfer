@@ -16,8 +16,8 @@ CREATE TABLE account_verification (
 
 CREATE TABLE transfer (
   id                 CHAR(36)     NOT NULL PRIMARY KEY,
-  idempotency_key    VARCHAR(64)  NOT NULL,
-  reference          CHAR(20)     NOT NULL,
+  idempotency_key    VARCHAR(64)  CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  reference          CHAR(20)     CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   request_hash       CHAR(64)     NOT NULL,
   bank_code          VARCHAR(3)   NOT NULL,
   account_no         VARCHAR(16)  NOT NULL,

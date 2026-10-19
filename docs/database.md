@@ -11,6 +11,7 @@
 | DBMS | MySQL 8.4 (LTS) | 로컬은 `infra/docker-compose.yml`, 테스트는 Testcontainers |
 | 스키마 | `bank_transfer` | |
 | 문자셋 / 정렬 | `utf8mb4` / `utf8mb4_0900_ai_ci` | 한글 · 이모지(4바이트)까지. MySQL `utf8` 은 3바이트라 쓰지 않는다 |
+| 키 컬럼 정렬 | `transfer.idempotency_key` · `reference` 는 `ascii` / `ascii_bin` | 기본 정렬(`_ai_ci`)은 대소문자 · 악센트를 구분하지 않아 `Order-1` 과 `order-1` 이 같은 키로 취급된다. 키는 바이트 그대로 비교해야 한다 |
 | 엔진 | InnoDB | 트랜잭션, 행 잠금, 클러스터드 PK |
 | 계정 | 앱 `bank` (스키마 권한만) / 관리 `root` (로컬 전용) | 비밀번호는 `infra/.env` (git 제외) |
 | 스키마 관리 | Flyway (`apps/api/src/main/resources/db/migration`) | JPA `ddl-auto=validate` — 엔티티가 스키마를 바꾸지 않는다 |
@@ -96,8 +97,8 @@ erDiagram
 | 컬럼 | 타입 | NULL | 설명 |
 |---|---|---|---|
 | `id` | `CHAR(36)` | N | PK. UUID 문자열. API 응답의 `id` |
-| `idempotency_key` | `VARCHAR(64)` | N | 클라이언트가 보낸 `Idempotency-Key`. **UNIQUE** |
-| `reference` | `CHAR(20)` | N | 이용기관 거래번호. `T` + KST `yyMMdd` + 무작위 13자. 은행 전문 · 결과조회의 업무 키. **UNIQUE** |
+| `idempotency_key` | `VARCHAR(64)` ascii_bin | N | 클라이언트가 보낸 `Idempotency-Key` (보이는 ASCII 1~64자). ascii_bin (대소문자·악센트 구분, 바이트 비교). **UNIQUE** |
+| `reference` | `CHAR(20)` ascii_bin | N | 이용기관 거래번호. `T` + KST `yyMMdd` + 무작위 13자. 은행 전문 · 결과조회의 업무 키. ascii_bin (대소문자·악센트 구분, 바이트 비교). **UNIQUE** |
 | `request_hash` | `CHAR(64)` | N | `SHA-256(bankCode\|accountNo\|amount\|memo)`. 같은 키 다른 내용 판별 |
 | `bank_code` | `VARCHAR(3)` | N | 받는 은행 |
 | `account_no` | `VARCHAR(16)` | N | 받는 계좌 (VERIFIED 여야 접수) |
@@ -197,3 +198,4 @@ EXPLAIN SELECT id FROM outbox_event WHERE published_at IS NULL ORDER BY id LIMIT
 |---|---|---|
 | 2026-10-19 | 최초 작성: P3 스키마 설계, 시간대 KST 정책 | P3 설계 문서 |
 | 2026-10-19 | V1 적용 (P3-1). payload 에서 eventId 제외, Hibernate Instant 설정 추가 | PR (P3-1) |
+| 2026-10-19 | `idempotency_key` · `reference` 를 `ascii_bin` 으로 (대소문자·악센트 구분), 키는 보이는 ASCII 1~64자만 허용 | 최종 리뷰 (P3-1) |
