@@ -5,7 +5,7 @@
 ## 1. 구성 요소와 포트
 | 구성 요소 | 실행 | 포트 | 상태 확인 |
 |---|---|---|---|
-| API (`apps/api`) | `./gradlew :apps:api:bootRun` 또는 실행 구성 `2. API (8080)` | 8080 | `GET /actuator/health` |
+| API (`apps/api`) | `./gradlew :apps:api:bootRun` 또는 실행 구성 `2. API (8080)` | 8080 | `GET /actuator/health` · MySQL 필요 (기동 시 Flyway 마이그레이션) |
 | 모의 은행 (`apps/mock-bank`) | `./gradlew :apps:mock-bank:run --args="9090"` 또는 `1. Mock Bank (9090)` | 9090 (TCP) | 콘솔 `Mock bank FEP started on port 9090` |
 | MySQL 8.4 | `infra/docker-compose.yml` | 3306 | `docker compose ... ps` → healthy |
 | Kafka 4.1 (KRaft) | 〃 | 9092 (PC) / 29092 (컨테이너) | 〃 |
@@ -17,6 +17,8 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 ## 2. 설정 (`apps/api/src/main/resources/application.yml`)
 | 키 | 기본값 | 의미 |
 |---|---|---|
+| `spring.datasource.url` | `jdbc:mysql://localhost:3306/bank_transfer?...` | `MYSQL_HOST` · `MYSQL_PORT` · `MYSQL_DATABASE` 환경변수로 덮어쓴다 (시각은 KST, [database.md §2](docs/database.md)) |
+| `spring.datasource.username` / `password` | `bank` / 로컬 개발용 값 (`infra/.env.example` 와 같다) | `MYSQL_USER` · `MYSQL_PASSWORD` 환경변수 |
 | `bank.gateway.host` / `port` | `localhost` / `9090` | 은행 FEP 주소 |
 | `bank.gateway.response-timeout` | `3s` | 응답 대기. 넘으면 504 `BANK_TIMEOUT` |
 | `bank.gateway.poll-interval` | `30s` | 쓰기 유휴 시 폴링 주기. ×3 동안 수신이 없으면 연결 종료 |
@@ -47,6 +49,13 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 | 유효시간 경과 | 410 | `VERIFICATION_EXPIRED` |
 | 은행 무응답 | 504 | `BANK_TIMEOUT` |
 | 은행 연결 없음 | 503 | `BANK_UNAVAILABLE` |
+| `Idempotency-Key` 헤더 없음 · 1~64자 아님 | 400 | `IDEMPOTENCY_KEY_REQUIRED` |
+| 금액이 1 ~ 10,000,000 원 밖 | 400 | `INVALID_AMOUNT` |
+| 적요가 EUC-KR 20바이트 초과 | 400 | `INVALID_MEMO` |
+| 은행코드·계좌번호 형식 오류 | 400 | ProblemDetail (요청 검증). 도메인 검사는 `INVALID_ACCOUNT` |
+| 1원인증을 마치지 않은 계좌 | 422 | `ACCOUNT_NOT_VERIFIED` |
+| 같은 키에 다른 내용 | 422 | `IDEMPOTENCY_KEY_REUSED` |
+| 없는 이체 id | 404 | `TRANSFER_NOT_FOUND` |
 
 ## 5. 인프라 일상 명령
 ```bash
@@ -69,6 +78,8 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env down -v        
 | Kafka 접속은 되는데 메시지가 안 감 | `advertised.listeners` | PC 앱은 `localhost:9092`, 컨테이너는 `kafka:29092` |
 | Kafka `Invalid cluster.id` | `.env` 의 `KAFKA_CLUSTER_ID` 변경 여부 | `down -v` 후 다시 `up` |
 | `port is already allocated` | PC 에 이미 떠 있는 MySQL/Redis | `infra/.env` 포트 변경 |
+| 기동 시 `Communications link failure` | MySQL 실행 여부 | infra 먼저 `up -d --wait` |
+| 기동 시 `Schema-validation` / Flyway 체크섬 오류 | 엔티티 · 마이그레이션 변경 | 적용된 V 파일을 고치지 않았는지 확인. 로컬은 `down -v` 로 초기화 |
 
 ### 자주 막히는 곳
 - PowerShell 에서 `bash …` 실패 → Git Bash 로 실행 ([SETUP §3](SETUP.md#3-windows-에서-알아둘-것)).

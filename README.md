@@ -18,12 +18,13 @@
 | [docs/database.md](docs/database.md) | DB 모델 · 테이블 정의 · 인덱스 · 시간대(KST) 정책 |
 | [CLAUDE.md](CLAUDE.md) | 이 저장소의 작업 규칙 (AI 에이전트 · 기여자용) |
 
-## 지금 되는 것 (1단계)
+## 지금 되는 것
 
 - **1원 계좌인증 API**: 예금주 성명조회 → 인증코드를 적요에 실어 1원 이체 → 사용자가 통장에서 본 코드로 확인
 - **은행 게이트웨이(Netty 클라이언트)**: 길이헤더 프레이밍, 폴링 전문으로 회선 확인, 지수 백오프 재접속, 전문번호 기반 응답 매칭
 - **모의 은행 FEP(Netty 서버)**: 같은 전문 규격으로 응답, 무응답 계좌로 타임아웃 재현
-- **테스트 29개**: 전문 직렬화, 쪼개진 TCP 패킷, 동시 요청 50건 매칭, 타임아웃, 재접속, API 통합(HTTP → TCP)
+- **출금이체 접수 API (P3-1)**: `Idempotency-Key` 로 멱등 접수(202), 1원인증 계좌만 허용, 이체와 처리 신호(아웃박스)를 한 트랜잭션에 저장. MySQL(Flyway) 사용
+- **테스트 67개**: 전문 직렬화, 쪼개진 TCP 패킷, 동시 요청 50건 매칭, 타임아웃, 재접속, API 통합(HTTP → TCP), MySQL 통합(Testcontainers: 같은 키 동시 10건, 아웃박스 원자성)
 
 ## 구조
 
@@ -46,7 +47,8 @@ flowchart LR
 | `modules/bank-protocol` | 전문 모델(sealed class), 고정길이 직렬화, Netty 프레임 디코더/인코더 | Netty |
 | `modules/bank-gateway` | 은행 접속 클라이언트: 폴링, 재접속, 응답 매칭, 타임아웃 | bank-protocol |
 | `modules/account` | 1원 계좌인증 도메인. **Spring·Netty 를 모른다** | 없음 |
-| `apps/api` | REST API, 조립(wiring), 예외 → HTTP 매핑 | account, bank-gateway |
+| `modules/transfer` | 출금이체 도메인: 상태 전이, 멱등 접수, 거래번호. **Spring·JPA 를 모른다** | 없음 |
+| `apps/api` | REST API, 조립(wiring), 예외 → HTTP 매핑 | account, transfer, bank-gateway |
 | `apps/mock-bank` | 모의 은행 FEP 서버 (실행 가능, 테스트 픽스처) | bank-protocol |
 
 `account` 는 `BankPort` 인터페이스만 알고, Netty 로 실제 연결하는 어댑터는 `apps/api` 에 있습니다.
@@ -79,11 +81,13 @@ sequenceDiagram
 ## 실행
 
 ### IntelliJ
+> P3-1 부터 API 는 MySQL 이 필요하다. 먼저 `docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait`
+
 1. **JDK 21 지정**: `Settings > Build, Execution, Deployment > Build Tools > Gradle > Gradle JVM` 을 21 로, `File > Project Structure > SDK` 도 21 로.
 2. 오른쪽 위 실행 목록에 `.run/` 의 구성이 자동으로 뜹니다.
    - `0. Mock Bank + API` : 모의 은행(9090)과 API(8080)를 한 번에 실행
    - `1. Mock Bank (9090)` / `2. API (8080)` : 하나씩 실행 (벌레 아이콘으로 디버그)
-   - `3. All Tests` : 테스트 29개
+   - `3. All Tests` : 테스트 67개
 3. `http/account-verification.http` 를 열고 요청 왼쪽 ▶ 버튼으로 호출합니다.
    1번 요청이 응답의 `id` 를 저장하고, 모의 은행 콘솔의 `적요='BT1234'` 숫자를 2번 요청의 `code` 에 넣으면 `VERIFIED` 가 됩니다.
 
@@ -101,10 +105,12 @@ bash infra/verify.sh
 
 ### 터미널
 
+> P3-1 부터 API 는 MySQL 이 필요하다. 먼저 `docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait`
+
 요구사항: JDK 21 (Gradle 은 래퍼가 내려받습니다)
 
 ```bash
-./gradlew build                                   # 컴파일 + 테스트 29개
+./gradlew build                                   # 컴파일 + 테스트 67개
 ./gradlew :apps:mock-bank:run --args="9090"       # 터미널 1: 모의 은행
 ./gradlew :apps:api:bootRun                       # 터미널 2: API (localhost:8080)
 ```
@@ -153,6 +159,9 @@ curl -X POST localhost:8080/api/v1/account-verifications/{id}/confirm -H 'Conten
 - [x] **P2** Netty 모의 은행, 프레이밍, 폴링, 재접속, 응답 매칭
 - [x] **P3-0** 로컬 인프라: Docker Compose 로 MySQL 8.4 · Kafka 4.1(KRaft) · Redis 7.4, CI 연기 테스트 → [infra/](infra/README.md) · [ADR-0003](docs/adr/0003-local-infra-docker-compose.md)
 - [ ] **P3** 입출금 비동기 처리: Kafka + Transactional Outbox + 멱등키 + DLT
+  - [x] P3-1 접수: Idempotency-Key · 아웃박스 · 1원인증 MySQL 이전 → [ADR-0004](docs/adr/0004-idempotency-key-and-transactional-outbox.md)
+  - [ ] P3-2 처리: 폴링 퍼블리셔 → Kafka → 컨슈머 → 은행
+  - [ ] P3-3 실패: 재시도 · DLT · 결과조회
 - [ ] **P4** 잔액 동시성: 비관적 락 vs 낙관적 락 vs Redis 분산락, k6 부하테스트
 - [ ] **P5** Spring Batch 일마감 대사 + 텔레그램 알림
 - [ ] **P6** WebFlux / Coroutines 버전과 성능 비교
@@ -162,4 +171,4 @@ curl -X POST localhost:8080/api/v1/account-verifications/{id}/confirm -H 'Conten
 
 ## 기술 스택
 
-Kotlin 2.3 · Java 21 · Spring Boot 4.1 (Spring MVC, Validation, Actuator) · Netty 4.2 · JUnit 5 · Gradle 9 (Kotlin DSL) · GitHub Actions
+Kotlin 2.3 · Java 21 · Spring Boot 4.1 (Spring MVC, Validation, Actuator) · Spring Data JPA (Hibernate 7) · Flyway · MySQL 8.4 · Testcontainers · Netty 4.2 · JUnit 5 · Gradle 9 (Kotlin DSL) · GitHub Actions

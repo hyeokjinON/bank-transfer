@@ -1,6 +1,6 @@
 # 데이터베이스 — 모델 정의와 구조
 
-> 기준: P3 설계(2026-10-19). 현재 `main` 에는 아직 테이블이 없고(1원인증은 메모리 저장소), **P3-1 에서 Flyway `V1__init.sql` 로 생성**한다.
+> 기준: P3-1 (Flyway `V1__init.sql` 적용). 1원인증 · 이체 · 아웃박스 테이블이 MySQL 에 있다.
 > 이 문서가 스키마의 기준이다. 마이그레이션을 추가할 때 이 문서도 같은 PR 에서 고친다.
 > 설계 배경: [P3 설계 문서](superpowers/specs/2026-10-19-p3-transfer-design.md) §2~§6
 
@@ -15,6 +15,7 @@
 | 계정 | 앱 `bank` (스키마 권한만) / 관리 `root` (로컬 전용) | 비밀번호는 `infra/.env` (git 제외) |
 | 스키마 관리 | Flyway (`apps/api/src/main/resources/db/migration`) | JPA `ddl-auto=validate` — 엔티티가 스키마를 바꾸지 않는다 |
 | 접근 방식 | Spring Data JPA (Hibernate) + 필요한 곳은 네이티브 SQL | `FOR UPDATE SKIP LOCKED`, 조건부 UPDATE |
+| 시간대 설정 | JDBC `connectionTimeZone=Asia/Seoul` · Hibernate `jdbc.time_zone=Asia/Seoul` + `type.preferred_instant_jdbc_type=TIMESTAMP` | 마지막 설정이 없으면 Hibernate 7 이 Instant 를 UTC 로 쓴다 |
 
 ## 2. 시간대 정책 — 한국시간(KST)으로 저장
 
@@ -24,7 +25,7 @@
 |---|---|---|
 | MySQL 서버 | `--default-time-zone` (Compose · Testcontainers 동일) | `+09:00` |
 | JDBC URL | `connectionTimeZone` · `forceConnectionTimeZoneToSession` | `Asia/Seoul` · `true` |
-| Hibernate | `spring.jpa.properties.hibernate.jdbc.time_zone` | `Asia/Seoul` |
+| Hibernate | `spring.jpa.properties.hibernate.jdbc.time_zone` · `hibernate.type.preferred_instant_jdbc_type` | `Asia/Seoul` + `hibernate.type.preferred_instant_jdbc_type: TIMESTAMP` |
 | 도메인 코드 | `Instant` + 주입한 `Clock` | 시간대를 모른다 (테스트에서 시간 고정) |
 | JVM 기본 시간대 | 건드리지 않는다 (`TimeZone.setDefault` 금지) | 서버 OS 설정에 따라 결과가 바뀌지 않게 |
 
@@ -118,10 +119,10 @@ erDiagram
 ### 4-3. `outbox_event` — 트랜잭셔널 아웃박스 (P3-1 생성, P3-2 부터 발행)
 | 컬럼 | 타입 | NULL | 설명 |
 |---|---|---|---|
-| `id` | `BIGINT AUTO_INCREMENT` | N | PK. 발행 순서 기준. 메시지의 `eventId` |
+| `id` | `BIGINT AUTO_INCREMENT` | N | PK. 발행 순서 기준. 발행(P3-2) 때 메시지의 `eventId` 가 된다 |
 | `aggregate_id` | `CHAR(36)` | N | 대상 집합 id (`transfer.id`). Kafka 메시지 key |
 | `event_type` | `VARCHAR(50)` | N | `TransferRequested` |
-| `payload` | `JSON` | N | `{"eventId", "transferId", "occurredAt"}` |
+| `payload` | `JSON` | N | `{"transferId", "occurredAt"}`. eventId 는 이 행의 `id` 라 발행(P3-2) 때 메시지에 붙인다 |
 | `created_at` | `DATETIME(6)` | N | 이벤트 기록 시각 (이체 저장과 같은 트랜잭션) |
 | `published_at` | `DATETIME(6)` | Y | Kafka 발행 완료 시각. `NULL` = 미발행 |
 
@@ -140,7 +141,7 @@ erDiagram
 ## 6. 동시성 · 잠금
 | 상황 | 방법 | SQL 모양 |
 |---|---|---|
-| 같은 `Idempotency-Key` 동시 접수 | UNIQUE 위반을 잡아 기존 건 반환 | `INSERT …` → `DuplicateKeyException` → 새 트랜잭션에서 `SELECT` |
+| 같은 `Idempotency-Key` 동시 접수 | UNIQUE 위반을 잡아 기존 건 반환 | `INSERT …` → UNIQUE 위반(`DataIntegrityViolationException`)을 도메인 예외로 변환 → 트랜잭션 밖에서 `SELECT` |
 | 1원인증 코드 확인 동시 요청 | 비관적 락 | `SELECT … FROM account_verification WHERE id = ? FOR UPDATE` |
 | 아웃박스 발행 (앱 여러 대) | 잠긴 행 건너뛰기 | `SELECT … WHERE published_at IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED` |
 | 이체 상태 변경 (중복 메시지) | 조건부 UPDATE | `UPDATE transfer SET status='SENDING', sending_at=? … WHERE id=? AND status='RECEIVED'` → 0건이면 건너뜀 |
@@ -195,3 +196,4 @@ EXPLAIN SELECT id FROM outbox_event WHERE published_at IS NULL ORDER BY id LIMIT
 | 날짜 | 변경 | 관련 |
 |---|---|---|
 | 2026-10-19 | 최초 작성: P3 스키마 설계, 시간대 KST 정책 | P3 설계 문서 |
+| 2026-10-19 | V1 적용 (P3-1). payload 에서 eventId 제외, Hibernate Instant 설정 추가 | PR (P3-1) |
