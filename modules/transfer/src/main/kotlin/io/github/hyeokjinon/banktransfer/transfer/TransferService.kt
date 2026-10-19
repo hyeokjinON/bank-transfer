@@ -72,6 +72,11 @@ class TransferService(
         if (command.idempotencyKey.isBlank() || command.idempotencyKey.length > MAX_KEY_LENGTH) {
             throw TransferException.IdempotencyKeyRequired()
         }
+        // 계좌 형식은 숫자만 허용한다. 해시가 "|" 로 이어 붙이는데 memo 가 마지막 필드라,
+        // 계좌번호에 "|" 가 섞이면 서로 다른 요청이 같은 해시가 된다. 웹 계층 검증에만 기대지 않고 도메인에서 막는다.
+        if (!BANK_CODE.matches(command.bankCode) || !ACCOUNT_NO.matches(command.accountNo)) {
+            throw TransferException.InvalidAccount()
+        }
         if (command.amount !in 1..MAX_TRANSFER_AMOUNT) throw TransferException.InvalidAmount(command.amount)
         if (!fitsMemo(command.memo)) throw TransferException.InvalidMemo()
     }
@@ -80,6 +85,8 @@ class TransferService(
         private const val MAX_KEY_LENGTH = 64
         private const val MEMO_MAX_BYTES = 20
         private val EUC_KR: Charset = Charset.forName("EUC-KR")
+        private val BANK_CODE = Regex("\\d{3}")
+        private val ACCOUNT_NO = Regex("\\d{10,16}")
 
         /** 은행 전문의 적요 필드는 EUC-KR 20바이트다. 인코딩할 수 없는 문자(이모지 등)는 받지 않는다. */
         private fun fitsMemo(memo: String): Boolean =

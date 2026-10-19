@@ -100,6 +100,7 @@ sealed class TransferException(message: String) : RuntimeException(message) {
     class IdempotencyKeyRequired : TransferException("Idempotency-Key header is required (1-64 chars)")
     class InvalidAmount(amount: Long) : TransferException("amount must be 1..$MAX_TRANSFER_AMOUNT, was $amount")
     class InvalidMemo : TransferException("memo must fit in 20 bytes of EUC-KR")
+    class InvalidAccount : TransferException("bankCode must be 3 digits and accountNo 10-16 digits")
     class AccountNotVerified : TransferException("account is not verified")
     class IdempotencyKeyReused : TransferException("idempotency key was already used with a different request")
     class TransferNotFound(id: UUID) : TransferException("transfer $id not found")

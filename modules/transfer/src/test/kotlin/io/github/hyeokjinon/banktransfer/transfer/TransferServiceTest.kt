@@ -115,6 +115,21 @@ class TransferServiceTest {
     }
 
     @Test
+    fun `은행코드는 숫자 3자리, 계좌번호는 숫자 10~16자리`() {
+        val invalid = listOf(
+            RequestTransfer("b1", "09", "1002123456789", 50_000, "출금"),          // 은행코드 2자리
+            RequestTransfer("b2", "0a0", "1002123456789", 50_000, "출금"),        // 은행코드에 문자
+            RequestTransfer("a1", "090", "123456789", 50_000, "출금"),             // 계좌 9자리
+            RequestTransfer("a2", "090", "1|23456789012", 50_000, "출금"),        // 계좌에 구분자
+            RequestTransfer("a3", "090", "12345678901234567", 50_000, "출금"),    // 계좌 17자리
+        )
+        for (command in invalid) {
+            assertFailsWith<TransferException.InvalidAccount> { service.request(command) }
+        }
+        assertTrue(store.transfers.isEmpty())
+    }
+
+    @Test
     fun `같은 키가 동시에 들어와 저장에서 지면 이긴 쪽 건을 돌려준다`() {
         val now = clock.instant()
         val winner = Transfer(
