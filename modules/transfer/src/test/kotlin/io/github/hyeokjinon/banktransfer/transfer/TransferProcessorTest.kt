@@ -122,6 +122,27 @@ class TransferProcessorTest {
     }
 
     @Test
+    fun `은행 호출이 예외를 던지면 UNKNOWN 이고 다시 보내지 않는다`() {
+        val t = received()
+        var calls = 0
+        val throwingProcessor = TransferProcessor(
+            store,
+            BankTransferPort { _, _, _, _ ->
+                calls++
+                throw IllegalStateException("boom")
+            },
+            Clock.fixed(now, ZoneOffset.UTC),
+        )
+
+        assertEquals(ProcessResult.UNKNOWN, throwingProcessor.process(t.id))
+        assertEquals(TransferStatus.UNKNOWN, store.transfers.getValue(t.id).status)
+        assertNull(store.transfers.getValue(t.id).bankResponseCode)
+
+        assertEquals(ProcessResult.ALREADY_HANDLED, throwingProcessor.process(t.id))
+        assertEquals(1, calls)
+    }
+
+    @Test
     fun `toString 은 계좌번호 뒤 4자리만, 적요는 찍지 않는다`() {
         val text = received().toString()
 

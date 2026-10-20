@@ -17,6 +17,7 @@ enum class ProcessResult { COMPLETED, FAILED, UNKNOWN, ALREADY_HANDLED, NOT_FOUN
  * 2. 은행 호출은 DB 트랜잭션 밖에서 한다 (응답을 기다리는 동안 커넥션을 붙잡지 않는다).
  * 3. 결과를 기록한다. 결과를 모르면 UNKNOWN — 다시 보내지 않는다 (P3-3 결과조회로 확정).
  *    보내지도 못했으면 RECEIVED 로 되돌려 재시도하게 한다.
+ * 은행 응답 뒤 DB 기록이 실패하면 SENDING 으로 남긴다 — P3-3 정리 작업이 30초 넘게 SENDING 인 건을 UNKNOWN 으로 바꾼다.
  */
 class TransferProcessor(
     private val store: TransferStore,
@@ -28,7 +29,13 @@ class TransferProcessor(
         val transfer = store.findById(transferId) ?: return ProcessResult.NOT_FOUND
         if (!store.transition(transferId, RECEIVED, SENDING, clock.instant())) return ProcessResult.ALREADY_HANDLED
 
-        return when (val outcome = bank.transfer(transfer.bankCode, transfer.accountNo, transfer.amount, transfer.memo)) {
+        val outcome = try {
+            bank.transfer(transfer.bankCode, transfer.accountNo, transfer.amount, transfer.memo)
+        } catch (e: Exception) {
+            // 포트가 결과를 분류하지 못하고 예외를 던졌다 = 은행이 받았는지 모른다 → 다시 보내지 않고 UNKNOWN (P3-3 결과조회로 확정)
+            BankTransferOutcome.ResultUnknown
+        }
+        return when (outcome) {
             BankTransferOutcome.Completed -> record(transferId, COMPLETED, BANK_OK, ProcessResult.COMPLETED)
             is BankTransferOutcome.Rejected -> record(transferId, FAILED, outcome.responseCode, ProcessResult.FAILED)
             BankTransferOutcome.ResultUnknown -> record(transferId, UNKNOWN, null, ProcessResult.UNKNOWN)
