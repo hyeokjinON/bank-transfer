@@ -48,6 +48,38 @@ data class Transfer(
         if (!status.canMoveTo(next)) throw TransferException.IllegalTransition(status, next)
         return copy(status = next, updatedAt = at, sendingAt = if (next == TransferStatus.SENDING) at else sendingAt)
     }
+
+    /** 로그에 계좌번호 · 적요가 그대로 남지 않게 한다 (data class 기본 toString 은 모든 필드를 찍는다). */
+    override fun toString(): String =
+        "Transfer(id=$id, reference=$reference, status=$status, bankCode=$bankCode, accountNo=${maskAccountNo(accountNo)}, " +
+            "amount=$amount, bankResponseCode=$bankResponseCode)"
+}
+
+/** 뒤 4자리만 남긴다: 1002123456789 -> *********6789 */
+internal fun maskAccountNo(accountNo: String): String =
+    if (accountNo.length <= 4) "*".repeat(accountNo.length) else "*".repeat(accountNo.length - 4) + accountNo.takeLast(4)
+
+/**
+ * 은행 이체 결과. "모름"과 "안 보냄"을 구분하는 게 핵심이다:
+ * 모르면 은행이 처리했을 수 있으므로 다시 보내지 않고, 안 보냈으면 다시 보내도 된다.
+ */
+sealed interface BankTransferOutcome {
+    /** 은행이 처리했다 (0000). */
+    data object Completed : BankTransferOutcome
+
+    /** 은행이 거절했다 (계좌 없음 등). 확정 실패. */
+    data class Rejected(val responseCode: String) : BankTransferOutcome
+
+    /** 보냈는데 결과를 모른다 (무응답 · 보낸 뒤 연결 끊김 · 쓰기 실패). */
+    data object ResultUnknown : BankTransferOutcome
+
+    /** 보내기 전에 실패했다 (연결 없음). 은행에 가지 않았다. */
+    data object NotSent : BankTransferOutcome
+}
+
+/** 은행 출금이체 포트. 결과가 나올 때까지 호출 스레드에서 기다린다 (Kafka 컨슈머 스레드가 부른다). */
+fun interface BankTransferPort {
+    fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String): BankTransferOutcome
 }
 
 data class RequestTransfer(
@@ -79,6 +111,13 @@ interface TransferStore {
     fun findById(id: UUID): Transfer?
 
     fun findByIdempotencyKey(key: String): Transfer?
+
+    /**
+     * 현재 상태가 [from] 일 때만 [to] 로 바꾼다 (조건부 UPDATE). 바뀌었으면 true.
+     * 같은 메시지를 두 번 받아도 두 번째는 false 라서 은행에 다시 보내지 않는다 — 도메인 상태가 곧 멱등키다.
+     * [to] 가 SENDING 이면 sendingAt 도 [at] 으로 기록한다. bankResponseCode 는 주어진 값으로 덮어쓴다.
+     */
+    fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String? = null): Boolean
 }
 
 /** 저장소가 UNIQUE 제약 위반을 도메인 말로 알려 줄 때 쓴다. */

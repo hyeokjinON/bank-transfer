@@ -41,6 +41,9 @@ class TransferServiceTest {
         override fun findById(id: UUID) = transfers[id]
 
         override fun findByIdempotencyKey(key: String) = transfers.values.firstOrNull { it.idempotencyKey == key }
+
+        override fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?) =
+            throw UnsupportedOperationException("접수 테스트에서는 쓰지 않는다")
     }
 
     private val store = FakeStore()
