@@ -9,7 +9,7 @@
 | P0 골격 · P1 1원인증 · P2 Netty 모의 은행 | ✅ 완료 (2026-10-01) | 테스트 29개 |
 | P3-0 로컬 인프라 | ✅ 완료 (2026-10-16, PR #1) | 로컬(Windows 11 + Docker Desktop)·CI 모두 `verify.sh` 통과 |
 | P3-1 접수 | ✅ 완료 (2026-10-20, [#3](https://github.com/hyeokjinON/bank-transfer/pull/3)) | ADR-0004 채택, 테스트 73개. 손 확인: 로컬 API · Postman 컬렉션으로 접수 흐름, DB 에서 아웃박스 미발행 · KST 저장 확인 |
-| P3-2 처리 | 🟡 PR 리뷰 중 (2026-10-20, PR #N) | ADR-0005 제안, 테스트 97개. 손 확인 대기 (머지 전 사람이 실행): `http/transfer.http` 2-1) · Postman 2-9 에서 몇 초 뒤 `COMPLETED` (아래 4번 한계 참고) |
+| P3-2 처리 | 🟡 PR 리뷰 중 (2026-10-20, PR #N) | ADR-0005 제안, 테스트 107개. 손 확인 대기 (머지 전 사람이 실행): `http/transfer.http` 2-1) · Postman 2-9 에서 몇 초 뒤 `COMPLETED` (아래 4번 한계 참고) |
 | P3-3 실패 | ⬜ 다음 | 설계 문서 §6 |
 | P4 ~ P9 | ⬜ 예정 | README 로드맵 |
 
