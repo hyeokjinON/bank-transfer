@@ -3,7 +3,7 @@ spring:
     name: bank-transfer
   mvc:
     problemdetails:
-      enabled: true   # 검증 실패(400)도 ProblemDetail 형식으로 응답
+      enabled: true   # ApiExceptionHandler 가 ResponseEntityExceptionHandler 를 상속하므로 표준 오류도 ProblemDetail + code 로 응답한다 (Boot 기본 핸들러는 물러난다. 설정은 명시용으로 유지)
   datasource:
     # 로컬은 infra/docker-compose.yml 의 MySQL (값은 infra/.env.example 과 같다). 시각은 KST 로 저장한다 (docs/database.md §2)
     url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:bank_transfer}?connectionTimeZone=Asia/Seoul&forceConnectionTimeZoneToSession=true

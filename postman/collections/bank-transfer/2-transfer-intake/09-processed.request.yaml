@@ -1,0 +1,14 @@
+$kind: http-request
+name: 2-9 처리 결과 → COMPLETED (2-1 후 몇 초 뒤)
+method: GET
+url: '{{baseUrl}}/api/v1/transfers/{{transferId}}'
+order: 9000
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("COMPLETED, 은행 응답코드 0000 (아웃박스 → Kafka → 은행)", () => {
+        pm.response.to.have.status(200);
+        pm.expect(pm.response.json().status).to.eql("COMPLETED");
+        pm.expect(pm.response.json().bankResponseCode).to.eql("0000");
+      });

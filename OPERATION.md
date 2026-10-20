@@ -5,7 +5,7 @@
 ## 1. 구성 요소와 포트
 | 구성 요소 | 실행 | 포트 | 상태 확인 |
 |---|---|---|---|
-| API (`apps/api`) | `./gradlew :apps:api:bootRun` 또는 실행 구성 `2. API (8080)` | 8080 | `GET /actuator/health` · MySQL 필요 (기동 시 Flyway 마이그레이션) |
+| API (`apps/api`) | `./gradlew :apps:api:bootRun` 또는 실행 구성 `2. API (8080)` | 8080 | `GET /actuator/health` · MySQL · Kafka 필요 (기동 시 Flyway 마이그레이션) |
 | 모의 은행 (`apps/mock-bank`) | `./gradlew :apps:mock-bank:run --args="9090"` 또는 `1. Mock Bank (9090)` | 9090 (TCP) | 콘솔 `Mock bank FEP started on port 9090` |
 | MySQL 8.4 | `infra/docker-compose.yml` | 3306 | `docker compose ... ps` → healthy |
 | Kafka 4.1 (KRaft) | 〃 | 9092 (PC) / 29092 (컨테이너) | 〃 |
@@ -19,6 +19,10 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 |---|---|---|
 | `spring.datasource.url` | `jdbc:mysql://localhost:3306/bank_transfer?...` | `MYSQL_HOST` · `MYSQL_PORT` · `MYSQL_DATABASE` 환경변수로 덮어쓴다 (시각은 KST, [database.md §2](docs/database.md)) |
 | `spring.datasource.username` / `password` | `bank` / 로컬 개발용 값 (`infra/.env.example` 와 같다) | `MYSQL_USER` · `MYSQL_PASSWORD` 환경변수 |
+| `spring.kafka.bootstrap-servers` | `localhost:9092` | `KAFKA_BOOTSTRAP_SERVERS` 환경변수로 덮어쓴다 (컨테이너에서는 `kafka:29092`) |
+| `transfer.outbox.relay.enabled` | `true` | 폴링 퍼블리셔 스케줄 on/off (테스트는 끄고 직접 호출) |
+| `transfer.outbox.relay.interval-ms` | `500` | 미발행 아웃박스 폴링 간격 (이전 실행이 끝난 뒤부터 잰다) |
+| `transfer.outbox.relay.batch-size` | `100` | 한 번에 발행하는 최대 건수 |
 | `bank.gateway.host` / `port` | `localhost` / `9090` | 은행 FEP 주소 |
 | `bank.gateway.response-timeout` | `3s` | 응답 대기. 넘으면 504 `BANK_TIMEOUT` |
 | `bank.gateway.poll-interval` | `30s` | 쓰기 유휴 시 폴링 주기. ×3 동안 수신이 없으면 연결 종료 |
@@ -27,6 +31,16 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 | `management.endpoints.web.exposure.include` | `health,info` | 노출 actuator |
 
 환경변수로 덮어쓰기: `BANK_GATEWAY_PORT=9191 ./gradlew :apps:api:bootRun`.
+
+### Kafka
+| 항목 | 값 |
+|---|---|
+| 토픽 | `transfer.requested` — 파티션 3, 복제 1 (로컬). 앱이 기동할 때 선언한다 (브로커 자동 생성은 꺼져 있다) |
+| 메시지 | key = 이체 id, value = `{"transferId", "occurredAt", "eventId"}` ([database.md §4-3](docs/database.md)) |
+| 컨슈머 그룹 | `transfer-processor` (컨슈머 3개, 수동 ack — 처리를 끝낸 뒤에만 오프셋 커밋) |
+| 재시도 | 은행에 보내지 못하면 1초부터 두 배씩(최대 10초) 5번 다시 시도한 뒤 로그를 남기고 넘어간다 ([ADR-0005](docs/adr/0005-kafka-delivery-and-consumer-idempotency.md)) |
+
+보기: kafka-ui — `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile tools up -d` 후 http://localhost:8089 에서 토픽의 메시지와 그룹 `transfer-processor` 의 랙(밀린 메시지 수)을 본다.
 
 ## 3. 모의 은행 시나리오
 | 계좌번호 | 예금주 | 동작 |
@@ -41,7 +55,7 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 ## 4. API 오류 코드
 | 상황 | HTTP | code |
 |---|---|---|
-| 형식 오류 | 400 | ProblemDetail (검증 메시지) |
+| 요청 형식 오류 (본문 JSON 깨짐 · 검증 실패 · 경로 변수 타입 오류 …) | 400 | `INVALID_REQUEST` |
 | 예금주명 불일치 | 422 | `HOLDER_NAME_MISMATCH` |
 | 없는 계좌 | 404 | `ACCOUNT_NOT_FOUND` |
 | 틀린 코드 | 400 | `WRONG_CODE` (+ `remainingAttempts`) |
@@ -51,12 +65,14 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 | 은행 연결 없음 | 503 | `BANK_UNAVAILABLE` |
 | `Idempotency-Key` 헤더 없음 · 1~64자 보이는 ASCII 아님 | 400 | `IDEMPOTENCY_KEY_REQUIRED` |
 | 금액이 1 ~ 10,000,000 원 밖 | 400 | `INVALID_AMOUNT` |
-| 금액이 정수가 아님 (소수 · 문자열) | 400 | ProblemDetail (요청 형식) |
+| 금액이 정수가 아님 (소수 · 문자열) | 400 | `INVALID_REQUEST` |
 | 적요가 EUC-KR 20바이트 초과 | 400 | `INVALID_MEMO` |
-| 은행코드·계좌번호 형식 오류 | 400 | ProblemDetail (요청 검증). 도메인 검사는 `INVALID_ACCOUNT` |
+| 은행코드·계좌번호 형식 오류 | 400 | `INVALID_REQUEST` (요청 검증). 도메인 검사는 `INVALID_ACCOUNT` |
 | 1원인증을 마치지 않은 계좌 | 422 | `ACCOUNT_NOT_VERIFIED` |
 | 같은 키에 다른 내용 | 422 | `IDEMPOTENCY_KEY_REUSED` |
 | 없는 이체 id | 404 | `TRANSFER_NOT_FOUND` |
+| 허용되지 않는 상태 전이 | 409 | `ILLEGAL_TRANSITION` |
+| 그 밖의 표준 Spring 오류 (405 · 415 …) | 해당 상태 | HTTP 상태 이름 (예 `METHOD_NOT_ALLOWED`) |
 
 ## 5. 인프라 일상 명령
 ```bash
@@ -74,6 +90,9 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env down -v        
 |---|---|---|
 | 은행 호출이 계속 503 | API 로그의 재접속 메시지, 모의 은행 실행 여부 | 은행 미기동/포트 불일치 → 9090 확인. 재접속은 자동 (최대 30초 간격) |
 | 504 `BANK_TIMEOUT` 이 잦음 | 은행 응답 지연, 폴링 로그 | 3초 안에 응답 없음. **이체는 은행에서 처리됐을 수 있다** → P3 부터는 결과조회로 확정 (재전송 금지) |
+| 이체가 `UNKNOWN` 으로 남아 있음 | `transfer` 의 `status`, 컨슈머 로그 | 응답 시간 초과 · 보낸 뒤 연결 끊김 · 포트 예외. 은행이 처리했을 수 있다 → **P3-3 결과조회 전까지 그대로 둔다 (재전송 금지)** |
+| 이체가 `SENDING` 에서 안 넘어감 | `sending_at` ([database.md §9](docs/database.md)) | 은행 응답 뒤 DB 기록이 실패한 경우. P3-3 정리 작업이 30초 넘은 건을 `UNKNOWN` 으로 바꾼다 |
+| 이체가 `RECEIVED` 에서 안 넘어감 | 릴레이 로그(`outbox relay failed`) · `outbox_event.published_at` · 컨슈머 랙 | 발행 전이면 Kafka 접속 확인. 발행됐는데 그대로면 은행 연결 없음이 원인이다: 재시도 5회 뒤 로그만 남기고 넘어가 `RECEIVED` 로 남는다 (P3-3 에서 재시도 토픽 · DLT) |
 | `late or unknown response tranNo=…` 경고 | 전문번호 | 타임아웃 후 도착한 응답. 현재는 로그만 남긴다 |
 | 길이 필드 오류로 연결이 끊김 | `CorruptedFrameException` | 스트림 경계를 잃음 → 연결 종료 후 재접속이 정상 동작 |
 | Kafka 접속은 되는데 메시지가 안 감 | `advertised.listeners` | PC 앱은 `localhost:9092`, 컨테이너는 `kafka:29092` |
