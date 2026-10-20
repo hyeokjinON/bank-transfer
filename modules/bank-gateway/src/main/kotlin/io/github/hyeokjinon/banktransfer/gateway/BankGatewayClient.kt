@@ -55,7 +55,11 @@ data class BankGatewayConfig(
 class BankTimeoutException(val tranNo: Long, timeout: Duration) :
     RuntimeException("bank did not respond to tranNo=$tranNo within $timeout")
 
-class BankUnavailableException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+/** 은행과 통신할 수 없다. 보낸 뒤에 끊긴 경우도 포함한다 — 그때는 은행이 요청을 받았을 수 있다. */
+open class BankUnavailableException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+
+/** 전문을 소켓에 쓰기 전에 실패했다 (연결 없음). 은행에 "확실히" 가지 않았으므로 다시 보내도 안전하다. */
+class BankNotSentException(message: String) : BankUnavailableException(message)
 
 /**
  * 은행 FEP 에 TCP 로 붙는 클라이언트.
@@ -119,12 +123,13 @@ class BankGatewayClient(
 
     /**
      * 요청을 보내고 즉시 future 를 돌려준다.
-     * 실패는 future 안에 담긴다: 연결 없음/쓰기 실패 -> BankUnavailableException, 시간 초과 -> BankTimeoutException.
+     * 실패는 future 안에 담긴다: 연결 없음 -> BankNotSentException (안 보냄),
+     * 쓰기 실패 · 보낸 뒤 연결 끊김 -> BankUnavailableException (보냈을 수 있음), 시간 초과 -> BankTimeoutException.
      */
     fun send(request: BankMessage): CompletableFuture<BankMessage> {
         val ch = channel
         if (ch == null || !ch.isActive) {
-            return CompletableFuture.failedFuture(BankUnavailableException("bank channel is not connected"))
+            return CompletableFuture.failedFuture(BankNotSentException("bank channel is not connected"))
         }
         val tranNo = request.header.tranNo
         val future = CompletableFuture<BankMessage>()

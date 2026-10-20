@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -86,7 +87,23 @@ class BankGatewayClientTest {
     fun `연결이 없으면 기다리지 않고 바로 BankUnavailableException`() {
         val client = client(freePort())
 
-        assertIs<BankUnavailableException>(client.inquireName("090", "1").awaitFailure())
+        val failure = client.inquireName("090", "1").awaitFailure()
+        assertIs<BankUnavailableException>(failure)
+        assertIs<BankNotSentException>(failure)   // 은행에 가지 않았다 → 다시 보내도 안전
+    }
+
+    @Test
+    fun `보낸 뒤 연결이 끊기면 BankNotSentException 이 아니다 (은행이 받았을 수 있다)`() {
+        val bank = MockBankServer(silentAccounts = setOf("9990000000001")).start()
+        val client = client(bank.boundPort, timeout = Duration.ofSeconds(5)).start()
+        waitUntil { client.isConnected }
+
+        val pending = client.transfer("090", "9990000000001", 1, "x")
+        bank.close()
+
+        val failure = pending.awaitFailure()
+        assertIs<BankUnavailableException>(failure)
+        assertFalse(failure is BankNotSentException)
     }
 
     @Test
