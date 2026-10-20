@@ -9,6 +9,7 @@ import io.github.hyeokjinon.banktransfer.transfer.TransferStore
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.awaitility.kotlin.await
 import org.awaitility.kotlin.untilAsserted
+import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.kafka.core.ConsumerFactory
@@ -16,7 +17,9 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.Callable
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -79,7 +82,7 @@ class OutboxRelayTest : ApiIntegrationTest() {
     }
 
     @Test
-    fun `발행기 두 개가 동시에 돌아도 이벤트마다 한 번만 발행한다 (SKIP LOCKED)`() {
+    fun `발행기 두 개가 동시에 돌아도 이벤트마다 한 번만 발행한다 (이중 발행 없음)`() {
         repeat(20) { saveTransfer() }
         val pending = pendingCount()
 
@@ -89,5 +92,33 @@ class OutboxRelayTest : ApiIntegrationTest() {
 
         assertEquals(pending, published)   // 같은 행을 두 번 보냈다면 합계가 더 크다
         assertEquals(0, pendingCount())
+    }
+
+    /**
+     * 발행기가 SELECT … FOR UPDATE SKIP LOCKED 로 행을 잡고 있는 동안(= Kafka 응답을 기다리는 동안)에도 접수의 outbox INSERT 는 막히지 않아야 한다.
+     * REPEATABLE READ 에서는 이 SELECT 가 next-key/gap 락을 잡아 INSERT 가 락 대기(ERROR 1205)에 걸린다. READ COMMITTED 는 고른 행만 잡는다.
+     */
+    @Test
+    fun `발행기가 잡고 있는 동안에도 새 접수(아웃박스 INSERT)는 막히지 않는다`() {
+        saveTransfer()   // 미발행 행이 하나는 있어야 발행기의 SELECT 가 락을 잡는다
+        val locked = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val pool = Executors.newSingleThreadExecutor()
+        val holder = pool.submit {
+            relay.tx.execute {
+                jdbc.query(OutboxRelay.SELECT_PENDING_SQL, { rs, _ -> rs.getLong("id") }, 100)
+                locked.countDown()
+                release.await(30, TimeUnit.SECONDS)   // 발행기가 Kafka 응답을 기다리는 시간
+            }
+        }
+        try {
+            assertTrue(locked.await(10, TimeUnit.SECONDS), "발행기 쪽 SELECT 가 락을 잡지 못했다")
+
+            assertTimeoutPreemptively(Duration.ofSeconds(5)) { saveTransfer() }
+        } finally {
+            release.countDown()
+            holder.get(10, TimeUnit.SECONDS)
+            pool.shutdown()
+        }
     }
 }

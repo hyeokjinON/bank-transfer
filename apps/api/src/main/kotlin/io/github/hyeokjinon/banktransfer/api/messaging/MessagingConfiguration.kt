@@ -14,6 +14,8 @@ import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.kafka.listener.DefaultErrorHandler
 import org.springframework.kafka.support.ExponentialBackOffWithMaxRetries
 import org.springframework.scheduling.annotation.EnableScheduling
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
 
@@ -33,13 +35,24 @@ class MessagingConfiguration {
     @Bean
     fun transferRequestedTopic(): NewTopic = TopicBuilder.name(TransferTopics.REQUESTED).partitions(3).replicas(1).build()
 
+    /**
+     * 발행기는 공용 TransactionTemplate 대신 READ COMMITTED 전용 템플릿을 쓴다 (빈으로 올리지 않는다: 공용 템플릿 자동 구성이 물러난다).
+     * 이유: MySQL 기본 REPEATABLE READ 에서는 `SELECT … FOR UPDATE SKIP LOCKED` 가 next-key/gap 락까지 잡아,
+     * 발행기가 Kafka 응답을 기다리는 동안 접수의 outbox INSERT 가 락 대기(ERROR 1205)에 걸린다.
+     * READ COMMITTED 는 고른 행만 잠그고 gap 락이 없어 새 INSERT 가 막히지 않는다. 행 락 + SKIP LOCKED 라 이중 발행 방지는 그대로다.
+     */
     @Bean
     fun outboxRelay(
         jdbc: JdbcTemplate,
-        tx: TransactionTemplate,
+        transactionManager: PlatformTransactionManager,
         kafka: KafkaTemplate<String, String>,
         props: OutboxRelayProperties,
-    ) = OutboxRelay(jdbc, tx, kafka, props.batchSize)
+    ): OutboxRelay {
+        val readCommitted = TransactionTemplate(transactionManager).apply {
+            isolationLevel = TransactionDefinition.ISOLATION_READ_COMMITTED
+        }
+        return OutboxRelay(jdbc, readCommitted, kafka, props.batchSize)
+    }
 
     @Bean
     @ConditionalOnProperty(prefix = "transfer.outbox.relay", name = ["enabled"], havingValue = "true", matchIfMissing = true)

@@ -15,6 +15,7 @@ spring:
       acks: all                    # ISR 모두 기록돼야 성공 (운영 3대 · min.insync.replicas=2 와 짝)
       properties:
         enable.idempotence: true   # 프로듀서 재시도가 브로커에 중복 기록되지 않게
+        max.block.ms: 5000         # 브로커에 닿지 않으면 send() 가 기본 60초 대신 5초만 기다린다 → 발행기 트랜잭션이 빨리 끝난다
     consumer:
       group-id: transfer-processor
       auto-offset-reset: earliest
