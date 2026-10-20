@@ -6,11 +6,14 @@ import io.github.hyeokjinon.banktransfer.account.VerificationStatus
 import io.github.hyeokjinon.banktransfer.api.support.ApiIntegrationTest
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus
 import io.github.hyeokjinon.banktransfer.transfer.TransferStore
+import org.apache.kafka.clients.admin.AdminClient
+import org.apache.kafka.common.TopicPartition
 import org.awaitility.kotlin.await
 import org.awaitility.kotlin.untilAsserted
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.MediaType
+import org.springframework.kafka.core.KafkaAdmin
 import org.springframework.kafka.core.KafkaTemplate
 import java.time.Duration
 import java.time.Instant
@@ -20,6 +23,7 @@ import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * 접수(HTTP) → 아웃박스 → 발행(relay) → 컨슈머 → 은행(모의, TCP) → 상태 기록 까지 한 번에.
@@ -31,6 +35,7 @@ class TransferProcessingFlowTest : ApiIntegrationTest() {
     @Autowired private lateinit var relay: OutboxRelay
     @Autowired private lateinit var store: TransferStore
     @Autowired private lateinit var kafka: KafkaTemplate<String, String>
+    @Autowired private lateinit var kafkaAdmin: KafkaAdmin
 
     private val mapType = object : ParameterizedTypeReference<Map<String, Any?>>() {}
 
@@ -107,11 +112,18 @@ class TransferProcessingFlowTest : ApiIntegrationTest() {
         awaitStatus(id, TransferStatus.COMPLETED)
 
         // 발행기가 커밋 직전에 죽어 같은 메시지를 다시 보낸 상황을 흉내 낸다
-        kafka.send(TransferTopics.REQUESTED, id.toString(), """{"transferId":"$id"}""").get(5, TimeUnit.SECONDS)
+        val sent = kafka.send(TransferTopics.REQUESTED, id.toString(), """{"transferId":"$id"}""").get(5, TimeUnit.SECONDS).recordMetadata
+        val partition = TopicPartition(TransferTopics.REQUESTED, sent.partition())
 
-        await.during(Duration.ofSeconds(2)).atMost(Duration.ofSeconds(5)) untilAsserted {
-            assertEquals(1, bank.depositsOf(account).count { it.memo == memo })
+        // 컨슈머가 이 중복 메시지를 실제로 처리하고 오프셋을 커밋할 때까지 기다린다. 그래야 "안 보낸 것"이 아니라 "받고도 안 보낸 것"을 확인한다
+        AdminClient.create(kafkaAdmin.configurationProperties).use { admin ->
+            await.atMost(Duration.ofSeconds(15)) untilAsserted {
+                val committed = admin.listConsumerGroupOffsets("transfer-processor").partitionsToOffsetAndMetadata().get()[partition]
+                assertTrue(committed != null && committed.offset() > sent.offset(), "중복 메시지(offset ${sent.offset()})를 아직 처리하지 않았다: $committed")
+            }
         }
+
+        assertEquals(1, bank.depositsOf(account).count { it.memo == memo })
         assertEquals(TransferStatus.COMPLETED, store.findById(id)!!.status)
     }
 }
