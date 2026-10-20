@@ -69,6 +69,8 @@ class MessagingConfiguration {
      * 컨슈머 예외 처리 (P3-2): 1초부터 두 배씩, 최대 10초 간격으로 5번 다시 시도한 뒤 로그를 남기고 넘어간다.
      * 그동안 같은 파티션의 다음 메시지는 기다린다 (블로킹 재시도).
      * 다 실패한 이체는 RECEIVED 로 남는다 → P3-3 에서 재시도 토픽 + DLT 로 바꾼다.
+     * 넘어간 레코드의 오프셋은 커밋한다(isCommitRecovered): manual_immediate 에서는 기본값이 커밋하지 않아,
+     * 재시작 뒤 그 메시지가 다시 올지 말지가 우연에 달린다. "넘김 = 커밋"으로 정해 둔다. 이체는 P3-3 까지 RECEIVED 로 남는다.
      */
     @Bean
     fun kafkaErrorHandler(): DefaultErrorHandler =
@@ -78,5 +80,5 @@ class MessagingConfiguration {
                 multiplier = 2.0
                 maxInterval = 10_000
             },
-        )
+        ).apply { setCommitRecovered(true) }
 }

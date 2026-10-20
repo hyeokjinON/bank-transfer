@@ -20,6 +20,7 @@ spring:
       group-id: transfer-processor
       auto-offset-reset: earliest
       enable-auto-commit: false    # 처리를 끝낸 뒤에만 커밋 (리스너가 ack)
+      max-poll-records: 50         # 한 건이 은행 호출로 최대 3초 막힐 수 있다. 기본 500건이면 한 번의 poll 이 max.poll.interval.ms(5분)를 넘겨 리밸런스가 날 수 있다
     listener:
       ack-mode: manual_immediate
   jpa:
