@@ -1,0 +1,27 @@
+$kind: http-request
+name: 2-5 인증 안 된 계좌 → 422 ACCOUNT_NOT_VERIFIED
+method: POST
+url: '{{baseUrl}}/api/v1/transfers'
+order: 5000
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: Idempotency-Key
+    value: '{{$guid}}'
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "1101234567890",
+      "amount": 10000,
+      "memo": "출금"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("422 ACCOUNT_NOT_VERIFIED", () => {
+        pm.response.to.have.status(422);
+        pm.expect(pm.response.json().code).to.eql("ACCOUNT_NOT_VERIFIED");
+      });

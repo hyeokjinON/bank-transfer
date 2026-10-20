@@ -32,7 +32,8 @@ cd bank-transfer
 2. `Settings > Build, Execution, Deployment > Build Tools > Gradle > Gradle JVM` = 21, `File > Project Structure > SDK` = 21.
 3. (권장) `Settings > Tools > Terminal > Shell path` = `C:\Program Files\Git\bin\bash.exe` → 터미널에서 `bash infra/verify.sh` 가 그대로 동작.
 3-1. 인프라 먼저: `docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait` (API 가 MySQL 을 쓴다)
-4. 실행 목록의 `0. Mock Bank + API` 실행 → `http/account-verification.http` 의 ▶ 로 요청.
+4. 실행 목록의 `0. Mock Bank + API` 실행 → `http/account-verification.http` 의 ▶ 로 요청 (Ultimate).
+   Community Edition 은 `.http` 실행이 없다 → Postman 에서 저장소 폴더를 열면 `postman/collections/bank-transfer` 컬렉션이 보인다 (요청마다 Test Results 로 통과/실패 표시).
 
 ### 2-4. Docker Desktop (P3 부터 필요)
 1. **관리자 PowerShell**: `wsl --install` → 재부팅.

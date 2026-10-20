@@ -1,0 +1,25 @@
+$kind: http-request
+name: 2-6 Idempotency-Key 없음 → 400 IDEMPOTENCY_KEY_REQUIRED
+method: POST
+url: '{{baseUrl}}/api/v1/transfers'
+order: 6000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "{{accountNo}}",
+      "amount": 10000,
+      "memo": "출금"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("400 IDEMPOTENCY_KEY_REQUIRED", () => {
+        pm.response.to.have.status(400);
+        pm.expect(pm.response.json().code).to.eql("IDEMPOTENCY_KEY_REQUIRED");
+      });

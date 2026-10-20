@@ -1,0 +1,26 @@
+$kind: http-request
+name: 2-7 소수 금액 50000.5 → 400 (잘라서 받지 않음)
+method: POST
+url: '{{baseUrl}}/api/v1/transfers'
+order: 7000
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: Idempotency-Key
+    value: '{{$guid}}'
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "{{accountNo}}",
+      "amount": 50000.5,
+      "memo": "출금"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("400 (소수 금액 거절)", () => {
+        pm.response.to.have.status(400);
+      });

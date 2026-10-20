@@ -1,0 +1,37 @@
+$kind: http-request
+name: 2-1 접수 → 202 RECEIVED
+method: POST
+url: '{{baseUrl}}/api/v1/transfers'
+order: 1000
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: Idempotency-Key
+    value: '{{idemKey}}'
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "{{accountNo}}",
+      "amount": 50000,
+      "memo": "출금"
+    }
+scripts:
+  - type: beforeRequest
+    language: text/javascript
+    code: |-
+      // 실행할 때마다 새 키 → 2-1 은 항상 새 접수(202). 2-3·2-4 는 이 키를 그대로 쓴다.
+      pm.collectionVariables.set("idemKey", pm.variables.replaceIn("{{$guid}}"));
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      const body = pm.response.json();
+      pm.test("202 Accepted, RECEIVED", () => {
+        pm.response.to.have.status(202);
+        pm.expect(body.status).to.eql("RECEIVED");
+      });
+      pm.test("Location 헤더 = /api/v1/transfers/{id}", () => {
+        pm.expect(pm.response.headers.get("Location")).to.eql("/api/v1/transfers/" + body.id);
+      });
+      pm.collectionVariables.set("transferId", body.id);
