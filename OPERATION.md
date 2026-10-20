@@ -38,6 +38,8 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 | 토픽 | `transfer.requested` — 파티션 3, 복제 1 (로컬). 앱이 기동할 때 선언한다 (브로커 자동 생성은 꺼져 있다) |
 | 메시지 | key = 이체 id, value = `{"transferId", "occurredAt", "eventId"}` ([database.md §4-3](docs/database.md)) |
 | 컨슈머 그룹 | `transfer-processor` (컨슈머 3개, 수동 ack — 처리를 끝낸 뒤에만 오프셋 커밋) |
+| 프로듀서 | `acks=all`, 멱등, `max.block.ms=5000` — 브로커에 닿지 않으면 `send()` 가 5초(기본 60초 아님) 뒤 실패하고 발행기가 다음 주기에 다시 보낸다 |
+| 컨슈머 폴링 | `max-poll-records=50` — 한 건이 은행 호출로 최대 3초 막히므로 한 번의 poll 이 `max.poll.interval.ms`(5분)를 넘기지 않게 한다 |
 | 재시도 | 은행에 보내지 못하면 1초부터 두 배씩(최대 10초) 5번 다시 시도한 뒤 로그를 남기고 넘어간다 ([ADR-0005](docs/adr/0005-kafka-delivery-and-consumer-idempotency.md)) |
 
 보기: kafka-ui — `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile tools up -d` 후 http://localhost:8089 에서 토픽의 메시지와 그룹 `transfer-processor` 의 랙(밀린 메시지 수)을 본다.
@@ -91,8 +93,8 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env down -v        
 | 은행 호출이 계속 503 | API 로그의 재접속 메시지, 모의 은행 실행 여부 | 은행 미기동/포트 불일치 → 9090 확인. 재접속은 자동 (최대 30초 간격) |
 | 504 `BANK_TIMEOUT` 이 잦음 | 은행 응답 지연, 폴링 로그 | 3초 안에 응답 없음. **이체는 은행에서 처리됐을 수 있다** → P3 부터는 결과조회로 확정 (재전송 금지) |
 | 이체가 `UNKNOWN` 으로 남아 있음 | `transfer` 의 `status`, 컨슈머 로그 | 응답 시간 초과 · 보낸 뒤 연결 끊김 · 포트 예외. 은행이 처리했을 수 있다 → **P3-3 결과조회 전까지 그대로 둔다 (재전송 금지)** |
-| 이체가 `SENDING` 에서 안 넘어감 | `sending_at` ([database.md §9](docs/database.md)) | 은행 응답 뒤 DB 기록이 실패한 경우. P3-3 정리 작업이 30초 넘은 건을 `UNKNOWN` 으로 바꾼다 |
-| 이체가 `RECEIVED` 에서 안 넘어감 | 릴레이 로그(`outbox relay failed`) · `outbox_event.published_at` · 컨슈머 랙 | 발행 전이면 Kafka 접속 확인. 발행됐는데 그대로면 은행 연결 없음이 원인이다: 재시도 5회 뒤 로그만 남기고 넘어가 `RECEIVED` 로 남는다 (P3-3 에서 재시도 토픽 · DLT) |
+| 이체가 `SENDING` 에서 안 넘어감 | `sending_at` ([database.md §9](docs/database.md)) | 은행이 응답한 뒤 DB 기록이 실패했거나, `SENDING` 커밋 뒤 또는 은행 호출 도중 앱이 죽은 경우. 둘 다 P3-3 정리 작업이 30초 넘은 건을 `UNKNOWN` 으로 바꿔 처리한다 |
+| 이체가 `RECEIVED` 에서 안 넘어감 | 릴레이 로그(`outbox relay failed`) · `outbox_event.published_at` · 컨슈머 랙 · 앱 로그 | 흔한 원인: 은행 연결 없음(재시도 5회 뒤 로그만 남기고 넘어감), 컨슈머 중단 · 랙, 첫 상태 전환(`RECEIVED → SENDING`)의 DB 실패, 메시지 key 가 UUID 가 아님. 발행 전(`published_at` NULL)이면 Kafka 접속부터 확인한다. 어느 쪽이든 P3-3 전까지는 자동으로 되살리지 않는다 (P3-3 에서 재시도 토픽 · DLT) |
 | `late or unknown response tranNo=…` 경고 | 전문번호 | 타임아웃 후 도착한 응답. 현재는 로그만 남긴다 |
 | 길이 필드 오류로 연결이 끊김 | `CorruptedFrameException` | 스트림 경계를 잃음 → 연결 종료 후 재접속이 정상 동작 |
 | Kafka 접속은 되는데 메시지가 안 감 | `advertised.listeners` | PC 앱은 `localhost:9092`, 컨테이너는 `kafka:29092` |

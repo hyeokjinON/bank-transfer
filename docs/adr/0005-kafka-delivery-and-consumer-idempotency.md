@@ -10,7 +10,10 @@
 - 예전 시스템은 요청을 Kafka 로 보낸 뒤 빠진 건 · 중복 건을 결과조회와 일마감 대사로 사람이 맞췄다.
 
 ## 결정
-1. **발행은 폴링 퍼블리셔**: 500ms 마다 `outbox_event` 의 미발행 행을 `FOR UPDATE SKIP LOCKED` 로 잡아(최대 100건) Kafka 로 보내고, 브로커가 받았다고 확인한(`get`) 뒤에 `published_at` 을 쓴다. 앱이 여러 대여도 같은 행을 두 번 잡지 않고 서로 기다리지도 않는다.
+1. **발행은 폴링 퍼블리셔**: 500ms 마다 `outbox_event` 의 미발행 행을 `FOR UPDATE SKIP LOCKED` 로 잡아(최대 100건) Kafka 로 보내고, 브로커가 받았다고 확인한(`get`) 뒤에 `published_at` 을 쓴다. 앱이 여러 대여도 같은 행을 두 번 잡지 않고(`SKIP LOCKED`) 발행기끼리 서로 기다리지 않는다.
+   - **발행기 트랜잭션은 READ COMMITTED 로 돈다.** MySQL 기본 REPEATABLE READ 에서는 이 SELECT 가 next-key/gap 락까지 잡아, 발행기가 Kafka 응답을 기다리는 동안 접수의 `outbox_event` INSERT 가 락 대기(ERROR 1205)에 걸린다 (MySQL 8.4 에서 재현). READ COMMITTED 는 고른 행만 잠그고 gap 락이 없어 접수가 막히지 않는다. 행 락 + `SKIP LOCKED` 라 이중 발행 방지는 그대로다. 발행기 전용 `TransactionTemplate` 으로만 적용하고 공용 템플릿은 바꾸지 않는다.
+   - **한 묶음을 먼저 다 보내고(`send`) 나서 응답을 기다린다(`get`, 건당 최대 5초).** 건마다 기다리면 락과 트랜잭션이 N×5초까지 길어진다. 묶음 중간에 실패하면 롤백되어 이미 나간 이벤트도 다음 주기에 다시 나간다 — 적어도 한 번이라 허용되고, 중복은 5번이 막는다.
+   - **프로듀서 `max.block.ms=5000`**: 브로커에 닿지 않을 때 `send()` 자체가 기본 60초 막히지 않게 한다. 브로커가 죽어도 발행기 트랜잭션은 5초 안팎에 끝난다.
 2. **프로듀서 `acks=all` + 멱등 프로듀서**(`enable.idempotence=true`): 프로듀서 재시도가 브로커에 중복 기록되지 않는다. (아웃박스 재발행의 중복은 이것으로 막지 못한다 → 5번)
 3. **key = 이체 id, 파티션 3, 컨슈머 3**(`concurrency = 3`): 같은 이체의 메시지는 같은 파티션으로 가서 순서가 지켜지고, 서로 다른 이체는 병렬로 처리된다.
 4. **수동 ack, 처리 후 커밋**(`enable-auto-commit=false`, `ack-mode=manual_immediate`): 처리가 끝난 뒤에만 오프셋을 올린다. 처리 중에 죽으면 같은 메시지를 다시 받는다.
@@ -20,12 +23,14 @@
    - 결과 모름은 **다시 보내지 않는다.** 응답 시간 초과, 보낸 뒤 연결 끊김, 쓰기 실패가 여기 속한다. 은행 포트가 분류하지 못하고 예외를 던진 경우도 같다(프로세서가 `UNKNOWN` 으로 기록). P3-3 의 결과조회로 확정한다.
    - 미전송만 재시도한다: 전문을 쓰기 전에 연결이 없던 경우(게이트웨이의 `BankNotSentException`)에 한해 `RECEIVED` 로 되돌리고 컨슈머가 예외를 던져 다시 처리하게 한다.
 7. **은행 호출은 DB 트랜잭션 밖에서** 한다. 응답을 기다리는 동안(최대 3초) 커넥션을 붙잡지 않는다. 은행 응답 뒤 DB 기록이 실패하면 행은 `SENDING` 으로 남는다 — P3-3 정리 작업이 30초 넘게 `SENDING` 인 건을 `UNKNOWN` 으로 바꾼다.
-8. **P3-2 의 재시도는 블로킹 지수 백오프**: `DefaultErrorHandler` 가 1초부터 두 배씩(최대 10초) 5번 다시 시도하고, 그래도 안 되면 로그를 남기고 넘어간다. 그동안 같은 파티션의 다음 메시지는 기다린다. P3-3 에서 재시도 토픽 · DLT 로 바꾼다.
+8. **P3-2 의 재시도는 블로킹 지수 백오프**: `DefaultErrorHandler` 가 1초부터 두 배씩(최대 10초) 5번 다시 시도하고, 그래도 안 되면 로그를 남기고 넘어간다. 그동안 같은 파티션의 다음 메시지는 기다린다. 넘어간 레코드의 오프셋은 에러 핸들러가 커밋한다(`commitRecovered`): `manual_immediate` 의 기본값은 커밋하지 않아 재시작 뒤 그 메시지가 다시 올지 말지가 우연에 달리기 때문에 "넘김 = 커밋"으로 정해 둔다. 이체는 P3-3 까지 `RECEIVED` 로 남는다. P3-3 에서 재시도 토픽 · DLT 로 바꾼다.
+   - 컨슈머 `max-poll-records=50`: 한 건이 은행 호출로 최대 3초 막히므로, 기본 500건이면 한 번의 poll 이 `max.poll.interval.ms`(5분)를 넘겨 리밸런스가 날 수 있다.
 
 ## 결과
 - 증명 테스트:
   - 같은 메시지 두 번 → 은행 입금 1건 (`TransferProcessingFlowTest`, `TransferProcessorTest`)
   - 발행기 2개 동시 → 이벤트당 1회 발행 (`OutboxRelayTest`)
+  - 발행기가 행을 잡고 있는 동안에도 접수(outbox INSERT)는 막히지 않음 (`OutboxRelayTest`)
   - 프로듀서 `acks=all` · 멱등 설정이 실제로 적용됨, 토픽 파티션 3 (`KafkaSetupTest`)
   - 결과를 모르면(무응답 · 포트 예외) `UNKNOWN` 이고 다시 보내지 않음 (`TransferProcessingFlowTest`, `TransferProcessorTest`)
   - 미전송이면 ack 하지 않고 예외를 던짐 (`TransferRequestedListenerTest`)
