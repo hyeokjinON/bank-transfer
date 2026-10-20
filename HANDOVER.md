@@ -9,7 +9,7 @@
 | P0 골격 · P1 1원인증 · P2 Netty 모의 은행 | ✅ 완료 (2026-10-01) | 테스트 29개 |
 | P3-0 로컬 인프라 | ✅ 완료 (2026-10-16, PR #1) | 로컬(Windows 11 + Docker Desktop)·CI 모두 `verify.sh` 통과 |
 | P3-1 접수 | ✅ 완료 (2026-10-20, [#3](https://github.com/hyeokjinON/bank-transfer/pull/3)) | ADR-0004 채택, 테스트 73개. 손 확인: 로컬 API · Postman 컬렉션으로 접수 흐름, DB 에서 아웃박스 미발행 · KST 저장 확인 |
-| P3-2 처리 | 🟡 PR 리뷰 중 (2026-10-20, PR #N) | ADR-0005 제안, 테스트 107개. 손 확인 대기 (머지 전 사람이 실행): `http/transfer.http` 2-1) · Postman 2-9 에서 몇 초 뒤 `COMPLETED` (아래 4번 한계 참고) |
+| P3-2 처리 | 🟡 PR 리뷰 중 (2026-10-20, [#5](https://github.com/hyeokjinON/bank-transfer/pull/5)) | ADR-0005 제안, 테스트 107개. 손 확인 대기 (머지 전 사람이 실행): `http/transfer.http` 2-1) · Postman 2-9 에서 몇 초 뒤 `COMPLETED` (아래 4번 한계 참고) |
 | P3-3 실패 | ⬜ 다음 | 설계 문서 §6 |
 | P4 ~ P9 | ⬜ 예정 | README 로드맵 |
 
@@ -34,7 +34,7 @@ P3-1 은 머지됐고 (PR #3), P3-2 는 구현을 마치고 PR 리뷰 중이다.
 
 ## 3. 다음 할 일 (순서대로)
 1. velog `#3` (P3-1 접수: 멱등키 · 아웃박스 · 최종 리뷰에서 잡은 collation · 금액 강제 변환).
-2. P3-2 PR 리뷰 → 머지 (머지 후 CHANGELOG · HANDOVER 의 `PR #N` 을 실제 번호로, ADR-0005 상태를 채택으로).
+2. P3-2 PR 리뷰 → 머지 (머지 후 ADR-0005 상태를 채택으로).
 3. velog `#4` (P3-2 처리: 적어도 한 번 발행 + 컨슈머 멱등, 결과 모름은 재전송 금지).
 4. P3-3 (재시도 토픽 · DLT · 결과조회, 규격 v0.2) 구현 계획. 아래 "P3-2 에서 남은 것"과 4번 한계를 계획의 제약에 넣는다.
 
