@@ -1,20 +1,20 @@
 # HANDOVER — 지금 상태와 다음 할 일
 
 > 세션(주말 작업)이 끝날 때마다 이 파일을 갱신한다. 다음 사람(또는 다음 세션의 AI)이 이것만 읽고 이어갈 수 있어야 한다.
-> 마지막 갱신: 2026-10-19
+> 마지막 갱신: 2026-10-20
 
 ## 1. 지금 어디까지 왔나
 | 단계 | 상태 | 비고 |
 |---|---|---|
 | P0 골격 · P1 1원인증 · P2 Netty 모의 은행 | ✅ 완료 (2026-10-01) | 테스트 29개 |
 | P3-0 로컬 인프라 | ✅ 완료 (2026-10-16, PR #1) | 로컬(Windows 11 + Docker Desktop)·CI 모두 `verify.sh` 통과 |
-| P3-1 접수 | 🟡 PR 리뷰 중 ([#3](https://github.com/hyeokjinON/bank-transfer/pull/3)) | ADR-0004(제안), 테스트 73개. `http/transfer.http` 손 확인은 PR 에서 사람이 수행 |
+| P3-1 접수 | ✅ 완료 (2026-10-20, [#3](https://github.com/hyeokjinON/bank-transfer/pull/3)) | ADR-0004 채택, 테스트 73개. 손 확인: 로컬 API · Postman 컬렉션으로 접수 흐름, DB 에서 아웃박스 미발행 · KST 저장 확인 |
 | P3-2 처리 · P3-3 실패 | ⬜ 다음 | 설계 문서 §5·§6 |
 | P4 ~ P9 | ⬜ 예정 | README 로드맵 |
 
 ## 2. P3 설계 (합의된 것)
 설계 섹션 1~5 모두 승인(2026-10-19) → **[설계 문서](docs/superpowers/specs/2026-10-19-p3-transfer-design.md)** 로 정리.
-P3-1 은 `feat/p3-1-transfer-intake` 브랜치에서 구현했다. 아래 표 중 P3-2 · P3-3 항목은 아직 구현 전이다.
+P3-1 은 머지됐다 (PR #3). 아래 표 중 P3-2 · P3-3 항목은 아직 구현 전이다.
 
 | 결정 | 내용 |
 |---|---|
@@ -32,9 +32,18 @@ P3-1 은 `feat/p3-1-transfer-intake` 브랜치에서 구현했다. 아래 표 �
 | 테스트 | 도메인 단위(가짜 포트) / Testcontainers MySQL 어댑터 / MySQL+Kafka+모의 은행 흐름 통합 + Awaitility. 단계별 '증명 테스트' 목록은 설계 문서 §7 |
 
 ## 3. 다음 할 일 (순서대로)
-1. P3-2 구현 계획 작성 (폴링 퍼블리셔 · Kafka · 컨슈머)
-2. P3-1 PR 리뷰 → ADR-0004 상태를 "채택"으로, velog `#3`.
+1. velog `#3` (P3-1 접수: 멱등키 · 아웃박스 · 최종 리뷰에서 잡은 collation · 금액 강제 변환).
+2. P3-2 구현 계획 작성 (폴링 퍼블리셔 · Kafka · 컨슈머). 아래 "P3-2 로 넘기는 것"을 계획의 제약에 넣는다.
 3. P3-3 (재시도 토픽 · DLT · 결과조회, 규격 v0.2) 구현 계획.
+
+### P3-2 로 넘기는 것 (P3-1 리뷰에서 나온 항목)
+- `Transfer` 의 `toString` 이 계좌번호 · 적요를 그대로 출력 → 컨슈머가 로그를 남기기 전에 마스킹.
+- `TransferEntity.from()` 은 INSERT 전용 (version = null). 상태 변경은 조회한 엔티티를 고치거나 조건부 UPDATE 로.
+- `moveTo` 로 `bankResponseCode` 를 설정할 수 없다. `IllegalTransition` 은 HTTP 매핑이 없어 500.
+- 깨진 JSON · 누락 필드 · 잘못된 UUID 는 `code` 없는 400 → `INVALID_REQUEST` 핸들러.
+- `TransferService.request` / `JpaTransferStore.saveWithEvent` 를 바깥 트랜잭션 안에서 호출하지 않는다 (KDoc).
+- UNIQUE 위반 구분은 오류 메시지의 제약 이름에 의존. 경합 롤백 때 드문 데드락(1213)은 500 → 재시도 안내 또는 매핑.
+- 동시 중복 요청마다 Hibernate 가 클라이언트 키를 WARN 으로 남긴다 (예상된 동작, 로그 잡음).
 
 ## 4. 알려진 한계 · 주의
 - 게이트웨이 응답 매칭은 단일 연결 · 단일 인스턴스 전제 (ADR-0002 한계).

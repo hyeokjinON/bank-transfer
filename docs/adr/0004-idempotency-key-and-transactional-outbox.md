@@ -1,6 +1,6 @@
 # ADR-0004 출금 접수는 Idempotency-Key + DB UNIQUE 로 멱등하게, 처리 신호는 트랜잭셔널 아웃박스로
 
-- 상태: 제안 (2026-10-19) — PR 리뷰 후 채택
+- 상태: 채택 (2026-10-20, PR #3 머지)
 - 단계: P3-1 · 설계: [P3 설계 문서](../superpowers/specs/2026-10-19-p3-transfer-design.md) §4 · [database.md](../database.md)
 
 ## 맥락

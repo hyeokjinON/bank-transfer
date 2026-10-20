@@ -7,20 +7,9 @@ description: |-
   3) API 를 재시작한 뒤 "2-2 조회" 만 다시 Send → 같은 건이면 DB 에 저장된 것.
   대응 파일: http/account-verification.http, http/transfer.http (IntelliJ Ultimate 용)
 variables:
-  - key: baseUrl
-    value: 'http://localhost:8080'
-  - key: accountNo
-    value: '1002123456789'
-    description: 모의 은행에 등록된 계좌 (홍길동). 1원인증을 먼저 마쳐야 출금이 된다
-  - key: code
-    value: ''
-    description: 1원인증 코드. 모의 은행 콘솔 "[통장] ... 적요='BT1234'" 의 숫자 4자리를 넣는다
-  - key: verificationId
-    value: ''
-    description: 1-1 응답에서 자동 저장
-  - key: idemKey
-    value: ''
-    description: 2-1 실행 때 새 UUID 로 자동 생성 (2-3·2-4 가 같은 키를 재사용)
-  - key: transferId
-    value: ''
-    description: 2-1 응답에서 자동 저장
+  baseUrl: http://localhost:8080
+  accountNo: "1002123456789"
+  code: ""
+  verificationId: ""
+  idemKey: ""
+  transferId: ""
