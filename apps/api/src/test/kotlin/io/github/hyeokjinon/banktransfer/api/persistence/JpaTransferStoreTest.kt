@@ -107,6 +107,17 @@ class JpaTransferStoreTest : ApiIntegrationTest() {
     }
 
     @Test
+    fun `상태 표에 없는 전이는 DB 에 가기 전에 거부한다`() {
+        val transfer = newTransfer()
+        store.saveWithEvent(transfer, requested(transfer))
+
+        assertFailsWith<IllegalArgumentException> {
+            store.transition(transfer.id, TransferStatus.RECEIVED, TransferStatus.COMPLETED, Instant.now())
+        }
+        assertEquals(TransferStatus.RECEIVED, store.findById(transfer.id)!!.status)
+    }
+
+    @Test
     fun `결과 기록 - SENDING 에서 COMPLETED 와 응답코드`() {
         val transfer = newTransfer()
         store.saveWithEvent(transfer, requested(transfer))
