@@ -1,0 +1,27 @@
+$kind: http-request
+name: 2-3 같은 키 · 같은 내용 → 200 같은 id (멱등)
+method: POST
+url: '{{baseUrl}}/api/v1/transfers'
+order: 3000
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: Idempotency-Key
+    value: '{{idemKey}}'
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "{{accountNo}}",
+      "amount": 50000,
+      "memo": "출금"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("200 (새로 만들지 않음), 2-1 과 같은 id", () => {
+        pm.response.to.have.status(200);
+        pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get("transferId"));
+      });

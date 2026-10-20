@@ -75,8 +75,8 @@ CREATE TABLE account_verification (
 
 CREATE TABLE transfer (
   id                 CHAR(36)     PRIMARY KEY,
-  idempotency_key    VARCHAR(64)  NOT NULL,
-  reference          CHAR(20)     NOT NULL,     -- 이용기관 거래번호 (은행에 보내는 업무 키, §6)
+  idempotency_key    VARCHAR(64)  CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  reference          CHAR(20)     CHARACTER SET ascii COLLATE ascii_bin NOT NULL,     -- 이용기관 거래번호 (은행에 보내는 업무 키, §6)
   request_hash       CHAR(64)     NOT NULL,     -- SHA-256(bankCode|accountNo|amount|memo)
   bank_code          VARCHAR(3)   NOT NULL,
   account_no         VARCHAR(16)  NOT NULL,
@@ -136,12 +136,12 @@ SENDING ──(30초 초과, 정리 작업)──▶ UNKNOWN
 `POST /api/v1/transfers`
 
 ```http
-Idempotency-Key: 8c1f6a2e-...          # 필수, 1~64자
+Idempotency-Key: 8c1f6a2e-...          # 필수, 1~64자 보이는 ASCII
 Content-Type: application/json
 
 {"bankCode": "090", "accountNo": "1002123456789", "amount": 50000, "memo": "출금"}
 ```
-→ `202 Accepted` `{"id": "...", "status": "RECEIVED", "createdAt": "..."}` · `Location: /api/v1/transfers/{id}`
+→ `202 Accepted` · `Location: /api/v1/transfers/{id}`. 본문은 `{"id": "...", "status": "RECEIVED", "createdAt": "..."}` 의 상위 집합인 전체 `TransferResponse` (아래 GET 응답과 같은 필드).
 
 `GET /api/v1/transfers/{id}` → `200` `{id, status, bankCode, accountNo, amount, memo, bankResponseCode, createdAt, updatedAt}`
 
@@ -155,7 +155,7 @@ Content-Type: application/json
 | 같은 키 + 다른 내용 | 422 | `IDEMPOTENCY_KEY_REUSED` |
 | 없는 id 조회 | 404 | `TRANSFER_NOT_FOUND` |
 
-**처리 순서 (한 트랜잭션)**
+**처리 순서 (저장 3 은 한 트랜잭션, 4 의 재조회는 새 트랜잭션)**
 1. 같은 키가 있으면 → `request_hash` 비교 → 같으면 기존 건 반환, 다르면 422.
 2. `VerifiedAccounts.isVerified` 가 false → 422.
 3. `transfer` insert (`RECEIVED`) + `outbox_event` insert (`TransferRequested`) → 커밋.

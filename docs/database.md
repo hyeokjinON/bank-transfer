@@ -1,6 +1,6 @@
 # 데이터베이스 — 모델 정의와 구조
 
-> 기준: P3 설계(2026-10-19). 현재 `main` 에는 아직 테이블이 없고(1원인증은 메모리 저장소), **P3-1 에서 Flyway `V1__init.sql` 로 생성**한다.
+> 기준: P3-1 (Flyway `V1__init.sql` 적용). 1원인증 · 이체 · 아웃박스 테이블이 MySQL 에 있다.
 > 이 문서가 스키마의 기준이다. 마이그레이션을 추가할 때 이 문서도 같은 PR 에서 고친다.
 > 설계 배경: [P3 설계 문서](superpowers/specs/2026-10-19-p3-transfer-design.md) §2~§6
 
@@ -11,10 +11,12 @@
 | DBMS | MySQL 8.4 (LTS) | 로컬은 `infra/docker-compose.yml`, 테스트는 Testcontainers |
 | 스키마 | `bank_transfer` | |
 | 문자셋 / 정렬 | `utf8mb4` / `utf8mb4_0900_ai_ci` | 한글 · 이모지(4바이트)까지. MySQL `utf8` 은 3바이트라 쓰지 않는다 |
+| 키 컬럼 정렬 | `transfer.idempotency_key` · `reference` 는 `ascii` / `ascii_bin` | 기본 정렬(`_ai_ci`)은 대소문자 · 악센트를 구분하지 않아 `Order-1` 과 `order-1` 이 같은 키로 취급된다. 키는 바이트 그대로 비교해야 한다 |
 | 엔진 | InnoDB | 트랜잭션, 행 잠금, 클러스터드 PK |
 | 계정 | 앱 `bank` (스키마 권한만) / 관리 `root` (로컬 전용) | 비밀번호는 `infra/.env` (git 제외) |
 | 스키마 관리 | Flyway (`apps/api/src/main/resources/db/migration`) | JPA `ddl-auto=validate` — 엔티티가 스키마를 바꾸지 않는다 |
 | 접근 방식 | Spring Data JPA (Hibernate) + 필요한 곳은 네이티브 SQL | `FOR UPDATE SKIP LOCKED`, 조건부 UPDATE |
+| 시간대 설정 | JDBC `connectionTimeZone=Asia/Seoul` · Hibernate `jdbc.time_zone=Asia/Seoul` + `type.preferred_instant_jdbc_type=TIMESTAMP` | 마지막 설정이 없으면 Hibernate 7 이 Instant 를 UTC 로 쓴다 |
 
 ## 2. 시간대 정책 — 한국시간(KST)으로 저장
 
@@ -24,9 +26,11 @@
 |---|---|---|
 | MySQL 서버 | `--default-time-zone` (Compose · Testcontainers 동일) | `+09:00` |
 | JDBC URL | `connectionTimeZone` · `forceConnectionTimeZoneToSession` | `Asia/Seoul` · `true` |
-| Hibernate | `spring.jpa.properties.hibernate.jdbc.time_zone` | `Asia/Seoul` |
+| Hibernate | `spring.jpa.properties.hibernate.jdbc.time_zone` · `hibernate.type.preferred_instant_jdbc_type` | `Asia/Seoul` + `hibernate.type.preferred_instant_jdbc_type: TIMESTAMP` |
 | 도메인 코드 | `Instant` + 주입한 `Clock` | 시간대를 모른다 (테스트에서 시간 고정) |
 | JVM 기본 시간대 | 건드리지 않는다 (`TimeZone.setDefault` 금지) | 서버 OS 설정에 따라 결과가 바뀌지 않게 |
+
+`forceConnectionTimeZoneToSession=true` + `Asia/Seoul` 은 MySQL 의 시간대 테이블이 있어야 동작한다. 공식 이미지와 RDS 에는 들어 있고, 직접 설치한 MySQL 은 `mysql_tzinfo_to_sql` 로 채워야 한다.
 
 **KST 로 정한 이유**
 - 국내 은행과만 연동한다. 전문의 `전문일시`, 은행 거래내역, 일마감 대사(P5)의 기준일이 모두 **KST 날짜**다. 저장도 같은 기준이면 "오늘 거래"를 `WHERE created_at >= '2026-10-19 00:00:00'` 처럼 그대로 조회할 수 있다.
@@ -95,8 +99,8 @@ erDiagram
 | 컬럼 | 타입 | NULL | 설명 |
 |---|---|---|---|
 | `id` | `CHAR(36)` | N | PK. UUID 문자열. API 응답의 `id` |
-| `idempotency_key` | `VARCHAR(64)` | N | 클라이언트가 보낸 `Idempotency-Key`. **UNIQUE** |
-| `reference` | `CHAR(20)` | N | 이용기관 거래번호. `T` + KST `yyMMdd` + 무작위 13자. 은행 전문 · 결과조회의 업무 키. **UNIQUE** |
+| `idempotency_key` | `VARCHAR(64)` ascii_bin | N | 클라이언트가 보낸 `Idempotency-Key` (보이는 ASCII 1~64자). ascii_bin (대소문자·악센트 구분, 바이트 비교). **UNIQUE** |
+| `reference` | `CHAR(20)` ascii_bin | N | 이용기관 거래번호. `T` + KST `yyMMdd` + 무작위 13자. 은행 전문 · 결과조회의 업무 키. ascii_bin (대소문자·악센트 구분, 바이트 비교). **UNIQUE** |
 | `request_hash` | `CHAR(64)` | N | `SHA-256(bankCode\|accountNo\|amount\|memo)`. 같은 키 다른 내용 판별 |
 | `bank_code` | `VARCHAR(3)` | N | 받는 은행 |
 | `account_no` | `VARCHAR(16)` | N | 받는 계좌 (VERIFIED 여야 접수) |
@@ -118,10 +122,10 @@ erDiagram
 ### 4-3. `outbox_event` — 트랜잭셔널 아웃박스 (P3-1 생성, P3-2 부터 발행)
 | 컬럼 | 타입 | NULL | 설명 |
 |---|---|---|---|
-| `id` | `BIGINT AUTO_INCREMENT` | N | PK. 발행 순서 기준. 메시지의 `eventId` |
+| `id` | `BIGINT AUTO_INCREMENT` | N | PK. 발행 순서 기준. 발행(P3-2) 때 메시지의 `eventId` 가 된다 |
 | `aggregate_id` | `CHAR(36)` | N | 대상 집합 id (`transfer.id`). Kafka 메시지 key |
 | `event_type` | `VARCHAR(50)` | N | `TransferRequested` |
-| `payload` | `JSON` | N | `{"eventId", "transferId", "occurredAt"}` |
+| `payload` | `JSON` | N | `{"transferId", "occurredAt"}`. eventId 는 이 행의 `id` 라 발행(P3-2) 때 메시지에 붙인다 |
 | `created_at` | `DATETIME(6)` | N | 이벤트 기록 시각 (이체 저장과 같은 트랜잭션) |
 | `published_at` | `DATETIME(6)` | Y | Kafka 발행 완료 시각. `NULL` = 미발행 |
 
@@ -140,10 +144,10 @@ erDiagram
 ## 6. 동시성 · 잠금
 | 상황 | 방법 | SQL 모양 |
 |---|---|---|
-| 같은 `Idempotency-Key` 동시 접수 | UNIQUE 위반을 잡아 기존 건 반환 | `INSERT …` → `DuplicateKeyException` → 새 트랜잭션에서 `SELECT` |
+| 같은 `Idempotency-Key` 동시 접수 | UNIQUE 위반을 잡아 기존 건 반환 | `INSERT …` → UNIQUE 위반(`DataIntegrityViolationException`)을 도메인 예외로 변환 → 트랜잭션 밖에서 `SELECT` |
 | 1원인증 코드 확인 동시 요청 | 비관적 락 | `SELECT … FROM account_verification WHERE id = ? FOR UPDATE` |
-| 아웃박스 발행 (앱 여러 대) | 잠긴 행 건너뛰기 | `SELECT … WHERE published_at IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED` |
-| 이체 상태 변경 (중복 메시지) | 조건부 UPDATE | `UPDATE transfer SET status='SENDING', sending_at=? … WHERE id=? AND status='RECEIVED'` → 0건이면 건너뜀 |
+| 아웃박스 발행 (앱 여러 대) (P3-2 예정) | 잠긴 행 건너뛰기 | `SELECT … WHERE published_at IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED` |
+| 이체 상태 변경 (중복 메시지) (P3-2 예정) | 조건부 UPDATE | `UPDATE transfer SET status='SENDING', sending_at=? … WHERE id=? AND status='RECEIVED'` → 0건이면 건너뜀 |
 | 엔티티 동시 수정 | 낙관적 락 | `@Version` → `… WHERE id=? AND version=?` |
 
 잔액 차감의 락 비교(비관적 · 낙관적 · Redis 분산락)는 P4 에서 이 표에 추가한다.
@@ -154,7 +158,7 @@ erDiagram
 - 시각: `DATETIME(6)` (마이크로초, KST). 접미어 `_at`.
 - 금액: `BIGINT` 원 단위. `DECIMAL`·부동소수점 쓰지 않는다 (원화는 소수점이 없다).
 - 불리언이 필요하면 `TINYINT(1)` 대신 상태 컬럼으로 표현할 수 있는지 먼저 본다.
-- 개인정보 원문(인증코드)은 저장하지 않는다. 계좌번호 마스킹은 로그·응답 단계에서 한다.
+- 개인정보 원문(인증코드)은 저장하지 않는다. 계좌번호 마스킹은 아직 없다 — 로그에 Transfer 를 남기기 전(P3-2)과 인증 도입 시 응답에서 적용한다.
 
 ## 8. 마이그레이션 규칙 (Flyway)
 - 파일명: `V<번호>__<설명>.sql` (예 `V1__init.sql`, `V2__transfer_reference_index.sql`).
@@ -195,3 +199,5 @@ EXPLAIN SELECT id FROM outbox_event WHERE published_at IS NULL ORDER BY id LIMIT
 | 날짜 | 변경 | 관련 |
 |---|---|---|
 | 2026-10-19 | 최초 작성: P3 스키마 설계, 시간대 KST 정책 | P3 설계 문서 |
+| 2026-10-19 | V1 적용 (P3-1). payload 에서 eventId 제외, Hibernate Instant 설정 추가 | PR (P3-1) |
+| 2026-10-19 | `idempotency_key` · `reference` 를 `ascii_bin` 으로 (대소문자·악센트 구분), 키는 보이는 ASCII 1~64자만 허용 | 최종 리뷰 (P3-1) |

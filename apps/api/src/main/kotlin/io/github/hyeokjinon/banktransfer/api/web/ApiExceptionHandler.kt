@@ -4,6 +4,7 @@ import io.github.hyeokjinon.banktransfer.account.AccountVerificationException
 import io.github.hyeokjinon.banktransfer.api.config.BankRejectedException
 import io.github.hyeokjinon.banktransfer.gateway.BankTimeoutException
 import io.github.hyeokjinon.banktransfer.gateway.BankUnavailableException
+import io.github.hyeokjinon.banktransfer.transfer.TransferException
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
@@ -25,6 +26,7 @@ class ApiExceptionHandler {
         BankTimeoutException::class,
         BankUnavailableException::class,
         BankRejectedException::class,
+        TransferException::class,
     )
     fun handle(e: Exception): ProblemDetail {
         val cause = if (e is CompletionException && e.cause != null) e.cause!! else e
@@ -38,12 +40,22 @@ class ApiExceptionHandler {
             is BankTimeoutException -> HttpStatus.GATEWAY_TIMEOUT to "BANK_TIMEOUT"
             is BankUnavailableException -> HttpStatus.SERVICE_UNAVAILABLE to "BANK_UNAVAILABLE"
             is BankRejectedException -> HttpStatus.BAD_GATEWAY to "BANK_REJECTED"
+            is TransferException.IdempotencyKeyRequired -> HttpStatus.BAD_REQUEST to "IDEMPOTENCY_KEY_REQUIRED"
+            is TransferException.InvalidAmount -> HttpStatus.BAD_REQUEST to "INVALID_AMOUNT"
+            is TransferException.InvalidMemo -> HttpStatus.BAD_REQUEST to "INVALID_MEMO"
+            // 컨트롤러의 @Pattern 이 먼저 거르지만, 도메인을 직접 거치는 경로를 위해 같은 400 으로 매핑한다.
+            is TransferException.InvalidAccount -> HttpStatus.BAD_REQUEST to "INVALID_ACCOUNT"
+            is TransferException.AccountNotVerified -> HttpStatus.UNPROCESSABLE_CONTENT to "ACCOUNT_NOT_VERIFIED"
+            is TransferException.IdempotencyKeyReused -> HttpStatus.UNPROCESSABLE_CONTENT to "IDEMPOTENCY_KEY_REUSED"
+            is TransferException.TransferNotFound -> HttpStatus.NOT_FOUND to "TRANSFER_NOT_FOUND"
             else -> {
                 log.error("unexpected error", cause)
                 HttpStatus.INTERNAL_SERVER_ERROR to "INTERNAL_ERROR"
             }
         }
-        return ProblemDetail.forStatusAndDetail(status, cause.message ?: code).apply {
+        // 500 은 내부 메시지(SQL · 경로 등)를 응답에 싣지 않는다. 원인은 위 log.error 로 남아 있다.
+        val detail = if (status == HttpStatus.INTERNAL_SERVER_ERROR) "internal error" else cause.message ?: code
+        return ProblemDetail.forStatusAndDetail(status, detail).apply {
             setProperty("code", code)
             if (cause is AccountVerificationException.WrongCode) setProperty("remainingAttempts", cause.remainingAttempts)
         }

@@ -10,7 +10,7 @@
 ## 절대 규칙
 - **예전 회사 코드·설정·식별자를 한 줄도 넣지 않는다.** 전문 규격·은행은 모두 이 저장소에서 새로 정의한 모의(Mock)다 ([docs/protocol.md](docs/protocol.md)).
 - 비밀번호·키·실제 IP·계정을 커밋하지 않는다. 로컬 값은 `infra/.env` (git 제외), 예시는 `infra/.env.example`.
-- 도메인 모듈(`modules/account`, 앞으로 `modules/transfer`)은 **Spring · Netty · JPA · Kafka 를 의존하지 않는다.** 외부와는 포트(인터페이스)로만 말하고, 어댑터는 `apps/api` 에서 조립한다 ([ADR-0001](docs/adr/0001-modular-monolith-ports.md)).
+- 도메인 모듈(`modules/account`, `modules/transfer`)은 **Spring · Netty · JPA · Kafka 를 의존하지 않는다.** 외부와는 포트(인터페이스)로만 말하고, 어댑터는 `apps/api` 에서 조립한다 ([ADR-0001](docs/adr/0001-modular-monolith-ports.md)).
 
 ## 작업 방식
 1. **설계는 사람이 정한다.** 선택지가 있으면 장단점과 추천을 제시하고 고르게 한다. 정한 내용은 `docs/adr/NNNN-*.md` 로 남긴다 (상태: 제안 → 머지 시 채택).

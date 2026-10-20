@@ -1,0 +1,27 @@
+$kind: http-request
+name: 2-4 같은 키 · 금액만 다름 → 422 IDEMPOTENCY_KEY_REUSED
+method: POST
+url: '{{baseUrl}}/api/v1/transfers'
+order: 4000
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: Idempotency-Key
+    value: '{{idemKey}}'
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "{{accountNo}}",
+      "amount": 70000,
+      "memo": "출금"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("422 IDEMPOTENCY_KEY_REUSED", () => {
+        pm.response.to.have.status(422);
+        pm.expect(pm.response.json().code).to.eql("IDEMPOTENCY_KEY_REUSED");
+      });

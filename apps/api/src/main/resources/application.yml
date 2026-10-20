@@ -4,6 +4,19 @@ spring:
   mvc:
     problemdetails:
       enabled: true   # 검증 실패(400)도 ProblemDetail 형식으로 응답
+  datasource:
+    # 로컬은 infra/docker-compose.yml 의 MySQL (값은 infra/.env.example 과 같다). 시각은 KST 로 저장한다 (docs/database.md §2)
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:bank_transfer}?connectionTimeZone=Asia/Seoul&forceConnectionTimeZoneToSession=true
+    username: ${MYSQL_USER:bank}
+    password: ${MYSQL_PASSWORD:local-dev-only}
+  jpa:
+    open-in-view: false        # 트랜잭션 밖(뷰 렌더링)에서 지연 로딩하지 않는다
+    hibernate:
+      ddl-auto: validate       # 스키마는 Flyway 만 바꾼다. 엔티티와 다르면 기동 실패
+    properties:
+      hibernate.jdbc.time_zone: Asia/Seoul
+      # Hibernate 7 은 Instant 를 기본으로 UTC 로 쓴다. 위 time_zone 을 따르게 하려면 이 설정이 필요하다
+      hibernate.type.preferred_instant_jdbc_type: TIMESTAMP
 
 bank:
   gateway:

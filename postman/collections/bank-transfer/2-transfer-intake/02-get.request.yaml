@@ -1,0 +1,14 @@
+$kind: http-request
+name: 2-2 조회 → 200 같은 건 (API 재시작 후에도)
+method: GET
+url: '{{baseUrl}}/api/v1/transfers/{{transferId}}'
+order: 2000
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("200, 2-1 에서 접수한 그 건", () => {
+        pm.response.to.have.status(200);
+        pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get("transferId"));
+        pm.expect(pm.response.json().amount).to.eql(50000);
+      });

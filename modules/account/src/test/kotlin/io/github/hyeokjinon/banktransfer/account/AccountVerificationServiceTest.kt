@@ -32,9 +32,10 @@ class AccountVerificationServiceTest {
 
     private val bank = FakeBank(mapOf("1002123456789" to "홍길동"))
     private val clock = MutableClock(Instant.parse("2026-10-01T00:00:00Z"))
+    private val repository = InMemoryVerificationRepository()
     private val service = AccountVerificationService(
         bank = bank,
-        repository = InMemoryVerificationRepository(),
+        repository = repository,
         codeGenerator = { "1234" },
         clock = clock,
         ttl = Duration.ofMinutes(5),
@@ -100,5 +101,17 @@ class AccountVerificationServiceTest {
     @Test
     fun `없는 인증 건은 VerificationNotFound`() {
         assertFailsWith<AccountVerificationException.VerificationNotFound> { service.confirm(UUID.randomUUID(), "1234") }
+    }
+
+    @Test
+    fun `인증을 마친 계좌만 existsVerified 가 true`() {
+        val v = request().get()
+        assertEquals(false, repository.existsVerified("090", "1002123456789"))
+
+        service.confirm(v.id, "1234")
+
+        assertEquals(true, repository.existsVerified("090", "1002123456789"))
+        assertEquals(false, repository.existsVerified("090", "3333012345678"))
+        assertEquals(false, repository.existsVerified("004", "1002123456789"))
     }
 }

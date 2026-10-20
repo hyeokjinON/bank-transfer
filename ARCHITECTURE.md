@@ -1,6 +1,6 @@
 # ARCHITECTURE — 구조와 흐름
 
-> 기준: P3-0 완료 (2026-10-16). P3(입출금 비동기)는 설계 중이며 아래 [§6](#6-다음-구조-p3-설계-중)에 합의된 방향만 적는다.
+> 기준: P3-1 완료 (2026-10-19). P3-2 · P3-3 는 설계만 합의된 상태이며 아래 [§6](#6-p3-진행-상황)에 적는다.
 
 ## 1. 한눈에 보기
 
@@ -11,7 +11,7 @@ flowchart LR
     subgraph app ["apps/api (Spring Boot, 단일 배포)"]
         API[REST Controller] --> SVC[도메인 서비스<br/>modules/account]
         SVC -- "BankPort" --> ADP[BankGatewayAdapter]
-        SVC -- "VerificationRepository" --> REPO[(InMemory 저장소)]
+        SVC -- "VerificationRepository" --> REPO[(MySQL<br/>Flyway)]
     end
 
     ADP --> GW["modules/bank-gateway<br/>Netty 클라이언트"]
@@ -34,13 +34,16 @@ flowchart LR
 | `modules/bank-protocol` | 전문 모델(`sealed interface BankMessage`), 고정길이 직렬화, Netty 프레임 디코더/코덱 | `netty-handler` (api) | Netty |
 | `modules/bank-gateway` | 은행 접속 클라이언트: 폴링, 재접속(지수 백오프), 전문번호 기반 응답 매칭, 타임아웃 | `bank-protocol` (api) | Netty |
 | `modules/account` | 1원 계좌인증 도메인 + 포트(`BankPort`, `VerificationRepository`, `CodeGenerator`) | **없음** | 없음 |
-| `apps/api` | REST API, 예외 → HTTP 매핑, 조립(`AppConfiguration`), 어댑터 | `account`, `bank-gateway` | Spring Boot 4 (MVC) |
+| `modules/transfer` | 출금이체 도메인: 상태 전이, 멱등 접수, 거래번호 + 포트(`TransferStore`, `VerifiedAccounts`, `ReferenceGenerator`) | **없음** | 없음 |
+| `apps/api` | REST API, 예외 → HTTP 매핑, 조립(`AppConfiguration`), 어댑터, JPA 저장소(`persistence/`) | `account`, `transfer`, `bank-gateway` | Spring Boot 4 (MVC, JPA) |
 | `apps/mock-bank` | 모의 은행 FEP 서버. 실행 가능 + 테스트 픽스처 | `bank-protocol` (api) | Netty |
 
 의존 방향 (화살표 = "의존한다"):
 
 ```
 apps/api ──▶ modules/account            (도메인, 의존 없음)
+   │
+   ├──────▶ modules/transfer           (도메인, 의존 없음)
    │
    └──────▶ modules/bank-gateway ──▶ modules/bank-protocol ──▶ netty
 apps/mock-bank ─────────────────────▶ modules/bank-protocol
@@ -55,10 +58,15 @@ apps/api/src/main/kotlin/.../api/
   BankTransferApplication.kt        # main
   config/AppConfiguration.kt        # 빈 조립, BankGatewayAdapter(BankPort 구현), 설정 프로퍼티
   web/AccountVerificationController.kt
+  web/TransferController.kt         # POST/GET /api/v1/transfers (Idempotency-Key, 202/200)
   web/ApiExceptionHandler.kt        # 도메인/게이트웨이 예외 → ProblemDetail + code
+  persistence/                      # JPA 엔티티 · 리포지토리 · JpaVerificationRepository · JpaTransferStore (transfer + outbox_event 한 트랜잭션)
 modules/account/.../account/
   AccountVerification.kt            # 엔티티, 포트, 예외 (sealed class)
-  AccountVerificationService.kt     # 성명조회 → 1원 이체 → 코드 확인, 해시 저장, InMemory 저장소
+  AccountVerificationService.kt     # 성명조회 → 1원 이체 → 코드 확인, 해시 저장 (InMemory 저장소는 테스트용)
+modules/transfer/.../transfer/
+  Transfer.kt                       # 상태 · 엔티티 · 명령 · 이벤트 · 포트 · 예외
+  TransferService.kt                # 접수 규칙(검증 · 멱등 · 인증 계좌 · 거래번호 재시도), 거래번호 생성기
 modules/bank-gateway/.../gateway/BankGatewayClient.kt
 modules/bank-protocol/.../protocol/
   BankMessage.kt · Header.kt · FixedLength.kt · BankMessageSerializer.kt
@@ -107,13 +115,15 @@ sequenceDiagram
 Docker Compose 한 파일로 MySQL 8.4 · Kafka 4.1(KRaft 단일 노드) · Redis 7.4. 리스너는 컨테이너용 `kafka:29092` / PC 용 `localhost:9092` 로 분리, 토픽 자동 생성 끔, 데이터는 이름 있는 볼륨.
 CI `infra-smoke` 잡이 같은 파일을 띄워 `verify.sh` 로 읽기/쓰기를 확인한다. → [ADR-0003](docs/adr/0003-local-infra-docker-compose.md), [infra/README.md](infra/README.md)
 
-## 6. 다음 구조: P3 (설계 중)
+## 6. P3 진행 상황
+- P3-1 접수 ✅ (ADR-0004). P3-2 · P3-3 진행 예정.
+
 합의된 방향 요약. 전체는 [P3 설계 문서](docs/superpowers/specs/2026-10-19-p3-transfer-design.md), 단계별 결정은 구현 PR 의 ADR(0004~0006)로 남긴다.
 - P3 는 3단계: **P3-1 접수**(transfer 모듈, JPA/MySQL/Flyway, Idempotency-Key, 아웃박스) → **P3-2 처리**(폴링 퍼블리셔 → Kafka → 컨슈머 → 은행) → **P3-3 실패**(재시도 토픽·DLT, 결과조회 전문).
 - 범위: 서비스 모계좌 → **1원인증을 마친 계좌**로의 출금이체만. 잔액·동시성은 P4.
 - 새 모듈 `modules/transfer` (순수 Kotlin) + 포트 `TransferStore.saveWithEvent`, `VerifiedAccounts`, `BankTransferPort`.
 - 상태: `RECEIVED → SENDING → COMPLETED | FAILED | UNKNOWN`, `UNKNOWN → (결과조회) → COMPLETED | FAILED`. **타임아웃은 실패로 확정하지 않는다.**
-- 1원인증 저장소도 메모리 → MySQL(JPA) 로 옮긴다.
+- 1원인증 저장소도 메모리 → MySQL(JPA) 로 옮겼다 (P3-1).
 
 ## 7. 관련 문서
 - 데이터베이스 모델 · 테이블 정의: [docs/database.md](docs/database.md)
@@ -125,3 +135,4 @@ CI `infra-smoke` 잡이 같은 파일을 띄워 `verify.sh` 로 읽기/쓰기를
 | [0001](docs/adr/0001-modular-monolith-ports.md) | 모듈러 모놀리스 + 포트/어댑터 |
 | [0002](docs/adr/0002-netty-framing-and-response-matching.md) | Netty 프레이밍과 전문번호 기반 응답 매칭 |
 | [0003](docs/adr/0003-local-infra-docker-compose.md) | 로컬 인프라는 Docker Compose 한 파일 |
+| [0004](docs/adr/0004-idempotency-key-and-transactional-outbox.md) | 출금 접수는 Idempotency-Key + DB UNIQUE, 처리 신호는 트랜잭셔널 아웃박스 (제안) |

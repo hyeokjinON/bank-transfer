@@ -1,0 +1,26 @@
+$kind: http-request
+name: 1-1 인증 요청 (1원 입금)
+method: POST
+url: '{{baseUrl}}/api/v1/account-verifications'
+order: 1000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "{{accountNo}}",
+      "holderName": "홍길동"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("201 SENT", () => {
+        pm.response.to.have.status(201);
+        pm.expect(pm.response.json().status).to.eql("SENT");
+      });
+      pm.collectionVariables.set("verificationId", pm.response.json().id);
+      console.log("모의 은행 콘솔에서 적요 BT#### 의 숫자 4자리를 컬렉션 변수 code 에 넣으세요");

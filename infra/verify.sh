@@ -16,9 +16,12 @@ dc() { docker compose -f docker-compose.yml --env-file "$ENV_FILE" "$@"; }
 ok() { printf '  \033[32mOK\033[0m %s\n' "$1"; }
 
 echo "[1/3] MySQL"
+# 앱 스키마에 흔적을 남기지 않는다: 테이블이 하나라도 있으면 Flyway 가 "이력 없는 비어 있지 않은 스키마"로 보고 앱 기동을 거부한다.
+# 임시 테이블은 이 접속이 끝나면 사라진다. DROP 은 예전 버전 스크립트가 남긴 테이블 정리용.
 dc exec -T mysql mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" -N -e "
-  CREATE TABLE IF NOT EXISTS infra_check (id INT PRIMARY KEY, note VARCHAR(20));
-  REPLACE INTO infra_check VALUES (1, '한글확인');
+  DROP TABLE IF EXISTS infra_check;
+  CREATE TEMPORARY TABLE infra_check (id INT PRIMARY KEY, note VARCHAR(20));
+  INSERT INTO infra_check VALUES (1, '한글확인');
   SELECT note FROM infra_check WHERE id = 1;" 2>/dev/null | grep -q '한글확인'
 ok "앱 계정 접속 · 쓰기 · 읽기 · utf8mb4 한글"
 
