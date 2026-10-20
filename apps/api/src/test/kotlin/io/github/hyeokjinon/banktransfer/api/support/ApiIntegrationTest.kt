@@ -14,9 +14,10 @@ import org.springframework.web.client.RestClient
 /**
  * 모든 Spring 통합 테스트의 부모. 설정이 같으므로 스프링 테스트 컨텍스트가 하나로 캐시되어
  * MySQL 컨테이너와 모의 은행도 한 번만 뜬다. 테스트끼리 DB 를 공유하므로 키 · 계좌번호는 테스트마다 새로 만든다.
+ * 폴링 퍼블리셔 스케줄은 끈다: 테스트가 OutboxRelay.publishPending() 을 직접 불러 발행 시점을 정한다 (다른 테스트의 이체 상태가 갑자기 바뀌지 않게).
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(MySqlTestContainer::class)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = ["transfer.outbox.relay.enabled=false"])
+@Import(MySqlTestContainer::class, KafkaTestContainer::class)
 abstract class ApiIntegrationTest {
 
     companion object {

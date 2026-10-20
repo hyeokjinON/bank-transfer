@@ -9,6 +9,18 @@ spring:
     url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:bank_transfer}?connectionTimeZone=Asia/Seoul&forceConnectionTimeZoneToSession=true
     username: ${MYSQL_USER:bank}
     password: ${MYSQL_PASSWORD:local-dev-only}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      acks: all                    # ISR 모두 기록돼야 성공 (운영 3대 · min.insync.replicas=2 와 짝)
+      properties:
+        enable.idempotence: true   # 프로듀서 재시도가 브로커에 중복 기록되지 않게
+    consumer:
+      group-id: transfer-processor
+      auto-offset-reset: earliest
+      enable-auto-commit: false    # 처리를 끝낸 뒤에만 커밋 (리스너가 ack)
+    listener:
+      ack-mode: manual_immediate
   jpa:
     open-in-view: false        # 트랜잭션 밖(뷰 렌더링)에서 지연 로딩하지 않는다
     hibernate:
@@ -35,3 +47,10 @@ management:
     web:
       exposure:
         include: health,info
+
+transfer:
+  outbox:
+    relay:
+      enabled: true      # 폴링 퍼블리셔 스케줄 (테스트는 끄고 직접 부른다)
+      interval-ms: 500
+      batch-size: 100
