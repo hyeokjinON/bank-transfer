@@ -1,5 +1,5 @@
 $kind: http-request
-name: 3-4 3초쯤 뒤 조회 → UNKNOWN (이미 COMPLETED 여도 정상)
+name: 3-4 접수 3~4초 뒤 조회 → UNKNOWN (30초 유예 안에서는 아직 안 묻는다)
 method: GET
 url: '{{baseUrl}}/api/v1/transfers/{{silentTransferId}}'
 order: 4000
@@ -8,8 +8,8 @@ scripts:
     language: text/javascript
     code: |-
       // 은행은 입금을 처리했지만 응답이 없어 결과를 모른다 → UNKNOWN. 다시 보내지 않는다.
-      // 정리 작업이 10초마다 돌아서, 늦게 Send 하면 이미 COMPLETED 일 수 있다.
-      pm.test("UNKNOWN 또는 (정리 작업이 먼저 돌았으면) COMPLETED", () => {
+      // 컨슈머의 3초 타임아웃 직전이면 아직 SENDING 일 수 있다. 정리 작업은 sending_at 30초 유예 뒤에야 묻는다.
+      pm.test("SENDING 또는 UNKNOWN (접수 30초 안)", () => {
         pm.response.to.have.status(200);
-        pm.expect(["UNKNOWN", "COMPLETED"]).to.include(pm.response.json().status);
+        pm.expect(["SENDING", "UNKNOWN"]).to.include(pm.response.json().status);
       });
