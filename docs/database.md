@@ -1,6 +1,6 @@
 # 데이터베이스 — 모델 정의와 구조
 
-> 기준: P3-2 (Flyway `V1__init.sql` 적용, P3-2 는 스키마 변경 없음). 1원인증 · 이체 · 아웃박스 테이블이 MySQL 에 있다.
+> 기준: P3-3a (Flyway `V1__init.sql` 적용, P3-2 · P3-3a 는 스키마 변경 없음). 1원인증 · 이체 · 아웃박스 테이블이 MySQL 에 있다.
 > 이 문서가 스키마의 기준이다. 마이그레이션을 추가할 때 이 문서도 같은 PR 에서 고친다.
 > 설계 배경: [P3 설계 문서](superpowers/specs/2026-10-19-p3-transfer-design.md) §2~§6
 
@@ -108,8 +108,8 @@ erDiagram
 | `memo` | `VARCHAR(20)` | N | 적요 (EUC-KR 20바이트 이내) |
 | `status` | `VARCHAR(10)` | N | `RECEIVED` · `SENDING` · `COMPLETED` · `FAILED` · `UNKNOWN` |
 | `bank_response_code` | `VARCHAR(4)` | Y | 은행 응답코드 (`0000`, `1001` …) |
-| `sending_at` | `DATETIME(6)` | Y | `SENDING` 으로 바뀐 시각. 멈춘 건 탐지 기준 |
-| `inquiry_attempts` | `INT` | N | 결과조회 시도 횟수 (P3-3), 기본 0 |
+| `sending_at` | `DATETIME(6)` | Y | `SENDING` 으로 바뀐 시각. 멈춘 건 탐지 기준. 미전송으로 `RECEIVED` 에 되돌려도 남으므로 대상은 `status = SENDING` 과 함께 고른다 |
+| `inquiry_attempts` | `INT` | N | 결과조회에도 답이 없던 횟수 (정리 작업이 10에서 멈춘다), 기본 0 |
 | `created_at` | `DATETIME(6)` | N | 접수 시각 |
 | `updated_at` | `DATETIME(6)` | N | 마지막 변경 시각 |
 | `version` | `BIGINT` | N | JPA `@Version` 낙관적 락 |
@@ -150,6 +150,7 @@ erDiagram
 | 1원인증 코드 확인 동시 요청 | 비관적 락 | `SELECT … FROM account_verification WHERE id = ? FOR UPDATE` |
 | 아웃박스 발행 (앱 여러 대) | 잠긴 행 건너뛰기 | `SELECT … WHERE published_at IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED`. 발행기는 READ COMMITTED 로 돈다: 기본 REPEATABLE READ 에서는 gap 락 때문에 접수의 INSERT 가 막힌다 ([ADR-0005](adr/0005-kafka-delivery-and-consumer-idempotency.md)) |
 | 이체 상태 변경 (중복 메시지) | 조건부 UPDATE | `UPDATE transfer SET status='SENDING', sending_at=? … WHERE id=? AND status='RECEIVED'` → 0건이면 건너뜀 |
+| 정리 작업과 컨슈머가 같은 이체를 확정 | 조건부 UPDATE (`UNKNOWN` 에서만 확정) | `UPDATE transfer SET status=?, bank_response_code=? … WHERE id=? AND status='UNKNOWN'` → 0건이면 다른 쪽이 먼저 확정한 것이라 건너뜀. 결과조회 횟수 증가도 `AND status='UNKNOWN'` 조건부다 |
 | 엔티티 동시 수정 | 낙관적 락 | `@Version` → `… WHERE id=? AND version=?` |
 
 잔액 차감의 락 비교(비관적 · 낙관적 · Redis 분산락)는 P4 에서 이 표에 추가한다.
@@ -180,6 +181,9 @@ SELECT status, COUNT(*) FROM transfer GROUP BY status;
 SELECT id, reference, sending_at FROM transfer
  WHERE status = 'SENDING' AND sending_at < NOW(6) - INTERVAL 30 SECOND;
 
+-- 결과조회 한도에 닿은 UNKNOWN (일마감 대사 대상)
+SELECT id, reference, inquiry_attempts FROM transfer WHERE status = 'UNKNOWN' AND inquiry_attempts >= 10;
+
 -- 아직 Kafka 로 안 나간 이벤트
 SELECT id, aggregate_id, created_at FROM outbox_event WHERE published_at IS NULL ORDER BY id LIMIT 20;
 
@@ -207,3 +211,4 @@ EXPLAIN SELECT id FROM outbox_event WHERE published_at IS NULL ORDER BY id LIMIT
 | 2026-10-19 | V1 적용 (P3-1). payload 에서 eventId 제외, Hibernate Instant 설정 추가 | PR (P3-1) |
 | 2026-10-19 | `idempotency_key` · `reference` 를 `ascii_bin` 으로 (대소문자·악센트 구분), 키는 보이는 ASCII 1~64자만 허용 | 최종 리뷰 (P3-1) |
 | 2026-10-20 | 스키마 변경 없음. 아웃박스 발행 메시지 모양 · `published_at` 기록 방식, 동시성 표(SKIP LOCKED · 조건부 UPDATE) 확정, 운영 조회 추가 | PR #5 (P3-2) |
+| 2026-10-21 | 스키마 변경 없음. `inquiry_attempts` 의미(결과조회에도 답이 없던 횟수, 10에서 멈춤), 정리 작업 ↔ 컨슈머 경합의 조건부 UPDATE, 한도에 닿은 `UNKNOWN` 운영 쿼리 | [PR #7](https://github.com/hyeokjinON/bank-transfer/pull/7) (P3-3a) |

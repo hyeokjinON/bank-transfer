@@ -27,7 +27,9 @@
 |---|---|---|
 | P3-1 접수 | `feat/p3-1-transfer-intake` | transfer 모듈, JPA/MySQL/Flyway, Idempotency-Key, 상태 모델, 아웃박스 테이블, 1원인증 JPA 이전 |
 | P3-2 처리 | `feat/p3-2-transfer-processing` | 폴링 퍼블리셔 → Kafka → 컨슈머 → 은행 이체 전문, 수동 커밋, 상태 조건부 멱등 |
-| P3-3 실패 | `feat/p3-3-transfer-failures` | 재시도 토픽 · DLT, 규격 v0.2(이용기관 거래번호 · 결과조회), 정리 작업 |
+| P3-3 실패 | – | 아래 둘로 나눈다 (2026-10-21) |
+| P3-3a 결과조회 | `feat/p3-3a-inquiry-reconcile` | 규격 v0.2(이용기관 거래번호 · 결과조회), 정리 작업, 모의 은행 시나리오, 컨슈머 경합 처리 → [ADR-0006](../../adr/0006-inquire-instead-of-resend.md) |
+| P3-3b 재시도 | `feat/p3-3b-retry-dlt` | 재시도 토픽 · DLT, 오래된 `RECEIVED` 재발행 |
 
 ## 1. 모듈 경계
 
@@ -48,7 +50,8 @@ apps/mock-bank/    P3-3 에서 결과조회 응답 · 무응답 시나리오 추
 |---|---|---|
 | `TransferStore` | `saveWithEvent(transfer, event)`: 이체와 이벤트를 **함께 성공하거나 함께 실패**하게 저장. `findById`, `findByIdempotencyKey`, `transition(id, from, to, ...)`: 현재 상태가 `from` 일 때만 바꾸고 성공 여부 반환 | JPA + 같은 트랜잭션의 `outbox_event` insert |
 | `VerifiedAccounts` | `isVerified(bankCode, accountNo): Boolean` | account 의 JPA 저장소 조회 (transfer 모듈은 account 모듈을 import 하지 않는다) |
-| `BankTransferPort` | `transfer(...)`, `inquire(reference)` (P3-3) | `BankGatewayClient` 어댑터 |
+| `BankTransferPort` | `transfer(...)` | `BankGatewayClient` 어댑터 (`BankTransferAdapter`) |
+| `BankInquiryPort` | `inquire(reference)`: 처리됨 · 처리 안 됨 · 모름 (P3-3a). 정리 작업은 이 포트로 **묻기만** 하고 `BankTransferPort` 를 쓰지 않는다 | `BankGatewayClient` 어댑터 (`BankInquiryAdapter`) |
 
 도메인이 "저장과 이벤트는 원자적"이라는 **계약만** 알기 때문에, 아웃박스를 Debezium 이나 Kafka 트랜잭션으로 바꿔도 도메인 코드와 테스트는 바뀌지 않는다.
 
@@ -85,7 +88,7 @@ CREATE TABLE transfer (
   status             VARCHAR(10)  NOT NULL,     -- RECEIVED | SENDING | COMPLETED | FAILED | UNKNOWN
   bank_response_code VARCHAR(4)   NULL,
   sending_at         DATETIME(6)  NULL,         -- 정리 작업이 '멈춘 SENDING' 을 찾는 기준
-  inquiry_attempts   INT          NOT NULL DEFAULT 0,   -- P3-3
+  inquiry_attempts   INT          NOT NULL DEFAULT 0,   -- P3-3a: 결과조회에도 답이 없던 횟수
   created_at         DATETIME(6)  NOT NULL,
   updated_at         DATETIME(6)  NOT NULL,
   version            BIGINT       NOT NULL,
@@ -194,7 +197,7 @@ TransferConsumer (group transfer-processor, AckMode.MANUAL_IMMEDIATE)
 은행 호출을 트랜잭션 밖에 두는 이유: 응답 대기 3초 동안 DB 커넥션을 잡지 않는다.
 컨슈머 스레드는 은행 응답을 블로킹으로 기다린다. 처리량은 P4 에서 측정하고 P6(WebFlux/코루틴)·P7(Virtual Thread)에서 같은 지점을 비교한다.
 
-## 6. P3-3 실패 처리
+## 6. P3-3 실패 처리 (P3-3a 결과조회 · 정리 작업 / P3-3b 재시도 토픽 · DLT)
 
 | 실패 | 은행 도달 | 처리 | 상태 |
 |---|---|---|---|
@@ -223,6 +226,14 @@ TransferConsumer (group transfer-processor, AckMode.MANUAL_IMMEDIATE)
 
 **남는 위험**: 원거래가 은행 안에서 아직 처리 중일 때 조회하면 `2001` 이 올 수 있다. 30초 유예로 줄이고, 최종 안전망은 P5 일마감 대사다.
 
+**2026-10-21 결정 (P3-3a)**
+- 1원인증 이체의 `V` 거래번호는 **API 어댑터**(`BankGatewayAdapter`)가 만들고 저장하지 않는다. 결과조회 대상이 아니라서 `BankPort` 계약과 `account` 모듈은 그대로 둔다.
+- 오래된 `RECEIVED`(발행됐는데 컨슈머가 못 집어간 건)는 **P3-3b** 에서 횟수를 제한해 다시 발행한다. P3-3a 의 정리 작업은 `SENDING` · `UNKNOWN` 만 다룬다.
+- 정리 작업의 대상 선택은 `status` 로만 한다 (`SENDING` + `sending_at < now - 30s`, `UNKNOWN` + `inquiry_attempts < 10`). `sending_at` 은 미전송으로 `RECEIVED` 에 되돌린 뒤에도 남는다. 한도(10회)에 닿으면 멈추고 경고 → 일마감 대사.
+- 컨슈머와 경합: 정리 작업이 먼저 `UNKNOWN` 으로 바꾼 뒤 컨슈머가 은행의 확정 결과(완료 · 거절)를 받으면 `UNKNOWN → COMPLETED/FAILED` 로 기록한다. 그 밖에는 로그만 남기고 던지지 않는다. 이미 다른 확정이면 `CONFLICT` 로 알린다.
+- 스케줄러 스레드는 2개(`spring.task.scheduling.pool.size: 2`).
+- **모의 은행 시나리오**: `9990000000001` = 무응답 · 처리 안 함 (테스트가 `silentAccounts` 로 지정, 조회 → `2001`). `9990000000002` = 처리하고 응답만 안 함 (기본 계좌, 예금주 `무응답`, 조회 → `0000`). 후자도 **1원 이체는 정상 응답**한다 — 1원인증으로 수취 계좌를 등록(VERIFIED)할 수 있어야 출금을 접수할 수 있기 때문이다.
+
 ## 7. 테스트 전략
 
 | 층 | 위치 | 도구 | 대상 |
@@ -242,10 +253,10 @@ TransferConsumer (group transfer-processor, AckMode.MANUAL_IMMEDIATE)
 - [P3-2] 퍼블리셔 2개 동시 → 이벤트당 발행 1회
 - [P3-2] 같은 메시지 2번 소비 → 모의 은행 입금 1건
 - [P3-2] 프로듀서 `acks=all` · `enable.idempotence=true` 적용 확인
-- [P3-3] 은행 꺼짐 → 재시도 중 기동 → `COMPLETED`
-- [P3-3] 깨진 메시지 → DLT
-- [P3-3] 처리 후 무응답 → `UNKNOWN` → 조회 → `COMPLETED`; 미처리 무응답 → `FAILED`
-- [P3-3] 멈춘 `SENDING` → 정리 작업 → 확정
+- [P3-3a] 처리 후 무응답 → `UNKNOWN` → 조회 → `COMPLETED` (입금 1건); 미처리 무응답 → `FAILED`
+- [P3-3a] 멈춘 `SENDING` → 정리 작업 → 확정; 한도(10회) 후 멈춤; 컨슈머와 경합
+- [P3-3b] 은행 꺼짐 → 재시도 중 기동 → `COMPLETED`
+- [P3-3b] 깨진 메시지 → DLT
 
 ## 8. 완료 기준
 
@@ -255,4 +266,5 @@ TransferConsumer (group transfer-processor, AckMode.MANUAL_IMMEDIATE)
 |---|---|---|
 | P3-1 | 로컬 MySQL 로 POST/GET 동작, 재시작 후 이체·인증 기록 유지 | 0004 멱등키와 아웃박스 |
 | P3-2 | 로컬에서 요청 후 약 1초 안에 `COMPLETED`, kafka-ui 에서 메시지 확인 | 0005 Kafka 발행·소비 보장 |
-| P3-3 | 규격 v0.2, 모의 은행 시나리오 2개 | 0006 불확실한 결과는 재전송하지 않고 조회한다 |
+| P3-3a | 규격 v0.2, 모의 은행 시나리오 2개, 정리 작업 | 0006 불확실한 결과는 재전송하지 않고 조회한다 |
+| P3-3b | 재시도 토픽 · DLT, 오래된 `RECEIVED` 재발행 | 새 ADR (제안) |
