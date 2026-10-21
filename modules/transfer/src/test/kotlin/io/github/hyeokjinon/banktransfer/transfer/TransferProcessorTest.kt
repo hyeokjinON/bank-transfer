@@ -190,4 +190,17 @@ class TransferProcessorTest {
         assertEquals(ProcessResult.ALREADY_HANDLED, TransferProcessor(store, racing, Clock.fixed(now, ZoneOffset.UTC)).process(t.id))
         assertEquals(TransferStatus.UNKNOWN, store.transfers.getValue(t.id).status)
     }
+
+    @Test
+    fun `이미 다른 결과로 확정된 건에 은행의 확정 결과가 오면 CONFLICT`() {
+        val t = received()
+        val racing = BankTransferPort { _, _, _, _, _ ->
+            store.transition(t.id, TransferStatus.SENDING, TransferStatus.UNKNOWN, now)
+            store.transition(t.id, TransferStatus.UNKNOWN, TransferStatus.FAILED, now, "2001")   // 결과조회가 먼저 FAILED 로 확정
+            BankTransferOutcome.Completed                                                          // 은행의 늦은 응답은 완료
+        }
+
+        assertEquals(ProcessResult.CONFLICT, TransferProcessor(store, racing, Clock.fixed(now, ZoneOffset.UTC)).process(t.id))
+        assertEquals(TransferStatus.FAILED, store.transfers.getValue(t.id).status)
+    }
 }

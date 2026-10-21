@@ -9,7 +9,17 @@ import java.time.Clock
 import java.util.UUID
 
 /** 처리 결과. 컨슈머는 [RETRY_LATER] 일 때만 메시지를 다시 처리하게 한다. */
-enum class ProcessResult { COMPLETED, FAILED, UNKNOWN, ALREADY_HANDLED, NOT_FOUND, RETRY_LATER }
+enum class ProcessResult {
+    COMPLETED,
+    FAILED,
+    UNKNOWN,
+    ALREADY_HANDLED,
+
+    /** 은행이 준 확정 결과가 이미 확정된 상태와 다르다 (예: 결과조회로 FAILED 확정 뒤 은행의 늦은 응답이 완료) → 사람이 확인해야 한다. */
+    CONFLICT,
+    NOT_FOUND,
+    RETRY_LATER,
+}
 
 /**
  * TransferRequested 처리 (P3-2).
@@ -47,11 +57,18 @@ class TransferProcessor(
      * SENDING 에서 결과로 옮긴다. false 면 정리 작업이 먼저 SENDING → UNKNOWN 으로 바꾼 것이다 (은행 응답이 30초 넘게 늦은 경우).
      * 그때 은행이 직접 준 확정 결과(완료 · 거절)는 결과조회보다 정확하므로 UNKNOWN 에서 바로 확정한다.
      * 그 밖(모름 · 미전송)은 정리 작업이 결과조회로 맡으므로 손대지 않는다.
+     * 확정 결과를 UNKNOWN 에서도 옮기지 못했는데 현재 상태가 이미 다른 확정(완료 ↔ 거절)이면 [ProcessResult.CONFLICT] 다:
+     * 결과조회 결과와 은행의 확정 결과가 엇갈린 것이라 조용히 넘기면 DB 와 은행이 어긋난 채 남는다.
+     * 같은 확정 결과였거나 아직 확정 전이면 [ProcessResult.ALREADY_HANDLED] 다.
      */
     private fun record(id: UUID, to: TransferStatus, bankResponseCode: String?, result: ProcessResult): ProcessResult {
         val now = clock.instant()
         if (store.transition(id, SENDING, to, now, bankResponseCode)) return result
         if ((to == COMPLETED || to == FAILED) && store.transition(id, UNKNOWN, to, now, bankResponseCode)) return result
+        if (to == COMPLETED || to == FAILED) {
+            val current = store.findById(id)?.status
+            if ((current == COMPLETED || current == FAILED) && current != to) return ProcessResult.CONFLICT
+        }
         return ProcessResult.ALREADY_HANDLED
     }
 
