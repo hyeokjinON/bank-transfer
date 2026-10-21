@@ -17,6 +17,7 @@ import jakarta.persistence.Version
 import org.hibernate.annotations.JdbcTypeCode
 import org.hibernate.type.SqlTypes
 import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.data.domain.Limit
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
@@ -48,7 +49,7 @@ class TransferEntity(
     fun toDomain() = Transfer(
         id = UUID.fromString(id), idempotencyKey = idempotencyKey, reference = reference, requestHash = requestHash,
         bankCode = bankCode, accountNo = accountNo, amount = amount, memo = memo, status = status,
-        bankResponseCode = bankResponseCode, sendingAt = sendingAt, createdAt = createdAt, updatedAt = updatedAt,
+        bankResponseCode = bankResponseCode, sendingAt = sendingAt, inquiryAttempts = inquiryAttempts, createdAt = createdAt, updatedAt = updatedAt,
     )
 
     companion object {
@@ -59,7 +60,7 @@ class TransferEntity(
         fun from(t: Transfer) = TransferEntity(
             id = t.id.toString(), idempotencyKey = t.idempotencyKey, reference = t.reference, requestHash = t.requestHash,
             bankCode = t.bankCode, accountNo = t.accountNo, amount = t.amount, memo = t.memo, status = t.status,
-            bankResponseCode = t.bankResponseCode, sendingAt = t.sendingAt?.toDbPrecision(),
+            bankResponseCode = t.bankResponseCode, sendingAt = t.sendingAt?.toDbPrecision(), inquiryAttempts = t.inquiryAttempts,
             createdAt = t.createdAt.toDbPrecision(), updatedAt = t.updatedAt.toDbPrecision(),
         )
     }
@@ -79,6 +80,18 @@ class OutboxEventEntity(
 
 interface TransferJpaRepository : JpaRepository<TransferEntity, String> {
     fun findByIdempotencyKey(idempotencyKey: String): TransferEntity?
+
+    fun findByStatusAndSendingAtBeforeOrderBySendingAt(status: TransferStatus, cutoff: Instant, limit: Limit): List<TransferEntity>
+
+    fun findByStatusAndInquiryAttemptsLessThanOrderByUpdatedAt(status: TransferStatus, maxAttempts: Int, limit: Limit): List<TransferEntity>
+
+    /** 결과조회 시도 +1. 상태가 바뀌었으면(컨슈머가 먼저 확정) 0 건. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(
+        "update TransferEntity t set t.inquiryAttempts = t.inquiryAttempts + 1, t.updatedAt = :at, " +
+            "t.version = t.version + 1 where t.id = :id and t.status = :status",
+    )
+    fun incrementInquiryAttempts(@Param("id") id: String, @Param("status") status: TransferStatus, @Param("at") at: Instant): Int
 
     /** 조건부 상태 변경 (SENDING 으로 갈 때 sending_at 도 기록). 현재 상태가 from 이 아니면 0 건. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
@@ -185,4 +198,16 @@ class JpaTransferStore(
             updated == 1
         }!!
     }
+
+    /** idx_transfer_status(status, sending_at) 를 탄다. */
+    override fun findSendingBefore(cutoff: Instant, limit: Int): List<Transfer> =
+        transfers.findByStatusAndSendingAtBeforeOrderBySendingAt(TransferStatus.SENDING, cutoff.toDbPrecision(), Limit.of(limit))
+            .map { it.toDomain() }
+
+    override fun findUnknownForInquiry(maxAttempts: Int, limit: Int): List<Transfer> =
+        transfers.findByStatusAndInquiryAttemptsLessThanOrderByUpdatedAt(TransferStatus.UNKNOWN, maxAttempts, Limit.of(limit))
+            .map { it.toDomain() }
+
+    override fun recordInquiryAttempt(id: UUID, at: Instant): Boolean =
+        tx.execute { transfers.incrementInquiryAttempts(id.toString(), TransferStatus.UNKNOWN, at.toDbPrecision()) == 1 }!!
 }

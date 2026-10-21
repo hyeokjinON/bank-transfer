@@ -13,6 +13,7 @@ import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
 import io.github.hyeokjinon.banktransfer.protocol.ResponseCodes
 import io.github.hyeokjinon.banktransfer.transfer.RandomReferenceGenerator
+import io.github.hyeokjinon.banktransfer.transfer.ReferenceGenerator
 import io.github.hyeokjinon.banktransfer.transfer.TransferService
 import io.github.hyeokjinon.banktransfer.transfer.TransferStore
 import io.github.hyeokjinon.banktransfer.transfer.VerifiedAccounts
@@ -50,7 +51,12 @@ class BankRejectedException(val responseCode: String) : RuntimeException("bank r
  * 은행 응답 future 는 Netty 이벤트 루프가 완료한다. 그 뒤의 처리(DB 저장 등 블로킹)가 이벤트 루프에서 돌지 않도록
  * thenApplyAsync 로 앱 실행기에 넘긴다. 이벤트 루프가 막히면 같은 루프의 모든 은행 통신이 멈춘다.
  */
-class BankGatewayAdapter(private val client: BankGatewayClient, private val executor: Executor) : BankPort {
+class BankGatewayAdapter(
+    private val client: BankGatewayClient,
+    private val executor: Executor,
+    /** 1원인증 이체의 이용기관 거래번호 (V 접두). 결과조회 대상이 아니라 저장하지 않는다. */
+    private val references: ReferenceGenerator = RandomReferenceGenerator(prefix = 'V'),
+) : BankPort {
     override fun inquireHolderName(bankCode: String, accountNo: String): CompletableFuture<String?> =
         client.inquireName(bankCode, accountNo).thenApplyAsync({ res ->
             when (res.header.responseCode) {
@@ -61,7 +67,7 @@ class BankGatewayAdapter(private val client: BankGatewayClient, private val exec
         }, executor)
 
     override fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String): CompletableFuture<Unit> =
-        client.transfer(bankCode, accountNo, amount, memo).thenApplyAsync({ res ->
+        client.transfer(bankCode, accountNo, amount, memo, references.next()).thenApplyAsync({ res ->
             if (!res.header.isOk) throw BankRejectedException(res.header.responseCode)
         }, executor)
 }

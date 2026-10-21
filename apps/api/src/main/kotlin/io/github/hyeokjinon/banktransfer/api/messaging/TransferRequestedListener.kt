@@ -23,6 +23,10 @@ class TransferRequestedListener(private val process: (UUID) -> ProcessResult) {
         val transferId = UUID.fromString(record.key())
         val result = process(transferId)
         if (result == ProcessResult.RETRY_LATER) throw RetryLaterException(transferId)
+        if (result == ProcessResult.CONFLICT) {
+            // 재시도로 풀 수 없다: 은행이 확정한 결과가 이미 기록된 최종 상태와 다르다. 오프셋은 넘기고 사람이 확인하게 경고만 남긴다
+            log.warn("transfer {} conflict: bank result differs from the recorded final status — needs manual check", transferId)
+        }
         log.info("transfer {} processed: {} (partition {}, offset {})", transferId, result, record.partition(), record.offset())
         ack.acknowledge()
     }
