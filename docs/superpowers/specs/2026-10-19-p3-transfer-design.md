@@ -220,11 +220,11 @@ TransferConsumer (group transfer-processor, AckMode.MANUAL_IMMEDIATE)
 
 **정리 작업 `TransferReconciler`** (10초 fixedDelay)
 1. `status = SENDING AND sending_at < now - 30s` → `UNKNOWN`.
-2. `status = UNKNOWN` 각각 결과조회 → `0000` 이면 `COMPLETED`, `2001` 이면 `FAILED`, 무응답이면 `inquiry_attempts + 1` 후 다음 주기. 10회 초과 시 경고 로그 (대사 대상).
+2. `status = UNKNOWN AND sending_at < now - 30s AND inquiry_attempts < 10` 각각 결과조회 (컨슈머가 3초 타임아웃으로 적은 `UNKNOWN` 도 같은 유예) → `0000` 이면 `COMPLETED`, `2001` 이면 `FAILED`, 무응답이면 `inquiry_attempts + 1` 후 다음 주기. 10회 초과 시 경고 로그 (대사 대상).
 
 **모의 은행 시나리오 추가**: 무응답 + 처리 안 함(조회 → `2001`), 처리 후 무응답(조회 → `0000`). 처리한 이체는 이용기관 거래번호로 기억한다.
 
-**남는 위험**: 원거래가 은행 안에서 아직 처리 중일 때 조회하면 `2001` 이 올 수 있다. 30초 유예로 줄이고, 최종 안전망은 P5 일마감 대사다.
+**남는 위험**: 원거래가 은행 안에서 아직 처리 중일 때 조회하면 `2001` 이 올 수 있다. `sending_at` 30초 유예(정리 작업이 바꾼 `UNKNOWN` 과 컨슈머가 적은 `UNKNOWN` 모두)로 줄인다. 은행이 30초보다 더 늦게 처리하면 `2001` → `FAILED` 로 확정된 뒤 늦은 이체 응답은 로그만 남는다. 최종 안전망은 P5 일마감 대사다.
 
 **2026-10-21 결정 (P3-3a)**
 - 1원인증 이체의 `V` 거래번호는 **API 어댑터**(`BankGatewayAdapter`)가 만들고 저장하지 않는다. 결과조회 대상이 아니라서 `BankPort` 계약과 `account` 모듈은 그대로 둔다.

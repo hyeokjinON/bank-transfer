@@ -14,7 +14,7 @@
 2. **거래번호의 출처**: 출금이체는 접수 때 만들어 저장한 `transfer.reference`(`T…`)를 보낸다. 1원인증 이체는 API 어댑터가 `RandomReferenceGenerator(prefix = 'V')` 로 만든 번호를 보낸다. 1원인증은 결과조회 대상이 아니라서 **저장하지 않는다.**
 3. **정리 작업 `TransferReconciler`(10초 고정 지연, 한 번에 100건)**:
    - `status = SENDING` 이고 `sending_at` 이 30초보다 오래된 건 → `UNKNOWN`. 대상은 **status 로만** 고른다. `sendingAt != null` 로 고르면 미전송으로 `RECEIVED` 에 되돌린 건(`sendingAt` 이 남는다)까지 잡힌다.
-   - `UNKNOWN` 이고 `inquiry_attempts < 10` 인 건마다 결과조회: 처리됨(`0000`) → `COMPLETED`, 원거래 없음(`2001`) → `FAILED`(은행 코드 기록), 모름 → `inquiry_attempts + 1`. 10번째에도 모르면 더 묻지 않고 경고를 남긴다 (일마감 대사 대상, P5).
+   - `UNKNOWN` 이고 `sending_at` 이 30초보다 오래되고 `inquiry_attempts < 10` 인 건마다 결과조회 (컨슈머가 3초 타임아웃으로 적은 `UNKNOWN` 도 같은 유예를 거친다 — 은행이 조금 느릴 뿐이면 아직 처리 중이라 `2001` 을 믿을 수 없다): 처리됨(`0000`) → `COMPLETED`, 원거래 없음(`2001`) → `FAILED`(은행 코드 기록), 모름 → `inquiry_attempts + 1`. 10번째에도 모르면 더 묻지 않고 경고를 남긴다 (일마감 대사 대상, P5).
 4. **결과조회는 묻기만 한다.** 정리 작업은 `BankInquiryPort` 만 쓰고 `BankTransferPort` 를 쓰지 않는다. 확실한 답(`0000` · `2001`) 외에는 모두 "모름"이다 (조회 전문 거절, 모르는 처리결과, 시간 초과, 연결 없음).
 5. **컨슈머와의 경합**: 모든 상태 변경은 조건부 UPDATE 다. 정리 작업이 먼저 `UNKNOWN` 으로 바꾼 뒤 컨슈머가 은행의 **확정 결과(완료 · 거절)** 를 받으면 `UNKNOWN → COMPLETED/FAILED` 로 기록한다 (직접 받은 답이 조회보다 정확하다). 결과 모름 · 미전송은 정리 작업에 맡기고 손대지 않는다. 이미 다른 확정(완료 ↔ 거절)으로 끝난 건에 반대 결과가 오면 `CONFLICT` 로 알리고 경고 로그만 남긴다 — 던지지 않는다 (재시도로 풀리지 않고, 던지면 같은 파티션이 막힌다).
 6. **스케줄러 스레드 2개**(`spring.task.scheduling.pool.size: 2`): 기본 1개면 0.5초 발행기와 10초 정리 작업이 서로 막는다.
@@ -24,12 +24,14 @@
   - 처리 후 무응답 → `UNKNOWN` → 결과조회로 `COMPLETED`, 은행 입금은 1건 (`ReconcileFlowTest`)
   - 미처리 무응답 → 결과조회 `2001` → `FAILED` (`ReconcileFlowTest`)
   - 30초 넘게 멈춘 `SENDING` → `UNKNOWN` → 확정 (`ReconcileFlowTest`, `TransferReconcilerTest`)
+  - 30초 유예: 방금 `UNKNOWN` 이 된 건은 묻지 않고 유예가 지난 뒤에 묻는다 (`TransferReconcilerTest`, `ReconcileFlowTest`, `JpaTransferStoreTest`)
   - 조회도 모르면 횟수만 늘리고 한도에서 멈추고 알림, `RECEIVED` 는 `sendingAt` 이 남아도 건드리지 않음 (`TransferReconcilerTest`)
   - 컨슈머와 경합: 먼저 `UNKNOWN` 이 돼도 은행의 확정 결과로 기록, 결과도 모르면 그대로 둠, 반대 결과면 `CONFLICT` (`TransferProcessorTest`)
   - 결과조회 어댑터는 확실한 답만 확정하고 예외를 던지지 않음 (`BankInquiryAdapterTest`)
   - 이체 전문 72바이트, 결과조회 전문 왕복 (`BankMessageSerializerTest`)
 - 한계:
-  - 원거래가 은행 안에서 아직 처리 중일 때 조회하면 `2001` 이 올 수 있다. 30초 유예로 줄이고, 최종 안전망은 P5 일마감 대사다.
+  - 원거래가 은행 안에서 아직 처리 중일 때 조회하면 `2001` 이 올 수 있다. `sending_at` 30초 유예(정리 작업이 바꾼 `UNKNOWN` 과 컨슈머가 적은 `UNKNOWN` 모두)로 줄인다. 은행이 30초보다 더 늦게 처리하면 `2001` → `FAILED` 로 확정된 뒤 늦은 이체 응답은 로그(`late or unknown response`)만 남는다. 최종 안전망은 P5 일마감 대사다.
+  - 그 대가로 `COMPLETED` / `FAILED` 는 접수로부터 대략 30~40초 뒤에 확정된다 (`UNKNOWN` 자체는 몇 초 만에 보인다).
   - 결과조회도 계속 모르면 `UNKNOWN` 으로 남는다 (10회 후 경고, 대사로 넘긴다).
   - 인스턴스가 여러 대면 같은 `UNKNOWN` 을 두 정리 작업이 동시에 물을 수 있다. 상태 변경은 조건부라 결과는 같고, 조회만 중복된다.
   - 게이트웨이 연결이 없을 때의 조회도 시도 1회로 센다 → 긴 은행 점검이면 한도에 닿아 대사로 넘어간다 (P3-3b 에서 정리, [HANDOVER](../../HANDOVER.md)).

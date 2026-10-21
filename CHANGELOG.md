@@ -14,6 +14,7 @@
 - 전문 규격 v0.2: 이체 개별부에 이용기관 거래번호 20 추가(52 → 72바이트), 신규 업무 `INQ` 결과조회(요청 거래번호 20, 응답 거래번호 20 + 처리결과 4: `0000` 처리됨 / `2001` 원거래 없음) ([protocol.md](docs/protocol.md)).
 - `BankInquiryPort` · `BankInquiryAdapter`: 결과조회는 확실한 답(`0000` · `2001`)만 확정하고 나머지(조회 거절 · 시간 초과 · 연결 없음)는 모름으로 둔다. 예외를 던지지 않는다.
 - 정리 작업 `TransferReconciler`(10초 고정 지연, 한 번에 100건): 30초 넘게 `SENDING` 인 건 → `UNKNOWN`, `UNKNOWN` → 결과조회로 `COMPLETED` / `FAILED`, 10번 모르면 멈추고 경고(일마감 대사 대상). 대상은 `status` 로 고른다. 설정은 `transfer.reconcile.*`.
+- 결과조회는 `sending_at` 30초 유예 뒤에 한다(컨슈머가 3초 타임아웃으로 적은 `UNKNOWN` 도 포함): 느린 은행의 `2001` 로 처리 중인 건이 `FAILED` 가 되지 않게. 결과조회 응답의 거래번호가 물은 것과 다르면 모름으로 둔다.
 - `TransferStore.findSendingBefore` · `findUnknownForInquiry` · `recordInquiryAttempt`(조건부, `UNKNOWN` 에서만 증가).
 - 모의 은행: 이체의 거래번호를 기억해 결과조회에 답하고, `9990000000002` 는 처리하고 응답만 보내지 않는다(1원 이체는 정상 응답). 테스트에서 `9990000000001` 은 처리도 응답도 하지 않는다.
 - ADR-0006 (제안), `http/transfer.http` 의 "손 확인: 처리 후 무응답" 절.

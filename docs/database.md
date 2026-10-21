@@ -117,7 +117,7 @@ erDiagram
 인덱스:
 - `uk_transfer_idempotency (idempotency_key)` — 중복 접수 차단 (동시 요청의 마지막 방어선)
 - `uk_transfer_reference (reference)` — 거래번호 충돌 차단, 결과조회 응답 매핑
-- `idx_transfer_status (status, sending_at)` — 정리 작업의 "30초 넘은 SENDING", "UNKNOWN 목록" 조회
+- `idx_transfer_status (status, sending_at)` — 정리 작업의 "30초 넘은 SENDING", "30초 유예가 지난 UNKNOWN 목록" 조회
 
 ### 4-3. `outbox_event` — 트랜잭셔널 아웃박스 (P3-1 생성, P3-2 부터 발행)
 | 컬럼 | 타입 | NULL | 설명 |
@@ -180,6 +180,10 @@ SELECT status, COUNT(*) FROM transfer GROUP BY status;
 -- 30초 넘게 SENDING 에 멈춘 건 (정리 작업 대상)
 SELECT id, reference, sending_at FROM transfer
  WHERE status = 'SENDING' AND sending_at < NOW(6) - INTERVAL 30 SECOND;
+
+-- 결과조회 대상 (30초 유예가 지난 UNKNOWN)
+SELECT id, reference, inquiry_attempts FROM transfer
+ WHERE status = 'UNKNOWN' AND inquiry_attempts < 10 AND sending_at < NOW(6) - INTERVAL 30 SECOND ORDER BY updated_at;
 
 -- 결과조회 한도에 닿은 UNKNOWN (일마감 대사 대상)
 SELECT id, reference, inquiry_attempts FROM transfer WHERE status = 'UNKNOWN' AND inquiry_attempts >= 10;

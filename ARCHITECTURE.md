@@ -184,7 +184,7 @@ sequenceDiagram
     S->>R: reconcile()
     R->>D: findSendingBefore(now - 30초) — status = SENDING
     R->>D: transition(SENDING → UNKNOWN) 조건부
-    R->>D: findUnknownForInquiry(inquiry_attempts < 10)
+    R->>D: findUnknownForInquiry(inquiry_attempts < 10, sending_at < now - 30초)
     loop UNKNOWN 마다
         R->>A: inquire(reference)
         A->>B: INQ 결과조회 (이용기관 거래번호 20)
