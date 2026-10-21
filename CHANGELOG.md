@@ -17,7 +17,7 @@
 - 결과조회는 `sending_at` 30초 유예 뒤에 한다(컨슈머가 3초 타임아웃으로 적은 `UNKNOWN` 도 포함): 느린 은행의 `2001` 로 처리 중인 건이 `FAILED` 가 되지 않게. 결과조회 응답의 거래번호가 물은 것과 다르면 모름으로 둔다.
 - `TransferStore.findSendingBefore` · `findUnknownForInquiry` · `recordInquiryAttempt`(조건부, `UNKNOWN` 에서만 증가).
 - 모의 은행: 이체의 거래번호를 기억해 결과조회에 답하고, `9990000000002` 는 처리하고 응답만 보내지 않는다(1원 이체는 정상 응답). 테스트에서 `9990000000001` 은 처리도 응답도 하지 않는다.
-- ADR-0006 (제안), `http/transfer.http` 의 "손 확인: 처리 후 무응답" 절.
+- ADR-0006, `http/transfer.http` 의 "손 확인: 처리 후 무응답" 절.
 ### Changed
 - 이체 전문 72바이트: 출금이체는 저장된 `transfer.reference`, 1원인증은 API 어댑터가 만든 `V` 거래번호를 싣는다(저장 안 함).
 - 컨슈머 경합: 정리 작업이 먼저 `UNKNOWN` 으로 바꿨어도 은행의 확정 결과(완료 · 거절)를 받으면 `UNKNOWN → COMPLETED/FAILED` 로 기록한다. 이미 반대 결과로 확정돼 있으면 `CONFLICT` 경고를 남기고 넘어간다(던지지 않는다).
