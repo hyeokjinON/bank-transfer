@@ -1,6 +1,6 @@
 # ADR-0005 아웃박스는 적어도 한 번 발행하고, 중복은 컨슈머의 상태 조건부 UPDATE 로 막는다
 
-- 상태: 제안 (2026-10-20) — PR 리뷰 후 채택
+- 상태: 채택 (2026-10-21, PR #5 머지)
 - 단계: P3-2 · 설계: [P3 설계 문서](../superpowers/specs/2026-10-19-p3-transfer-design.md) §5 · [ADR-0004](0004-idempotency-key-and-transactional-outbox.md) · [database.md](../database.md)
 
 ## 맥락
