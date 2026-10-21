@@ -1,0 +1,27 @@
+$kind: http-request
+name: 3-1 무응답 계좌 1원인증 요청 (9990000000002)
+method: POST
+url: '{{baseUrl}}/api/v1/account-verifications'
+order: 1000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "9990000000002",
+      "holderName": "무응답"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // 이 계좌는 이체를 처리하고 응답만 하지 않는다. 1원 이체는 정상 응답해서 인증은 된다.
+      pm.test("201 SENT", () => {
+        pm.response.to.have.status(201);
+        pm.expect(pm.response.json().status).to.eql("SENT");
+      });
+      pm.collectionVariables.set("silentVerificationId", pm.response.json().id);
+      console.log("모의 은행 콘솔의 [통장] 9990000000002 입금 1원 적요 BT#### 의 숫자 4자리를 컬렉션 변수 code 에 넣으세요");

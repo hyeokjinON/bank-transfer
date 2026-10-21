@@ -1,0 +1,15 @@
+$kind: http-request
+name: 3-4 3초쯤 뒤 조회 → UNKNOWN (이미 COMPLETED 여도 정상)
+method: GET
+url: '{{baseUrl}}/api/v1/transfers/{{silentTransferId}}'
+order: 4000
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // 은행은 입금을 처리했지만 응답이 없어 결과를 모른다 → UNKNOWN. 다시 보내지 않는다.
+      // 정리 작업이 10초마다 돌아서, 늦게 Send 하면 이미 COMPLETED 일 수 있다.
+      pm.test("UNKNOWN 또는 (정리 작업이 먼저 돌았으면) COMPLETED", () => {
+        pm.response.to.have.status(200);
+        pm.expect(["UNKNOWN", "COMPLETED"]).to.include(pm.response.json().status);
+      });
