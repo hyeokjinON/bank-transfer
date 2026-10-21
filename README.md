@@ -163,7 +163,7 @@ curl -X POST localhost:8080/api/v1/account-verifications/{id}/confirm -H 'Conten
 - [ ] **P3** 입출금 비동기 처리: Kafka + Transactional Outbox + 멱등키 + DLT
   - [x] P3-1 접수: Idempotency-Key · 아웃박스 · 1원인증 MySQL 이전 → [ADR-0004](docs/adr/0004-idempotency-key-and-transactional-outbox.md)
   - [x] P3-2 처리: 폴링 퍼블리셔 → Kafka → 컨슈머 → 은행 → [ADR-0005](docs/adr/0005-kafka-delivery-and-consumer-idempotency.md)
-  - [x] P3-3a 결과조회: 규격 v0.2 · 정리 작업 (PR #7 리뷰 중) → [ADR-0006](docs/adr/0006-inquire-instead-of-resend.md)
+  - [x] P3-3a 결과조회: 규격 v0.2 · 정리 작업 (PR #7) → [ADR-0006](docs/adr/0006-inquire-instead-of-resend.md)
   - [ ] P3-3b 재시도: 재시도 토픽 · DLT · 오래된 `RECEIVED` 재발행
 - [ ] **P4** 잔액 동시성: 비관적 락 vs 낙관적 락 vs Redis 분산락, k6 부하테스트
 - [ ] **P5** Spring Batch 일마감 대사 + 텔레그램 알림

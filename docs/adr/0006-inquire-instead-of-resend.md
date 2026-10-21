@@ -1,6 +1,6 @@
 # ADR-0006 결과를 모르는 이체는 다시 보내지 않고 이용기관 거래번호로 은행에 물어서 확정한다
 
-- 상태: 제안 (2026-10-21)
+- 상태: 채택 (2026-10-21, PR #7 머지)
 - 단계: P3-3a · 설계: [P3 설계 문서](../superpowers/specs/2026-10-19-p3-transfer-design.md) §6 · [ADR-0005](0005-kafka-delivery-and-consumer-idempotency.md) · [protocol.md](../protocol.md) v0.2
 
 ## 맥락

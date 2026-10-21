@@ -10,13 +10,13 @@
 | P3-0 로컬 인프라 | ✅ 완료 (2026-10-16, PR #1) | 로컬(Windows 11 + Docker Desktop)·CI 모두 `verify.sh` 통과 |
 | P3-1 접수 | ✅ 완료 (2026-10-20, [#3](https://github.com/hyeokjinON/bank-transfer/pull/3)) | ADR-0004 채택, 테스트 73개. 손 확인: 로컬 API · Postman 컬렉션으로 접수 흐름, DB 에서 아웃박스 미발행 · KST 저장 확인 |
 | P3-2 처리 | ✅ 완료 (2026-10-21, [#5](https://github.com/hyeokjinON/bank-transfer/pull/5)) | ADR-0005 채택, 테스트 107개. CI `build` · `infra-smoke` 통과. 손 확인 절차: Postman 2-1 → 2-9 `COMPLETED`, kafka-ui 로 메시지 · 컨슈머 Lag (OPERATION.md Kafka 절) |
-| P3-3a 결과조회 · 정리 작업 | 🟡 구현 완료 · [PR #7](https://github.com/hyeokjinON/bank-transfer/pull/7) 리뷰 대기 (2026-10-21) | ADR-0006 **제안** (머지 뒤 채택으로), 테스트 135개. 손 확인 대기: `http/transfer.http` "손 확인: 처리 후 무응답" 절 (7-1 → 7-5, 몇 초 뒤 `UNKNOWN` → 접수 30~40초 뒤 `COMPLETED`) |
+| P3-3a 결과조회 · 정리 작업 | ✅ 완료 (2026-10-21, [#7](https://github.com/hyeokjinON/bank-transfer/pull/7)) | ADR-0006 채택, 테스트 135개. CI `build` · `infra-smoke` 통과. 손 확인: Postman 3-1 → 3-5 로 무응답 계좌 출금 5건 모두 `COMPLETED 0000`, `sending_at` 뒤 32~38초에 확정(30초 유예 + 주기), `inquiry_attempts` 0 |
 | P3-3b 재시도 | ⬜ 다음 | 재시도 토픽 · DLT · 오래된 `RECEIVED` 재발행. 설계 문서 §6, 아래 "P3-3b 로 넘기는 것" |
 | P4 ~ P9 | ⬜ 예정 | README 로드맵 |
 
 ## 2. P3 설계 (합의된 것)
 설계 섹션 1~5 모두 승인(2026-10-19) → **[설계 문서](docs/superpowers/specs/2026-10-19-p3-transfer-design.md)** 로 정리.
-P3-1 (PR #3) · P3-2 (PR #5) 는 머지됐다. P3-3a (결과조회 · 정리 작업, PR #7) 는 구현을 마치고 리뷰 중이다. 표 중 재시도 토픽 · DLT 는 P3-3b 에서 구현한다.
+P3-1 (PR #3) · P3-2 (PR #5) · P3-3a (PR #7) 는 머지됐다. 표 중 재시도 토픽 · DLT · 오래된 `RECEIVED` 재발행은 P3-3b 에서 구현한다.
 
 | 결정 | 내용 |
 |---|---|
@@ -34,10 +34,8 @@ P3-1 (PR #3) · P3-2 (PR #5) 는 머지됐다. P3-3a (결과조회 · 정리 작
 | 테스트 | 도메인 단위(가짜 포트) / Testcontainers MySQL 어댑터 / MySQL+Kafka+모의 은행 흐름 통합 + Awaitility. 단계별 '증명 테스트' 목록은 설계 문서 §7 |
 
 ## 3. 다음 할 일 (순서대로)
-1. PR #7 (P3-3a) 리뷰 · 머지. 머지하면 ADR-0006 상태를 제안 → 채택(날짜 · PR)으로 고치고 이 문서와 CHANGELOG 를 갱신한다.
-2. 손 확인: `http/transfer.http` "손 확인: 처리 후 무응답" 절 (7-1 → 7-5). 모의 은행 콘솔의 입금이 1건뿐인지도 본다.
-3. velog `#4` (P3-2 처리: 적어도 한 번 발행 + 컨슈머 멱등, 결과 모름은 재전송 금지, 발행기가 접수를 막던 간격 잠금) 와 `#5` (P3-3a: 모르면 묻는다 — 거래번호, 정리 작업, 경합).
-4. P3-3b (재시도 토픽 · DLT · 오래된 `RECEIVED` 재발행) 구현 계획. 아래 "P3-3b 로 넘기는 것"과 4번 한계를 계획의 제약에 넣는다.
+1. velog `#5` (P3-3a: 모르면 묻는다 — 거래번호, 정리 작업, 경합, 최종 리뷰에서 잡은 "유예 없는 결과조회" 버그). `#2` ~ `#4` 는 비공개 초안으로 올라가 있다.
+2. P3-3b (재시도 토픽 · DLT · 오래된 `RECEIVED` 재발행) 구현 계획. 아래 "P3-3b 로 넘기는 것"과 4번 한계를 계획의 제약에 넣는다.
 
 ### P3-3b 로 넘기는 것 (P3-2 · P3-3a 리뷰에서 나온 항목)
 - 발행은 됐는데 오래 `RECEIVED` 로 남은 행을 훑는 스위퍼: 횟수를 제한해 다시 발행하거나 알린다 (설계 문서 §6).
