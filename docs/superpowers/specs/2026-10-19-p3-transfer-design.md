@@ -255,6 +255,7 @@ TransferConsumer (group transfer-processor, AckMode.MANUAL_IMMEDIATE)
 - [P3-2] 프로듀서 `acks=all` · `enable.idempotence=true` 적용 확인
 - [P3-3a] 처리 후 무응답 → `UNKNOWN` → 조회 → `COMPLETED` (입금 1건); 미처리 무응답 → `FAILED`
 - [P3-3a] 멈춘 `SENDING` → 정리 작업 → 확정; 한도(10회) 후 멈춤; 컨슈머와 경합
+- [P3-3a] 컨슈머가 방금 적은 `UNKNOWN` 은 `sending_at` 30초 유예 전에는 묻지 않는다 (느린 은행의 `2001` 로 잘못 `FAILED` 확정 방지)
 - [P3-3b] 은행 꺼짐 → 재시도 중 기동 → `COMPLETED`
 - [P3-3b] 깨진 메시지 → DLT
 

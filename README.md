@@ -25,7 +25,7 @@
 - **모의 은행 FEP(Netty 서버)**: 같은 전문 규격으로 응답, 무응답 계좌로 타임아웃 재현, 처리 후 무응답 계좌(`9990000000002`)와 결과조회 응답
 - **출금이체 접수 API (P3-1)**: `Idempotency-Key` 로 멱등 접수(202), 1원인증 계좌만 허용, 이체와 처리 신호(아웃박스)를 한 트랜잭션에 저장. MySQL(Flyway) 사용
 - **출금이체 처리 (P3-2)**: 아웃박스 → Kafka(`transfer.requested`) → 컨슈머 → 은행 → `COMPLETED` / `FAILED` / `UNKNOWN`. 발행은 적어도 한 번, 중복 메시지는 상태 조건부 UPDATE 로 막고, 결과를 모르면 다시 보내지 않음 ([ADR-0005](docs/adr/0005-kafka-delivery-and-consumer-idempotency.md))
-- **결과조회와 정리 작업 (P3-3a)**: 응답을 못 받은 이체(`UNKNOWN`)와 30초 넘게 멈춘 `SENDING` 을 다시 보내지 않고, 이용기관 거래번호로 은행에 결과조회(`INQ`, 전문 규격 v0.2)해 10초마다 `COMPLETED` / `FAILED` 로 확정. 10번 물어도 모르면 멈추고 경고(일마감 대사 대상) ([ADR-0006](docs/adr/0006-inquire-instead-of-resend.md))
+- **결과조회와 정리 작업 (P3-3a)**: 응답을 못 받은 이체(`UNKNOWN`)와 30초 넘게 멈춘 `SENDING` 을 다시 보내지 않고, 이용기관 거래번호로 은행에 결과조회(`INQ`, 전문 규격 v0.2)해 보낸 지 30초 유예 뒤 10초마다 `COMPLETED` / `FAILED` 로 확정. 10번 물어도 모르면 멈추고 경고(일마감 대사 대상) ([ADR-0006](docs/adr/0006-inquire-instead-of-resend.md))
 - **테스트 135개**: 전문 직렬화, 쪼개진 TCP 패킷, 동시 요청 50건 매칭, 타임아웃, 재접속, API 통합(HTTP → TCP), MySQL · Kafka 통합(Testcontainers: 같은 키 동시 10건, 아웃박스 원자성, 발행기 2개 동시 발행 · 접수가 발행기에 막히지 않음, 같은 메시지 두 번 → 은행 1건, 처리 후 무응답 → 결과조회로 확정 · 입금 1건)
 
 ## 구조

@@ -63,6 +63,6 @@ transfer:
   reconcile:
     enabled: true          # 정리 작업 스케줄 (테스트는 끄고 직접 부른다)
     interval-ms: 10000
-    sending-timeout: 30s   # 이보다 오래 SENDING 이면 UNKNOWN 으로 보고 결과조회
+    sending-timeout: 30s   # 이보다 오래 SENDING 이면 UNKNOWN 으로 본다. UNKNOWN 도 sending_at 이 이만큼 지나야 결과조회 (유예)
     max-inquiries: 10      # 결과조회도 계속 모르면 멈추고 경고 → 일마감 대사
     batch-size: 100

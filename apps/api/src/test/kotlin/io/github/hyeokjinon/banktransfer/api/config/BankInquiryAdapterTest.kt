@@ -55,13 +55,15 @@ class BankInquiryAdapterTest {
     fun `응답의 거래번호가 물은 것과 다르면 2001 이어도 Unknown - 다른 거래의 답으로 확정하지 않는다`() {
         // 모의 은행은 늘 물은 번호를 그대로 돌려주므로, 어긋난 응답은 직접 만들어 분류만 확인한다
         val header = Header(MessageClass.RESPONSE, BizType.INQUIRY, 1, LocalDateTime.of(2026, 10, 21, 9, 0, 0))
-        val adapter = BankInquiryAdapter(BankGatewayClient(BankGatewayConfig(host = "localhost", port = 1)))
+        BankGatewayClient(BankGatewayConfig(host = "localhost", port = 1)).use { client ->
+            val adapter = BankInquiryAdapter(client)
 
-        val mismatched = InquiryResponse(header, "T2610219999999999999", ResponseCodes.ORIGINAL_NOT_FOUND)
-        assertEquals(InquiryOutcome.Unknown, adapter.classify("T2610210000000000013", mismatched))
+            val mismatched = InquiryResponse(header, "T2610219999999999999", ResponseCodes.ORIGINAL_NOT_FOUND)
+            assertEquals(InquiryOutcome.Unknown, adapter.classify("T2610210000000000013", mismatched))
 
-        val same = InquiryResponse(header, "T2610210000000000013 ", ResponseCodes.ORIGINAL_NOT_FOUND)   // 뒤 공백은 무시
-        assertEquals(InquiryOutcome.NotProcessed("2001"), adapter.classify("T2610210000000000013", same))
+            val same = InquiryResponse(header, "T2610210000000000013 ", ResponseCodes.ORIGINAL_NOT_FOUND)   // 뒤 공백은 무시
+            assertEquals(InquiryOutcome.NotProcessed("2001"), adapter.classify("T2610210000000000013", same))
+        }
     }
 
     @Test

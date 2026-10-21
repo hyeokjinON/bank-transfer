@@ -37,11 +37,12 @@ class ReconcileFlowTest : ApiIntegrationTest() {
     @Autowired private lateinit var reconciler: TransferReconciler
 
     /**
-     * 시계를 60초 앞으로 돌린 정리 작업. 컨슈머가 방금 적은 UNKNOWN 은 30초 유예 안쪽이라 진짜 시계로는 묻지 않으므로,
+     * 시계를 31초 앞으로 돌린 정리 작업. 컨슈머가 방금 적은 UNKNOWN 은 30초 유예 안쪽이라 진짜 시계로는 묻지 않으므로,
      * 30초를 실제로 기다리는 대신 시계만 앞당겨 "유예가 지난 뒤" 를 만든다. 나머지는 [reconciler] 와 같은 구성이다.
+     * 유예를 겨우 넘기는 만큼만 앞당긴다: 공유 DB 에 다른 테스트 클래스가 남긴 진행 중 SENDING 까지 휩쓸지 않게.
      */
     private val reconcilerAfterGrace by lazy {
-        TransferReconciler(store, BankInquiryAdapter(gateway), Clock.offset(Clock.systemUTC(), Duration.ofSeconds(60)))
+        TransferReconciler(store, BankInquiryAdapter(gateway), Clock.offset(Clock.systemUTC(), Duration.ofSeconds(31)))
     }
 
     private val mapType = object : ParameterizedTypeReference<Map<String, Any?>>() {}

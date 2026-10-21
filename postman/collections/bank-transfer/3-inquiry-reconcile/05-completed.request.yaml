@@ -1,5 +1,5 @@
 $kind: http-request
-name: 3-5 접수 30~40초 뒤 조회 → COMPLETED 0000 (30초 유예 뒤 결과조회로 확정)
+name: 3-5 접수 40초쯤 뒤 조회 → COMPLETED 0000 (30초 유예 뒤 결과조회로 확정)
 method: GET
 url: '{{baseUrl}}/api/v1/transfers/{{silentTransferId}}'
 order: 5000

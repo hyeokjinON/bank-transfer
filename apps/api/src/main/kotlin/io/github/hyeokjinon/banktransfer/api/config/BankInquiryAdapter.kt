@@ -26,16 +26,17 @@ class BankInquiryAdapter(private val client: BankGatewayClient) : BankInquiryPor
         }
 
     /**
-     * 응답이 우리가 물은 거래번호에 대한 것인지 먼저 본다. 다른 거래의 "처리 안 됨(2001)" 을 이 건의 FAILED 로 확정하면
+     * 응답이 우리가 물은 거래번호에 대한 것인지 본다. 다른 거래의 "처리 안 됨(2001)" 을 이 건의 FAILED 로 확정하면
      * 돈이 나간 건을 실패로 적게 되므로, 거래번호가 다르면 모름으로 두고 다음 주기에 다시 묻는다.
+     * 조회 전문 자체가 거절되면 거래번호 칸이 비어 올 수 있으므로 거절 여부를 먼저 본다 (로그가 원인을 바로 말하게).
      */
     internal fun classify(reference: String, response: InquiryResponse): InquiryOutcome {
-        val echoed = response.reference.trim()
-        if (echoed != reference) {
-            return unknown(reference, "reference mismatch: echoed=$echoed")
+        if (!response.header.isOk) {
+            return unknown(reference, "inquiry rejected: ${response.header.responseCode}")
         }
+        val echoed = response.reference.trim()
         return when {
-            !response.header.isOk -> unknown(reference, "inquiry rejected: ${response.header.responseCode}")
+            echoed != reference -> unknown(reference, "reference mismatch: echoed=$echoed")
             response.result == ResponseCodes.OK -> InquiryOutcome.Processed
             response.result == ResponseCodes.ORIGINAL_NOT_FOUND -> InquiryOutcome.NotProcessed(response.result)
             else -> unknown(reference, "unexpected result: ${response.result}")
