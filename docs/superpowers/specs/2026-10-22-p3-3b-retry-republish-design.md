@@ -19,7 +19,7 @@
 | 결정 | 내용 | 이유 |
 |---|---|---|
 | 재시도 방식 | `@RetryableTopic` 논블로킹 재시도. 기존 블로킹 `DefaultErrorHandler` 빈은 지운다 | 블로킹 재시도는 같은 파티션의 뒤 메시지를 막는다 |
-| 재시도 간격 | **5s → 30s → 60s** (시도 4회 = 원래 1 + 재시도 3), 합계 약 95초 | 첫 간격은 게이트웨이 재접속 주기(3초)보다 길게. 점점 늘려 복구 직후 몰림을 줄인다 |
+| 재시도 간격 | **5s → 30s → 60s** (시도 4회 = 원래 1 + 재시도 3), 합계 약 95초 | 첫 간격 5초 안에 게이트웨이 재접속이 두 번 시도된다(1초 → 2초 간격, 지수 백오프 최대 30초). 점점 늘려 복구 직후 몰림을 줄인다 |
 | 재시도하지 않는 것 | key 가 UUID 가 아닌 메시지 → 바로 DLT | 몇 번 해도 같은 결과 (독 메시지) |
 | DLT | 이체 id · 예외 · 원래 토픽 · 오프셋을 경고 로그로. 이체는 `RECEIVED` 그대로 | 정리 작업의 재발행이 이어받는다. 알림 채널은 P5 |
 | 재발행 위치 | **정리 작업 단계 ⓪** 이 아웃박스에 이벤트를 넣는다 (A안) | 발행 경로를 아웃박스 하나로 유지 → 이중 쓰기 없음 |
@@ -127,13 +127,13 @@ transfer:
 | `TransferReconciler` | 단계 ⓪, `Unavailable` 처리, `republishAfter` · `maxRepublish`, `ReconcileResult(+republished, +abandoned)` |
 | `apps/api` `JpaTransferStore` | 위 두 메서드 (조건부 UPDATE + 아웃박스 INSERT 한 트랜잭션) |
 | `BankInquiryAdapter` | 연결 없음 → `Unavailable` |
-| `TransferRequestedListener` | `@RetryableTopic` · `@DltHandler`, 그룹 · 동시성 애너테이션에서 제거 |
+| `TransferRequestedListener` | `@RetryableTopic` · `@DltHandler`. 그룹은 `groupId = "${spring.kafka.consumer.group-id}"` 로 yml 값을 참조 (비우면 재시도 · DLT 컨테이너가 모두 같은 그룹이 된다), 동시성은 애너테이션에서 제거 |
 | `MessagingConfiguration` | `kafkaErrorHandler` 제거, 재시도 설정 프로퍼티 |
 | `application.yml` | `transfer.retry.*`, `reconcile.republish-after` · `max-republish`, `listener.concurrency: 3` |
 
 ## 9. 테스트
 
-시간 줄이기: 재시도 간격은 설정으로 0.1초 단위, 재발행 대기 5분은 시계를 앞당긴 정리 작업으로 대신한다 (P3-3a 와 같은 방법). "은행 연결 없음"은 흐름 테스트에서 모의 은행을 내렸다가 같은 포트로 다시 올려 만든다 (게이트웨이 3초 재접속). `finally` 에서 반드시 복구한다.
+시간 줄이기: 재시도 간격은 설정으로 0.5s · 1s · 2s ("뒤 메시지가 막히지 않음"을 안정적으로 보려면 간격이 조금 있어야 한다). 재발행 대기 5분은 `republishAfter = 1ms` 인 정리 작업을 테스트에서 직접 만들어 대신한다 — 시계를 앞당기면 `republished_at` 이 미래 시각으로 적혀 2 · 3회차의 `sending_at > republished_at` 비교가 깨지기 때문이다. "은행 연결 없음"은 모의 은행에 `pause()` / `resume()`(같은 포트, 기존 연결도 끊음)을 추가해 만든다. 게이트웨이는 1초부터 두 배씩 최대 30초 간격으로 재접속하므로 복구 대기는 넉넉히 잡는다. `finally` 에서 반드시 `resume()` 한다.
 
 | 층 | 증명 테스트 |
 |---|---|

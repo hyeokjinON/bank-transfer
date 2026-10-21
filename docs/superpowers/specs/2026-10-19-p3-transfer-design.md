@@ -208,7 +208,7 @@ TransferConsumer (group transfer-processor, AckMode.MANUAL_IMMEDIATE)
 | 그 밖의 예외 (DB 등) | 상황별 | 재시도 토픽 → 소진 시 DLT | 유지 + 경고 로그 |
 | 역직렬화 실패 | – | 재시도 없이 DLT | – |
 
-- 재시도: `@RetryableTopic(attempts = 4, backoff 5s → 30s → 60s)` → `transfer.requested-retry-*` → `transfer.requested-dlt`. (2026-10-22: 첫 간격을 게이트웨이 재접속 3초보다 길게 1s → 5s, 2차 10s → 30s. 자세한 설계는 [P3-3b 설계](2026-10-22-p3-3b-retry-republish-design.md)) 원래 토픽을 막지 않는 대신 재시도 메시지는 순서가 바뀐다 (이체당 메시지 1개라 무해).
+- 재시도: `@RetryableTopic(attempts = 4, backoff 5s → 30s → 60s)` → `transfer.requested-retry-*` → `transfer.requested-dlt`. (2026-10-22: 첫 간격을 1s → 5s (게이트웨이 재접속 1초 · 2초 시도가 그 안에 들어간다), 2차 10s → 30s. 자세한 설계는 [P3-3b 설계](2026-10-22-p3-3b-retry-republish-design.md)) 원래 토픽을 막지 않는 대신 재시도 메시지는 순서가 바뀐다 (이체당 메시지 1개라 무해).
 - DLT 핸들러: 이체 id · 예외 · 원본 오프셋을 경고 로그로 남긴다. 알림 채널은 P5.
 
 **규격 v0.2** (`docs/protocol.md` 갱신)
