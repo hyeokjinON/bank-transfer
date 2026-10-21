@@ -18,7 +18,7 @@ class TransferStatusTest {
     @Test
     fun `설계 문서 3장의 전이만 허용한다`() {
         val allowed = setOf(
-            RECEIVED to SENDING,
+            RECEIVED to SENDING, RECEIVED to FAILED,   // RECEIVED → FAILED: 재발행 한도 뒤 포기 (P3-3b, E001)
             SENDING to RECEIVED, SENDING to COMPLETED, SENDING to FAILED, SENDING to UNKNOWN,
             UNKNOWN to COMPLETED, UNKNOWN to FAILED,
         )
