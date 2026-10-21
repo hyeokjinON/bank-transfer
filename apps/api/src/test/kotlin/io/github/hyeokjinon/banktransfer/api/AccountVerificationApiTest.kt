@@ -57,11 +57,12 @@ class AccountVerificationApiTest : ApiIntegrationTest() {
     }
 
     @Test
-    fun `형식이 틀리면 400`() {
-        val (status, _) = post(
+    fun `형식이 틀리면 400 INVALID_REQUEST`() {
+        val (status, body) = post(
             "/api/v1/account-verifications",
             mapOf("bankCode" to "9", "accountNo" to "abc", "holderName" to ""),
         )
         assertEquals(400, status)
+        assertEquals("INVALID_REQUEST", body["code"])
     }
 }

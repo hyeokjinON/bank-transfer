@@ -19,7 +19,10 @@ Idempotency-Key: {{$random.uuid}}
     client.log("transferId = " + response.body.id + " status = " + response.status);
 %}
 
-### 2) 조회 → 200 RECEIVED (은행 처리는 P3-2 부터)
+### 2) 조회 → 200 (접수 직후면 RECEIVED)
+GET http://localhost:8080/api/v1/transfers/{{transferId}}
+
+### 2-1) 처리 결과 → 몇 초 안에 COMPLETED (P3-2 부터: 아웃박스 → Kafka → 은행)
 GET http://localhost:8080/api/v1/transfers/{{transferId}}
 
 ### 3) 같은 키로 두 번 → 처음 202, 두 번째 200 같은 id (키를 고정해서 두 번 실행해 본다)

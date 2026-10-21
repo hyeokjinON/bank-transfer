@@ -24,7 +24,8 @@
 - **은행 게이트웨이(Netty 클라이언트)**: 길이헤더 프레이밍, 폴링 전문으로 회선 확인, 지수 백오프 재접속, 전문번호 기반 응답 매칭
 - **모의 은행 FEP(Netty 서버)**: 같은 전문 규격으로 응답, 무응답 계좌로 타임아웃 재현
 - **출금이체 접수 API (P3-1)**: `Idempotency-Key` 로 멱등 접수(202), 1원인증 계좌만 허용, 이체와 처리 신호(아웃박스)를 한 트랜잭션에 저장. MySQL(Flyway) 사용
-- **테스트 73개**: 전문 직렬화, 쪼개진 TCP 패킷, 동시 요청 50건 매칭, 타임아웃, 재접속, API 통합(HTTP → TCP), MySQL 통합(Testcontainers: 같은 키 동시 10건, 아웃박스 원자성)
+- **출금이체 처리 (P3-2)**: 아웃박스 → Kafka(`transfer.requested`) → 컨슈머 → 은행 → `COMPLETED` / `FAILED` / `UNKNOWN`. 발행은 적어도 한 번, 중복 메시지는 상태 조건부 UPDATE 로 막고, 결과를 모르면 다시 보내지 않음 ([ADR-0005](docs/adr/0005-kafka-delivery-and-consumer-idempotency.md))
+- **테스트 107개**: 전문 직렬화, 쪼개진 TCP 패킷, 동시 요청 50건 매칭, 타임아웃, 재접속, API 통합(HTTP → TCP), MySQL · Kafka 통합(Testcontainers: 같은 키 동시 10건, 아웃박스 원자성, 발행기 2개 동시 발행 · 접수가 발행기에 막히지 않음, 같은 메시지 두 번 → 은행 1건)
 
 ## 구조
 
@@ -81,13 +82,13 @@ sequenceDiagram
 ## 실행
 
 ### IntelliJ
-> P3-1 부터 API 는 MySQL 이 필요하다. 먼저 `docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait`
+> API 는 MySQL 과 Kafka 가 필요하다 (P3-2 부터 Kafka). 먼저 `docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait`
 
 1. **JDK 21 지정**: `Settings > Build, Execution, Deployment > Build Tools > Gradle > Gradle JVM` 을 21 로, `File > Project Structure > SDK` 도 21 로.
 2. 오른쪽 위 실행 목록에 `.run/` 의 구성이 자동으로 뜹니다.
    - `0. Mock Bank + API` : 모의 은행(9090)과 API(8080)를 한 번에 실행
    - `1. Mock Bank (9090)` / `2. API (8080)` : 하나씩 실행 (벌레 아이콘으로 디버그)
-   - `3. All Tests` : 테스트 73개
+   - `3. All Tests` : 테스트 107개
 3. `http/account-verification.http` 를 열고 요청 왼쪽 ▶ 버튼으로 호출합니다.
    1번 요청이 응답의 `id` 를 저장하고, 모의 은행 콘솔의 `적요='BT1234'` 숫자를 2번 요청의 `code` 에 넣으면 `VERIFIED` 가 됩니다.
 
@@ -105,12 +106,12 @@ bash infra/verify.sh
 
 ### 터미널
 
-> P3-1 부터 API 는 MySQL 이 필요하다. 먼저 `docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait`
+> API 는 MySQL 과 Kafka 가 필요하다 (P3-2 부터 Kafka). 먼저 `docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait`
 
 요구사항: JDK 21 (Gradle 은 래퍼가 내려받습니다)
 
 ```bash
-./gradlew build                                   # 컴파일 + 테스트 73개
+./gradlew build                                   # 컴파일 + 테스트 107개
 ./gradlew :apps:mock-bank:run --args="9090"       # 터미널 1: 모의 은행
 ./gradlew :apps:api:bootRun                       # 터미널 2: API (localhost:8080)
 ```
@@ -160,7 +161,7 @@ curl -X POST localhost:8080/api/v1/account-verifications/{id}/confirm -H 'Conten
 - [x] **P3-0** 로컬 인프라: Docker Compose 로 MySQL 8.4 · Kafka 4.1(KRaft) · Redis 7.4, CI 연기 테스트 → [infra/](infra/README.md) · [ADR-0003](docs/adr/0003-local-infra-docker-compose.md)
 - [ ] **P3** 입출금 비동기 처리: Kafka + Transactional Outbox + 멱등키 + DLT
   - [x] P3-1 접수: Idempotency-Key · 아웃박스 · 1원인증 MySQL 이전 → [ADR-0004](docs/adr/0004-idempotency-key-and-transactional-outbox.md)
-  - [ ] P3-2 처리: 폴링 퍼블리셔 → Kafka → 컨슈머 → 은행
+  - [x] P3-2 처리: 폴링 퍼블리셔 → Kafka → 컨슈머 → 은행 → [ADR-0005](docs/adr/0005-kafka-delivery-and-consumer-idempotency.md)
   - [ ] P3-3 실패: 재시도 · DLT · 결과조회
 - [ ] **P4** 잔액 동시성: 비관적 락 vs 낙관적 락 vs Redis 분산락, k6 부하테스트
 - [ ] **P5** Spring Batch 일마감 대사 + 텔레그램 알림
@@ -171,4 +172,4 @@ curl -X POST localhost:8080/api/v1/account-verifications/{id}/confirm -H 'Conten
 
 ## 기술 스택
 
-Kotlin 2.3 · Java 21 · Spring Boot 4.1 (Spring MVC, Validation, Actuator) · Spring Data JPA (Hibernate 7) · Flyway · MySQL 8.4 · Testcontainers · Netty 4.2 · JUnit 5 · Gradle 9 (Kotlin DSL) · GitHub Actions
+Kotlin 2.3 · Java 21 · Spring Boot 4.1 (Spring MVC, Validation, Actuator) · Spring Data JPA (Hibernate 7) · Flyway · MySQL 8.4 · Spring Kafka (Kafka 4.1) · Testcontainers · Netty 4.2 · JUnit 5 · Gradle 9 (Kotlin DSL) · GitHub Actions

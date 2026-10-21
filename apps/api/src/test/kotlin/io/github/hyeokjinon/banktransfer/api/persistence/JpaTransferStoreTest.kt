@@ -16,7 +16,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class JpaTransferStoreTest : ApiIntegrationTest() {
 
@@ -82,5 +84,51 @@ class JpaTransferStoreTest : ApiIntegrationTest() {
 
         assertFails { broken.saveWithEvent(transfer, requested(transfer)) }
         assertNull(store.findById(transfer.id))
+    }
+
+    @Test
+    fun `조건부 전이 - 현재 상태가 맞을 때만 바뀌고 sending_at 은 KST 로 기록된다`() {
+        val transfer = newTransfer()
+        store.saveWithEvent(transfer, requested(transfer))
+        val at = Instant.parse("2026-10-20T01:00:00Z")
+
+        assertTrue(store.transition(transfer.id, TransferStatus.RECEIVED, TransferStatus.SENDING, at))
+        assertFalse(store.transition(transfer.id, TransferStatus.RECEIVED, TransferStatus.SENDING, at))   // 두 번째는 실패
+
+        val after = store.findById(transfer.id)!!
+        assertEquals(TransferStatus.SENDING, after.status)
+        assertEquals(at, after.sendingAt)
+        val row = jdbc.queryForMap(
+            "SELECT DATE_FORMAT(sending_at, '%Y-%m-%d %H:%i:%s') AS sending_kst, version FROM transfer WHERE id = ?",
+            transfer.id.toString(),
+        )
+        assertEquals("2026-10-20 10:00:00", row["sending_kst"])
+        assertEquals(1L, (row["version"] as Number).toLong())
+    }
+
+    @Test
+    fun `상태 표에 없는 전이는 DB 에 가기 전에 거부한다`() {
+        val transfer = newTransfer()
+        store.saveWithEvent(transfer, requested(transfer))
+
+        assertFailsWith<IllegalArgumentException> {
+            store.transition(transfer.id, TransferStatus.RECEIVED, TransferStatus.COMPLETED, Instant.now())
+        }
+        assertEquals(TransferStatus.RECEIVED, store.findById(transfer.id)!!.status)
+    }
+
+    @Test
+    fun `결과 기록 - SENDING 에서 COMPLETED 와 응답코드`() {
+        val transfer = newTransfer()
+        store.saveWithEvent(transfer, requested(transfer))
+        val at = Instant.parse("2026-10-20T01:00:01Z")
+        store.transition(transfer.id, TransferStatus.RECEIVED, TransferStatus.SENDING, at)
+
+        assertTrue(store.transition(transfer.id, TransferStatus.SENDING, TransferStatus.COMPLETED, at, "0000"))
+
+        val after = store.findById(transfer.id)!!
+        assertEquals(TransferStatus.COMPLETED, after.status)
+        assertEquals("0000", after.bankResponseCode)
+        assertEquals(at, after.updatedAt)
     }
 }

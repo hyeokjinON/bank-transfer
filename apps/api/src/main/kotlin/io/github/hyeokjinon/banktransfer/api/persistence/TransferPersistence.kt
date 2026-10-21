@@ -18,6 +18,9 @@ import org.hibernate.annotations.JdbcTypeCode
 import org.hibernate.type.SqlTypes
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Modifying
+import org.springframework.data.jpa.repository.Query
+import org.springframework.data.repository.query.Param
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.util.UUID
@@ -76,6 +79,34 @@ class OutboxEventEntity(
 
 interface TransferJpaRepository : JpaRepository<TransferEntity, String> {
     fun findByIdempotencyKey(idempotencyKey: String): TransferEntity?
+
+    /** 조건부 상태 변경 (SENDING 으로 갈 때 sending_at 도 기록). 현재 상태가 from 이 아니면 0 건. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(
+        "update TransferEntity t set t.status = :to, t.sendingAt = :at, t.updatedAt = :at, " +
+            "t.bankResponseCode = :code, t.version = t.version + 1 where t.id = :id and t.status = :from",
+    )
+    fun transitionToSending(
+        @Param("id") id: String,
+        @Param("from") from: TransferStatus,
+        @Param("to") to: TransferStatus,
+        @Param("at") at: Instant,
+        @Param("code") code: String?,
+    ): Int
+
+    /** 조건부 상태 변경 (결과 기록 등). 현재 상태가 from 이 아니면 0 건. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(
+        "update TransferEntity t set t.status = :to, t.updatedAt = :at, " +
+            "t.bankResponseCode = :code, t.version = t.version + 1 where t.id = :id and t.status = :from",
+    )
+    fun transition(
+        @Param("id") id: String,
+        @Param("from") from: TransferStatus,
+        @Param("to") to: TransferStatus,
+        @Param("at") at: Instant,
+        @Param("code") code: String?,
+    ): Int
 }
 
 interface OutboxEventJpaRepository : JpaRepository<OutboxEventEntity, Long> {
@@ -136,4 +167,22 @@ class JpaTransferStore(
     override fun findById(id: UUID): Transfer? = transfers.findById(id.toString()).orElse(null)?.toDomain()
 
     override fun findByIdempotencyKey(key: String): Transfer? = transfers.findByIdempotencyKey(key)?.toDomain()
+
+    /**
+     * 조건부 UPDATE 로만 상태를 바꾼다. TransferEntity.from() 으로 만든 엔티티를 save 하면 INSERT 가 되므로 쓰지 않는다.
+     * 한 문장의 UPDATE 라 두 소비자가 동시에 와도 DB 가 한쪽만 1 건으로 통과시킨다.
+     * 허용하는 전이는 도메인의 상태 표([TransferStatus.canMoveTo])를 따른다. 표에 없는 전이는 DB 에 가기 전에 거른다 (호출 쪽 버그).
+     */
+    override fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?): Boolean {
+        require(from.canMoveTo(to)) { "illegal transition $from -> $to" }
+        return tx.execute {
+            val dbAt = at.toDbPrecision()
+            val updated = if (to == TransferStatus.SENDING) {
+                transfers.transitionToSending(id.toString(), from, to, dbAt, bankResponseCode)
+            } else {
+                transfers.transition(id.toString(), from, to, dbAt, bankResponseCode)
+            }
+            updated == 1
+        }!!
+    }
 }

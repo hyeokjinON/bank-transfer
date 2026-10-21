@@ -154,6 +154,22 @@ class TransferApiTest : ApiIntegrationTest() {
     }
 
     @Test
+    fun `JSON 이 깨지면 400 INVALID_REQUEST`() {
+        val response = postRaw(UUID.randomUUID().toString(), """{"bankCode": "090", """)
+
+        assertEquals(400, response.status)
+        assertEquals("INVALID_REQUEST", response.body["code"])
+    }
+
+    @Test
+    fun `조회 id 가 UUID 가 아니면 400 INVALID_REQUEST`() {
+        val response = get("not-a-uuid")
+
+        assertEquals(400, response.status)
+        assertEquals("INVALID_REQUEST", response.body["code"])
+    }
+
+    @Test
     fun `같은 키로 동시에 10건 보내도 이체 1건 · 이벤트 1건`() {
         val key = UUID.randomUUID().toString()
         val request = body(verifiedAccount())

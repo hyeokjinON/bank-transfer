@@ -6,10 +6,15 @@ import io.github.hyeokjinon.banktransfer.gateway.BankTimeoutException
 import io.github.hyeokjinon.banktransfer.gateway.BankUnavailableException
 import io.github.hyeokjinon.banktransfer.transfer.TransferException
 import org.slf4j.LoggerFactory
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
+import org.springframework.http.HttpStatusCode
 import org.springframework.http.ProblemDetail
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.context.request.WebRequest
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler
 import java.util.concurrent.CompletionException
 
 /**
@@ -17,8 +22,38 @@ import java.util.concurrent.CompletionException
  * 비동기(CompletableFuture) 경로에서는 예외가 CompletionException 으로 한 번 감싸져 오므로 벗겨서 처리한다.
  */
 @RestControllerAdvice
-class ApiExceptionHandler {
+class ApiExceptionHandler : ResponseEntityExceptionHandler() {
     private val log = LoggerFactory.getLogger(javaClass)
+
+    /**
+     * Spring MVC 가 던지는 표준 예외(본문 JSON 깨짐, 검증 실패, 경로 변수 타입 오류 …)의 ProblemDetail 에도 code 를 붙인다.
+     * 클라이언트는 도메인 오류든 형식 오류든 code 하나로 분기할 수 있다.
+     * 상태별 code: 400 = INVALID_REQUEST, 그 밖의 4xx = HttpStatus 이름, 5xx = INTERNAL_ERROR.
+     * (Boot 의 기본 ProblemDetail 핸들러는 ResponseEntityExceptionHandler 빈이 있으면 물러나므로 이 지점이 유일한 공통 경로다.)
+     */
+    override fun handleExceptionInternal(
+        ex: Exception,
+        body: Any?,
+        headers: HttpHeaders,
+        statusCode: HttpStatusCode,
+        request: WebRequest,
+    ): ResponseEntity<Any>? {
+        val response = super.handleExceptionInternal(ex, body, headers, statusCode, request)
+        // 검증 실패 등은 body 가 null 로 들어오고 부모가 ErrorResponse 에서 ProblemDetail 을 만들어 채운다. 그래서 결과의 body 에 붙인다.
+        val problem = response?.body as? ProblemDetail
+        if (problem != null && problem.properties?.containsKey("code") != true) {
+            // 5xx 는 어느 경로로 오든 도메인 catch-all 과 같은 INTERNAL_ERROR (클라이언트가 서버 오류를 한 code 로 분기한다)
+            problem.setProperty(
+                "code",
+                when {
+                    statusCode.is5xxServerError -> "INTERNAL_ERROR"
+                    statusCode.value() == 400 -> "INVALID_REQUEST"
+                    else -> HttpStatus.resolve(statusCode.value())?.name ?: "ERROR"
+                },
+            )
+        }
+        return response
+    }
 
     @ExceptionHandler(
         CompletionException::class,
@@ -48,6 +83,7 @@ class ApiExceptionHandler {
             is TransferException.AccountNotVerified -> HttpStatus.UNPROCESSABLE_CONTENT to "ACCOUNT_NOT_VERIFIED"
             is TransferException.IdempotencyKeyReused -> HttpStatus.UNPROCESSABLE_CONTENT to "IDEMPOTENCY_KEY_REUSED"
             is TransferException.TransferNotFound -> HttpStatus.NOT_FOUND to "TRANSFER_NOT_FOUND"
+            is TransferException.IllegalTransition -> HttpStatus.CONFLICT to "ILLEGAL_TRANSITION"
             else -> {
                 log.error("unexpected error", cause)
                 HttpStatus.INTERNAL_SERVER_ERROR to "INTERNAL_ERROR"

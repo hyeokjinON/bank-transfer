@@ -123,7 +123,7 @@ SENDING ──(30초 초과, 정리 작업)──▶ UNKNOWN
 | 전이 | 조건 |
 |---|---|
 | `RECEIVED → SENDING` | 컨슈머가 집어감. `sending_at` 기록 |
-| `SENDING → RECEIVED` | `BankUnavailableException` (전문을 쓰기 전 실패 = 은행에 안 감) **만** 허용 |
+| `SENDING → RECEIVED` | `BankNotSentException` (전문을 쓰기 전 실패 = 은행에 안 감) **만** 허용 |
 | `SENDING → COMPLETED / FAILED / UNKNOWN` | 은행 응답 · 거절 · 타임아웃 |
 | `SENDING → UNKNOWN` | 정리 작업: `sending_at` 이 30초보다 오래됨 |
 | `UNKNOWN → COMPLETED / FAILED` | 결과조회 응답 `0000` / `2001` |
@@ -199,8 +199,9 @@ TransferConsumer (group transfer-processor, AckMode.MANUAL_IMMEDIATE)
 | 실패 | 은행 도달 | 처리 | 상태 |
 |---|---|---|---|
 | 은행 거절 (≠ `0000`) | 도달, 거절 확정 | 재시도 없음 | `FAILED` |
-| `BankUnavailableException` | 안 됨 | `SENDING → RECEIVED` 후 예외 → 재시도 토픽 | 재시도 |
+| 연결 없음 (`BankNotSentException`, 전문을 쓰기 전 실패) | 안 됨 | `SENDING → RECEIVED` 후 예외 → 재시도 토픽 | 재시도 |
 | `BankTimeoutException` | 모름 | **재전송 금지** | `UNKNOWN` → 결과조회 |
+| 그 밖의 `BankUnavailableException` (쓰기 실패 · 보낸 뒤 연결 끊김) | 모름 | **재전송 금지** | `UNKNOWN` → 결과조회 |
 | 그 밖의 예외 (DB 등) | 상황별 | 재시도 토픽 → 소진 시 DLT | 유지 + 경고 로그 |
 | 역직렬화 실패 | – | 재시도 없이 DLT | – |
 

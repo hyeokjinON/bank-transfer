@@ -9,12 +9,13 @@
 | P0 골격 · P1 1원인증 · P2 Netty 모의 은행 | ✅ 완료 (2026-10-01) | 테스트 29개 |
 | P3-0 로컬 인프라 | ✅ 완료 (2026-10-16, PR #1) | 로컬(Windows 11 + Docker Desktop)·CI 모두 `verify.sh` 통과 |
 | P3-1 접수 | ✅ 완료 (2026-10-20, [#3](https://github.com/hyeokjinON/bank-transfer/pull/3)) | ADR-0004 채택, 테스트 73개. 손 확인: 로컬 API · Postman 컬렉션으로 접수 흐름, DB 에서 아웃박스 미발행 · KST 저장 확인 |
-| P3-2 처리 · P3-3 실패 | ⬜ 다음 | 설계 문서 §5·§6 |
+| P3-2 처리 | 🟡 PR 리뷰 중 (2026-10-20, [#5](https://github.com/hyeokjinON/bank-transfer/pull/5)) | ADR-0005 제안, 테스트 107개. 손 확인 대기 (머지 전 사람이 실행): `http/transfer.http` 2-1) · Postman 2-9 에서 몇 초 뒤 `COMPLETED` (아래 4번 한계 참고) |
+| P3-3 실패 | ⬜ 다음 | 설계 문서 §6 |
 | P4 ~ P9 | ⬜ 예정 | README 로드맵 |
 
 ## 2. P3 설계 (합의된 것)
 설계 섹션 1~5 모두 승인(2026-10-19) → **[설계 문서](docs/superpowers/specs/2026-10-19-p3-transfer-design.md)** 로 정리.
-P3-1 은 머지됐다 (PR #3). 아래 표 중 P3-2 · P3-3 항목은 아직 구현 전이다.
+P3-1 은 머지됐고 (PR #3), P3-2 는 구현을 마치고 PR 리뷰 중이다. 아래 표 중 P3-3 항목(재시도 토픽 · DLT · 결과조회 · 정리 작업)은 아직 구현 전이다.
 
 | 결정 | 내용 |
 |---|---|
@@ -22,7 +23,7 @@ P3-1 은 머지됐다 (PR #3). 아래 표 중 P3-2 · P3-3 항목은 아직 구�
 | 범위 | 서비스 모계좌 → 사용자 계좌 **출금이체만**. 잔액·락 비교는 P4 |
 | 수취 계좌 | **1원인증 VERIFIED 계좌만**. 그래서 1원인증 저장소도 MySQL(JPA) 로 이전 (P3-1) |
 | 아웃박스 발행 | **폴링 퍼블리셔** (0.5초, `FOR UPDATE SKIP LOCKED`), 적어도 한 번 발행. Debezium 은 검토 후 보류 |
-| 모듈 | `modules/transfer` 순수 Kotlin. 포트 `TransferStore.saveWithEvent`, `VerifiedAccounts`, `BankTransferPort` |
+| 모듈 | `modules/transfer` 순수 Kotlin. 포트 `TransferStore.saveWithEvent` + `transition`, `VerifiedAccounts`, `BankTransferPort` |
 | 상태 | `RECEIVED → SENDING → COMPLETED / FAILED / UNKNOWN`, `UNKNOWN → 결과조회 → 확정` |
 | 멱등 | API: `Idempotency-Key` 필수 + `UNIQUE` + `request_hash` (다른 내용 재사용 422). 컨슈머: **상태 조건부 UPDATE** (`processed_event` 테이블은 쓰지 않기로 수정) |
 | 실패 | 거절 → FAILED / 연결 없음(미전송) → RECEIVED 로 되돌리고 `@RetryableTopic` (1s·10s·60s) → DLT / 타임아웃 → **재전송 금지**, UNKNOWN → 결과조회 |
@@ -33,19 +34,28 @@ P3-1 은 머지됐다 (PR #3). 아래 표 중 P3-2 · P3-3 항목은 아직 구�
 
 ## 3. 다음 할 일 (순서대로)
 1. velog `#3` (P3-1 접수: 멱등키 · 아웃박스 · 최종 리뷰에서 잡은 collation · 금액 강제 변환).
-2. P3-2 구현 계획 작성 (폴링 퍼블리셔 · Kafka · 컨슈머). 아래 "P3-2 로 넘기는 것"을 계획의 제약에 넣는다.
-3. P3-3 (재시도 토픽 · DLT · 결과조회, 규격 v0.2) 구현 계획.
+2. P3-2 PR 리뷰 → 머지 (머지 후 ADR-0005 상태를 채택으로).
+3. velog `#4` (P3-2 처리: 적어도 한 번 발행 + 컨슈머 멱등, 결과 모름은 재전송 금지).
+4. P3-3 (재시도 토픽 · DLT · 결과조회, 규격 v0.2) 구현 계획. 아래 "P3-2 에서 남은 것"과 4번 한계를 계획의 제약에 넣는다.
 
-### P3-2 로 넘기는 것 (P3-1 리뷰에서 나온 항목)
-- `Transfer` 의 `toString` 이 계좌번호 · 적요를 그대로 출력 → 컨슈머가 로그를 남기기 전에 마스킹.
-- `TransferEntity.from()` 은 INSERT 전용 (version = null). 상태 변경은 조회한 엔티티를 고치거나 조건부 UPDATE 로.
-- `moveTo` 로 `bankResponseCode` 를 설정할 수 없다. `IllegalTransition` 은 HTTP 매핑이 없어 500.
-- 깨진 JSON · 누락 필드 · 잘못된 UUID 는 `code` 없는 400 → `INVALID_REQUEST` 핸들러.
+### P3-3 로 넘기는 것 (P3-2 리뷰에서 나온 항목)
+- 발행은 됐는데 오래 `RECEIVED` 로 남은 행을 훑는 스위퍼: 다시 발행하거나 알린다.
+- 정리 작업(결과조회)은 `status = SENDING` 으로 대상을 고른다. `sendingAt != null` 로 고르면 안 된다: `NotSent` 로 `RECEIVED` 에 되돌린 뒤에도 `sendingAt` 이 남는다.
+- 재시도 토픽 + DLT(`@RetryableTopic`)를 도입할 때 `kafkaErrorHandler` 빈을 교체한다. key 가 UUID 가 아닌 메시지는 재시도 없이 바로 DLT 로 보낸다.
+- 릴레이와 정리 작업이 같은 스케줄러를 쓰므로 `spring.task.scheduling.pool.size` 를 정한다 (기본 1개면 서로 막는다).
+- 정리 작업이 컨슈머와 경합할 수 있게 되면 `TransferProcessor.record()` 는 `check()` 로 던지지 말고 로그를 남기고 돌아온다.
+- 게이트웨이 쓰기 실패 경로(`write failed` → `UNKNOWN`)의 테스트를 추가한다.
+- 리스너의 그룹 · 동시성은 yml 과 애너테이션 중 한 곳에서만 정한다 (지금은 `@KafkaListener` 의 `concurrency = "3"` · `groupId`, yml 의 `group-id`).
+- 릴레이는 인스턴스가 여럿이면 키별 순서를 보장하지 않는다 (`ORDER BY id` 라도 `SKIP LOCKED` 로 건너뛴다). 이벤트 종류를 늘리기 전에 이 점을 정리한다.
+
+### P3-2 에서 남은 것 (P3-1 리뷰 항목 중 아직 안 한 것)
 - `TransferService.request` / `JpaTransferStore.saveWithEvent` 를 바깥 트랜잭션 안에서 호출하지 않는다 (KDoc).
 - UNIQUE 위반 구분은 오류 메시지의 제약 이름에 의존. 경합 롤백 때 드문 데드락(1213)은 500 → 재시도 안내 또는 매핑.
 - 동시 중복 요청마다 Hibernate 가 클라이언트 키를 WARN 으로 남긴다 (예상된 동작, 로그 잡음).
 
 ## 4. 알려진 한계 · 주의
+- (P3-2) 재시도를 다 쓰면(은행 연결 없음이 계속됨) 이체는 `RECEIVED` 로 남는다. `UNKNOWN` · 은행 응답 뒤 DB 기록 실패로 `SENDING` 에 남은 건도 P3-3 전까지 그대로다. 재시도 중인 메시지는 같은 파티션의 뒤 메시지를 막는다 (블로킹 재시도).
+- (P3-2) 컨슈머 스레드가 은행 응답을 블로킹으로 기다린다(최대 3초) → P4 에서 측정, P6 · P7 에서 비교.
 - 게이트웨이 응답 매칭은 단일 연결 · 단일 인스턴스 전제 (ADR-0002 한계).
 - Kafka 는 단일 노드라 복제 · ISR 장애 실험 불가 (ADR-0003 한계).
 - Windows: 셸 스크립트는 Git Bash 로. PowerShell `bash` 는 WSL 실행기라 실패한다.

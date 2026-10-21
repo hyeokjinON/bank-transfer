@@ -1,6 +1,6 @@
 # 데이터베이스 — 모델 정의와 구조
 
-> 기준: P3-1 (Flyway `V1__init.sql` 적용). 1원인증 · 이체 · 아웃박스 테이블이 MySQL 에 있다.
+> 기준: P3-2 (Flyway `V1__init.sql` 적용, P3-2 는 스키마 변경 없음). 1원인증 · 이체 · 아웃박스 테이블이 MySQL 에 있다.
 > 이 문서가 스키마의 기준이다. 마이그레이션을 추가할 때 이 문서도 같은 PR 에서 고친다.
 > 설계 배경: [P3 설계 문서](superpowers/specs/2026-10-19-p3-transfer-design.md) §2~§6
 
@@ -122,14 +122,16 @@ erDiagram
 ### 4-3. `outbox_event` — 트랜잭셔널 아웃박스 (P3-1 생성, P3-2 부터 발행)
 | 컬럼 | 타입 | NULL | 설명 |
 |---|---|---|---|
-| `id` | `BIGINT AUTO_INCREMENT` | N | PK. 발행 순서 기준. 발행(P3-2) 때 메시지의 `eventId` 가 된다 |
+| `id` | `BIGINT AUTO_INCREMENT` | N | PK. 발행 순서 기준. 발행할 때 메시지의 `eventId` 가 된다 |
 | `aggregate_id` | `CHAR(36)` | N | 대상 집합 id (`transfer.id`). Kafka 메시지 key |
 | `event_type` | `VARCHAR(50)` | N | `TransferRequested` |
-| `payload` | `JSON` | N | `{"transferId", "occurredAt"}`. eventId 는 이 행의 `id` 라 발행(P3-2) 때 메시지에 붙인다 |
+| `payload` | `JSON` | N | `{"transferId", "occurredAt"}`. eventId 는 이 행의 `id` 라 발행할 때 `JSON_SET(payload, '$.eventId', id)` 로 메시지에 붙인다 |
 | `created_at` | `DATETIME(6)` | N | 이벤트 기록 시각 (이체 저장과 같은 트랜잭션) |
-| `published_at` | `DATETIME(6)` | Y | Kafka 발행 완료 시각. `NULL` = 미발행 |
+| `published_at` | `DATETIME(6)` | Y | Kafka 발행 완료 시각. `NULL` = 미발행. 브로커가 받았다고 확인한 뒤 `NOW(6)`로 기록한다. `NOW(6)` 은 세션 시간대를 따르고, 세션 시간대는 JDBC `forceConnectionTimeZoneToSession=true` + `connectionTimeZone=Asia/Seoul` 이 KST 로 맞춘다 (서버 시간대만의 결과가 아니다, §2) |
 
 인덱스: `idx_outbox_unpublished (published_at, id)` — `WHERE published_at IS NULL ORDER BY id LIMIT 100` 를 인덱스만으로 처리.
+
+발행 메시지 모양 (`transfer.requested`, [ADR-0005](adr/0005-kafka-delivery-and-consumer-idempotency.md)): key = `aggregate_id`(이체 id), value = `{"transferId", "occurredAt", "eventId"}`. 같은 이체의 메시지는 같은 파티션으로 간다.
 
 ## 5. 상태 값
 상태는 MySQL `ENUM` 이 아니라 `VARCHAR` + Kotlin `enum` 으로 둔다. 값을 추가할 때 `ALTER TABLE ... MODIFY ENUM` (테이블 재작성 위험) 없이 코드만 바꾸면 되고, 허용 전이는 도메인이 검증한다.
@@ -146,8 +148,8 @@ erDiagram
 |---|---|---|
 | 같은 `Idempotency-Key` 동시 접수 | UNIQUE 위반을 잡아 기존 건 반환 | `INSERT …` → UNIQUE 위반(`DataIntegrityViolationException`)을 도메인 예외로 변환 → 트랜잭션 밖에서 `SELECT` |
 | 1원인증 코드 확인 동시 요청 | 비관적 락 | `SELECT … FROM account_verification WHERE id = ? FOR UPDATE` |
-| 아웃박스 발행 (앱 여러 대) (P3-2 예정) | 잠긴 행 건너뛰기 | `SELECT … WHERE published_at IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED` |
-| 이체 상태 변경 (중복 메시지) (P3-2 예정) | 조건부 UPDATE | `UPDATE transfer SET status='SENDING', sending_at=? … WHERE id=? AND status='RECEIVED'` → 0건이면 건너뜀 |
+| 아웃박스 발행 (앱 여러 대) | 잠긴 행 건너뛰기 | `SELECT … WHERE published_at IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED`. 발행기는 READ COMMITTED 로 돈다: 기본 REPEATABLE READ 에서는 gap 락 때문에 접수의 INSERT 가 막힌다 ([ADR-0005](adr/0005-kafka-delivery-and-consumer-idempotency.md)) |
+| 이체 상태 변경 (중복 메시지) | 조건부 UPDATE | `UPDATE transfer SET status='SENDING', sending_at=? … WHERE id=? AND status='RECEIVED'` → 0건이면 건너뜀 |
 | 엔티티 동시 수정 | 낙관적 락 | `@Version` → `… WHERE id=? AND version=?` |
 
 잔액 차감의 락 비교(비관적 · 낙관적 · Redis 분산락)는 P4 에서 이 표에 추가한다.
@@ -158,7 +160,7 @@ erDiagram
 - 시각: `DATETIME(6)` (마이크로초, KST). 접미어 `_at`.
 - 금액: `BIGINT` 원 단위. `DECIMAL`·부동소수점 쓰지 않는다 (원화는 소수점이 없다).
 - 불리언이 필요하면 `TINYINT(1)` 대신 상태 컬럼으로 표현할 수 있는지 먼저 본다.
-- 개인정보 원문(인증코드)은 저장하지 않는다. 계좌번호 마스킹은 아직 없다 — 로그에 Transfer 를 남기기 전(P3-2)과 인증 도입 시 응답에서 적용한다.
+- 개인정보 원문(인증코드)은 저장하지 않는다. 계좌번호 마스킹: `Transfer.toString()` 은 뒤 4자리만 남겨 로그에 원문이 찍히지 않는다. API 응답 마스킹은 인증 도입 때 적용한다.
 
 ## 8. 마이그레이션 규칙 (Flyway)
 - 파일명: `V<번호>__<설명>.sql` (예 `V1__init.sql`, `V2__transfer_reference_index.sql`).
@@ -171,7 +173,7 @@ erDiagram
 ```sql
 -- 접속: docker compose -f infra/docker-compose.yml exec mysql mysql -ubank -p bank_transfer
 
--- 상태별 건수
+-- 처리 상태별 건수
 SELECT status, COUNT(*) FROM transfer GROUP BY status;
 
 -- 30초 넘게 SENDING 에 멈춘 건 (정리 작업 대상)
@@ -180,6 +182,9 @@ SELECT id, reference, sending_at FROM transfer
 
 -- 아직 Kafka 로 안 나간 이벤트
 SELECT id, aggregate_id, created_at FROM outbox_event WHERE published_at IS NULL ORDER BY id LIMIT 20;
+
+-- 발행 지연: 미발행 중 가장 오래된 것
+SELECT MIN(created_at) FROM outbox_event WHERE published_at IS NULL;
 
 -- 오늘(KST) 완료된 출금 합계
 SELECT COUNT(*), SUM(amount) FROM transfer
@@ -201,3 +206,4 @@ EXPLAIN SELECT id FROM outbox_event WHERE published_at IS NULL ORDER BY id LIMIT
 | 2026-10-19 | 최초 작성: P3 스키마 설계, 시간대 KST 정책 | P3 설계 문서 |
 | 2026-10-19 | V1 적용 (P3-1). payload 에서 eventId 제외, Hibernate Instant 설정 추가 | PR (P3-1) |
 | 2026-10-19 | `idempotency_key` · `reference` 를 `ascii_bin` 으로 (대소문자·악센트 구분), 키는 보이는 ASCII 1~64자만 허용 | 최종 리뷰 (P3-1) |
+| 2026-10-20 | 스키마 변경 없음. 아웃박스 발행 메시지 모양 · `published_at` 기록 방식, 동시성 표(SKIP LOCKED · 조건부 UPDATE) 확정, 운영 조회 추가 | PR #5 (P3-2) |

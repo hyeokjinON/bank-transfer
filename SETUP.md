@@ -23,15 +23,15 @@ cd bank-transfer
 
 ### 2-2. 빌드 · 테스트
 ```bash
-./gradlew build      # 첫 실행은 의존성 다운로드로 몇 분 걸린다. 테스트 73개 통과해야 정상
+./gradlew build      # 첫 실행은 의존성 다운로드로 몇 분 걸린다. 테스트 107개 통과해야 정상
 ```
-테스트는 Testcontainers 로 MySQL 을 띄우므로 Docker Desktop 이 켜져 있어야 한다 (설치는 2-4).
+테스트는 Testcontainers 로 MySQL 과 Kafka 를 띄우므로 Docker Desktop 이 켜져 있어야 한다 (설치는 2-4).
 
 ### 2-3. IntelliJ
 1. 폴더 열기 → Gradle 프로젝트로 가져오기.
 2. `Settings > Build, Execution, Deployment > Build Tools > Gradle > Gradle JVM` = 21, `File > Project Structure > SDK` = 21.
 3. (권장) `Settings > Tools > Terminal > Shell path` = `C:\Program Files\Git\bin\bash.exe` → 터미널에서 `bash infra/verify.sh` 가 그대로 동작.
-3-1. 인프라 먼저: `docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait` (API 가 MySQL 을 쓴다)
+3-1. 인프라 먼저: `docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait` (API 는 MySQL 과 Kafka 를 쓴다)
 4. 실행 목록의 `0. Mock Bank + API` 실행 → `http/account-verification.http` 의 ▶ 로 요청 (Ultimate).
    Community Edition 은 `.http` 실행이 없다 → Postman 에서 저장소 폴더를 열면 `postman/collections/bank-transfer` 컬렉션이 보인다 (요청마다 Test Results 로 통과/실패 표시).
 
@@ -61,6 +61,6 @@ cd bank-transfer
 - [ ] `0. Mock Bank + API` 실행 후 `GET /actuator/health` → `UP`
 - [ ] 1원인증 요청 → 모의 은행 콘솔의 적요 코드로 confirm → `VERIFIED`
 - [ ] `bash infra/verify.sh` → "모두 정상입니다."
-- [ ] `http/transfer.http` 1) → 202, API 재시작 후 2) 조회 → 같은 건 (DB 에 남음)
+- [ ] `http/transfer.http` 1) → 202, 2-1) 조회 → 몇 초 뒤 `COMPLETED` (아웃박스 → Kafka → 모의 은행), API 재시작 후 조회 → 같은 건 (DB 에 남음)
 
 다음: 실행·장애 대응은 [OPERATION.md](OPERATION.md), 구조는 [ARCHITECTURE.md](ARCHITECTURE.md).
