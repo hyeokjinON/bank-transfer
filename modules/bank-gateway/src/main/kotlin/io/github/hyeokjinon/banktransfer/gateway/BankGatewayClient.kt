@@ -4,6 +4,8 @@ import io.github.hyeokjinon.banktransfer.protocol.BankMessage
 import io.github.hyeokjinon.banktransfer.protocol.BizType
 import io.github.hyeokjinon.banktransfer.protocol.Header
 import io.github.hyeokjinon.banktransfer.protocol.MessageClass
+import io.github.hyeokjinon.banktransfer.protocol.InquiryRequest
+import io.github.hyeokjinon.banktransfer.protocol.InquiryResponse
 import io.github.hyeokjinon.banktransfer.protocol.NameInquiryRequest
 import io.github.hyeokjinon.banktransfer.protocol.NameInquiryResponse
 import io.github.hyeokjinon.banktransfer.protocol.PollRequest
@@ -118,8 +120,12 @@ class BankGatewayClient(
     fun inquireName(bankCode: String, accountNo: String): CompletableFuture<NameInquiryResponse> =
         send(NameInquiryRequest(newHeader(BizType.NAME_INQUIRY), bankCode, accountNo)).thenApply { it.expect<NameInquiryResponse>() }
 
-    fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String): CompletableFuture<TransferResponse> =
-        send(TransferRequest(newHeader(BizType.TRANSFER), bankCode, accountNo, amount, memo)).thenApply { it.expect<TransferResponse>() }
+    fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String, reference: String): CompletableFuture<TransferResponse> =
+        send(TransferRequest(newHeader(BizType.TRANSFER), bankCode, accountNo, amount, memo, reference)).thenApply { it.expect<TransferResponse>() }
+
+    /** 결과조회 (v0.2). 결과를 모르는 이체를 이용기관 거래번호로 묻는다 — 이체를 다시 보내지 않는다. */
+    fun inquire(reference: String): CompletableFuture<InquiryResponse> =
+        send(InquiryRequest(newHeader(BizType.INQUIRY), reference)).thenApply { it.expect<InquiryResponse>() }
 
     /**
      * 요청을 보내고 즉시 future 를 돌려준다.

@@ -30,11 +30,11 @@ class BankMessageSerializerTest {
 
     @Test
     fun `한글은 EUC-KR 2바이트로 계산한다`() {
-        val transfer = TransferRequest(header(BizType.TRANSFER), "090", "1002123456789", 1, "BT1234홍길동")
+        val transfer = TransferRequest(header(BizType.TRANSFER), "090", "1002123456789", 1, "BT1234홍길동", "V2610210000000000001")
         val bytes = BankMessageSerializer.serialize(transfer)
 
-        // 적요 20바이트 = "BT1234"(6) + "홍길동"(6) + 공백 8
-        val memoBytes = bytes.copyOfRange(bytes.size - 20, bytes.size)
+        // 적요 20바이트 = "BT1234"(6) + "홍길동"(6) + 공백 8, 그 뒤에 거래번호 20바이트
+        val memoBytes = bytes.copyOfRange(bytes.size - 40, bytes.size - 20)
         assertEquals(6 + 6, String(memoBytes, BankCharsets.EUC_KR).trimEnd().toByteArray(BankCharsets.EUC_KR).size)
         assertEquals(transfer, BankMessageSerializer.deserialize(bytes))
     }
@@ -51,7 +51,7 @@ class BankMessageSerializerTest {
 
     @Test
     fun `금액이 13자리를 넘으면 예외`() {
-        val tooBig = TransferRequest(header(BizType.TRANSFER), "090", "1", 10_000_000_000_000, "")
+        val tooBig = TransferRequest(header(BizType.TRANSFER), "090", "1", 10_000_000_000_000, "", "")
         assertFailsWith<ProtocolException> { BankMessageSerializer.serialize(tooBig) }
     }
 
@@ -68,5 +68,30 @@ class BankMessageSerializerTest {
 
         assertIs<PollRequest>(BankMessageSerializer.deserialize(req))
         assertIs<PollResponse>(BankMessageSerializer.deserialize(res))
+    }
+
+    @Test
+    fun `이체 전문 개별부는 72바이트 (v0_2 - 이용기관 거래번호 20 추가)`() {
+        val transfer = TransferResponse(header(BizType.TRANSFER, MessageClass.RESPONSE), "090", "1002123456789", 50_000, "출금", "T2610210000000000001")
+
+        val bytes = BankMessageSerializer.serialize(transfer)
+
+        assertEquals(Header.LENGTH + 72, bytes.size)
+        assertEquals("T2610210000000000001", String(bytes.copyOfRange(bytes.size - 20, bytes.size), Charsets.US_ASCII))
+        assertEquals(transfer, BankMessageSerializer.deserialize(bytes))
+    }
+
+    @Test
+    fun `결과조회 요청 · 응답은 직렬화 후 다시 읽어도 같다`() {
+        val request = InquiryRequest(header(BizType.INQUIRY), "T2610210000000000001")
+        val response = InquiryResponse(header(BizType.INQUIRY, MessageClass.RESPONSE), "T2610210000000000001", ResponseCodes.ORIGINAL_NOT_FOUND)
+
+        val requestBytes = BankMessageSerializer.serialize(request)
+        val responseBytes = BankMessageSerializer.serialize(response)
+
+        assertEquals(Header.LENGTH + 20, requestBytes.size)
+        assertEquals(Header.LENGTH + 24, responseBytes.size)
+        assertEquals(request, BankMessageSerializer.deserialize(requestBytes))
+        assertEquals(response, BankMessageSerializer.deserialize(responseBytes))
     }
 }

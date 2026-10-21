@@ -1,6 +1,8 @@
 package io.github.hyeokjinon.banktransfer.mockbank
 
 import io.github.hyeokjinon.banktransfer.protocol.BankMessage
+import io.github.hyeokjinon.banktransfer.protocol.InquiryRequest
+import io.github.hyeokjinon.banktransfer.protocol.InquiryResponse
 import io.github.hyeokjinon.banktransfer.protocol.NameInquiryRequest
 import io.github.hyeokjinon.banktransfer.protocol.NameInquiryResponse
 import io.github.hyeokjinon.banktransfer.protocol.PollRequest
@@ -33,11 +35,14 @@ import java.util.concurrent.atomic.AtomicInteger
  * - 이체: 등록된 계좌면 입금 기록을 남기고 0000 (통장 거래내역 역할)
  * - 폴링: 바로 응답
  * - silentAccounts: 응답을 보내지 않는다 (타임아웃 테스트용)
+ * - 결과조회(v0.2): 처리한 이체의 이용기관 거래번호면 0000, 아니면 2001
+ * - silentAfterProcessingAccounts: 이체를 처리(입금 · 거래번호 기록)하고 응답만 보내지 않는다. 단 1원 이체는 정상 응답 — 1원인증으로 수취 계좌를 등록할 수 있게 (결과조회 시나리오용)
  */
 class MockBankServer(
     private val port: Int = 0,
     private val accounts: Map<String, String> = DEFAULT_ACCOUNTS,
     private val silentAccounts: Set<String> = emptySet(),
+    private val silentAfterProcessingAccounts: Set<String> = DEFAULT_SILENT_AFTER_PROCESSING,
     private val responseDelay: Duration = Duration.ZERO,
 ) : AutoCloseable {
 
@@ -45,6 +50,7 @@ class MockBankServer(
     private val boss = MultiThreadIoEventLoopGroup(1, NioIoHandler.newFactory())
     private val workers = MultiThreadIoEventLoopGroup(2, NioIoHandler.newFactory())
     private val deposits = ConcurrentHashMap<String, MutableList<TransferRequest>>()
+    private val processedReferences: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val pollCounter = AtomicInteger()
     private lateinit var serverChannel: Channel
 
@@ -67,6 +73,8 @@ class MockBankServer(
 
     /** 이 계좌로 들어온 입금 내역 (받는 사람이 통장에서 보는 적요 확인용). */
     fun depositsOf(accountNo: String): List<TransferRequest> = deposits[accountNo]?.toList() ?: emptyList()
+
+    fun hasProcessed(reference: String): Boolean = reference in processedReferences
 
     override fun close() {
         if (::serverChannel.isInitialized) serverChannel.close().awaitUninterruptibly(1, TimeUnit.SECONDS)
@@ -91,16 +99,27 @@ class MockBankServer(
             message.accountNo in silentAccounts -> null
             message.accountNo !in accounts -> message.reply(ResponseCodes.ACCOUNT_NOT_FOUND)
             else -> {
-                deposits.computeIfAbsent(message.accountNo) { CopyOnWriteArrayList() }.add(message)
-                log.info("[통장] {} 입금 {}원 적요='{}'", message.accountNo, message.amount, message.memo)
-                message.reply(ResponseCodes.OK)
+                deposit(message)
+                // 처리는 했는데 응답이 사라진 상황 (결과조회로만 확정할 수 있다)
+                if (message.accountNo in silentAfterProcessingAccounts && message.amount > 1) null else message.reply(ResponseCodes.OK)
             }
         }
-        is PollResponse, is NameInquiryResponse, is TransferResponse -> null
+        is InquiryRequest -> {
+            val result = if (message.reference in processedReferences) ResponseCodes.OK else ResponseCodes.ORIGINAL_NOT_FOUND
+            log.info("[결과조회] {} -> {}", message.reference, result)
+            InquiryResponse(message.header.toResponse(), message.reference, result)
+        }
+        is PollResponse, is NameInquiryResponse, is TransferResponse, is InquiryResponse -> null
+    }
+
+    private fun deposit(message: TransferRequest) {
+        deposits.computeIfAbsent(message.accountNo) { CopyOnWriteArrayList() }.add(message)
+        processedReferences += message.reference
+        log.info("[통장] {} 입금 {}원 적요='{}' 거래번호={}", message.accountNo, message.amount, message.memo, message.reference)
     }
 
     private fun TransferRequest.reply(code: String) =
-        TransferResponse(header.toResponse(code), bankCode, accountNo, amount, memo)
+        TransferResponse(header.toResponse(code), bankCode, accountNo, amount, memo, reference)
 
     private inner class BankHandler : SimpleChannelInboundHandler<BankMessage>() {
         override fun channelRead0(ctx: ChannelHandlerContext, msg: BankMessage) {
@@ -123,7 +142,9 @@ class MockBankServer(
             "1002123456789" to "홍길동",
             "3333012345678" to "김카뱅",
             "1101234567890" to "이페이",
+            "9990000000002" to "무응답",
         )
+        val DEFAULT_SILENT_AFTER_PROCESSING = setOf("9990000000002")
     }
 }
 
