@@ -46,7 +46,7 @@ class TransferServiceTest {
             throw UnsupportedOperationException("접수 테스트에서는 쓰지 않는다")
 
         override fun findSendingBefore(cutoff: Instant, limit: Int): List<Transfer> = throw UnsupportedOperationException()
-        override fun findUnknownForInquiry(maxAttempts: Int, limit: Int): List<Transfer> = throw UnsupportedOperationException()
+        override fun findUnknownForInquiry(maxAttempts: Int, sendingBefore: Instant, limit: Int): List<Transfer> = throw UnsupportedOperationException()
         override fun recordInquiryAttempt(id: UUID, at: Instant): Boolean = throw UnsupportedOperationException()
     }
 

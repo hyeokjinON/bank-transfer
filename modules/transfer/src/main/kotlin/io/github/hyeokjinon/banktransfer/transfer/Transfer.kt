@@ -140,8 +140,13 @@ interface TransferStore {
     /** status = SENDING 이고 sendingAt 이 [cutoff] 보다 이른 건 (오래된 순, 최대 [limit]). */
     fun findSendingBefore(cutoff: Instant, limit: Int): List<Transfer>
 
-    /** status = UNKNOWN 이고 결과조회 시도가 [maxAttempts] 미만인 건 (오래 기다린 순, 최대 [limit]). */
-    fun findUnknownForInquiry(maxAttempts: Int, limit: Int): List<Transfer>
+    /**
+     * status = UNKNOWN 이고 결과조회 시도가 [maxAttempts] 미만이며 sendingAt 이 [sendingBefore] 보다 이른 건
+     * (오래 기다린 순, 최대 [limit]).
+     * sendingAt 조건이 유예 기간이다: 은행이 조금 느릴 뿐 원거래를 아직 처리 중일 수 있어, 그때 물으면 "처리 안 됨(2001)" 이
+     * 돌아와도 믿을 수 없다. 컨슈머가 타임아웃(3초)으로 UNKNOWN 을 적은 건도 같은 유예를 거친다.
+     */
+    fun findUnknownForInquiry(maxAttempts: Int, sendingBefore: Instant, limit: Int): List<Transfer>
 
     /** UNKNOWN 인 동안에만 결과조회 시도 횟수를 1 늘린다. 늘렸으면 true. */
     fun recordInquiryAttempt(id: UUID, at: Instant): Boolean

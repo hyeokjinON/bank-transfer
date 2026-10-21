@@ -83,7 +83,9 @@ interface TransferJpaRepository : JpaRepository<TransferEntity, String> {
 
     fun findByStatusAndSendingAtBeforeOrderBySendingAt(status: TransferStatus, cutoff: Instant, limit: Limit): List<TransferEntity>
 
-    fun findByStatusAndInquiryAttemptsLessThanOrderByUpdatedAt(status: TransferStatus, maxAttempts: Int, limit: Limit): List<TransferEntity>
+    fun findByStatusAndInquiryAttemptsLessThanAndSendingAtBeforeOrderByUpdatedAt(
+        status: TransferStatus, maxAttempts: Int, sendingBefore: Instant, limit: Limit,
+    ): List<TransferEntity>
 
     /** 결과조회 시도 +1. 상태가 바뀌었으면(컨슈머가 먼저 확정) 0 건. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
@@ -204,9 +206,11 @@ class JpaTransferStore(
         transfers.findByStatusAndSendingAtBeforeOrderBySendingAt(TransferStatus.SENDING, cutoff.toDbPrecision(), Limit.of(limit))
             .map { it.toDomain() }
 
-    override fun findUnknownForInquiry(maxAttempts: Int, limit: Int): List<Transfer> =
-        transfers.findByStatusAndInquiryAttemptsLessThanOrderByUpdatedAt(TransferStatus.UNKNOWN, maxAttempts, Limit.of(limit))
-            .map { it.toDomain() }
+    /** sending_at 조건은 원거래가 아직 처리 중일 수 있는 유예 기간이다. idx_transfer_status(status, sending_at) 를 탄다. */
+    override fun findUnknownForInquiry(maxAttempts: Int, sendingBefore: Instant, limit: Int): List<Transfer> =
+        transfers.findByStatusAndInquiryAttemptsLessThanAndSendingAtBeforeOrderByUpdatedAt(
+            TransferStatus.UNKNOWN, maxAttempts, sendingBefore.toDbPrecision(), Limit.of(limit),
+        ).map { it.toDomain() }
 
     override fun recordInquiryAttempt(id: UUID, at: Instant): Boolean =
         tx.execute { transfers.incrementInquiryAttempts(id.toString(), TransferStatus.UNKNOWN, at.toDbPrecision()) == 1 }!!

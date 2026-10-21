@@ -33,7 +33,7 @@ class TransferProcessorTest {
         }
 
         override fun findSendingBefore(cutoff: Instant, limit: Int): List<Transfer> = emptyList()
-        override fun findUnknownForInquiry(maxAttempts: Int, limit: Int): List<Transfer> = emptyList()
+        override fun findUnknownForInquiry(maxAttempts: Int, sendingBefore: Instant, limit: Int): List<Transfer> = emptyList()
         override fun recordInquiryAttempt(id: UUID, at: Instant) = false
     }
 

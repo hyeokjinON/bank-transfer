@@ -36,8 +36,10 @@ class TransferReconcilerTest {
         override fun findSendingBefore(cutoff: Instant, limit: Int) =
             transfers.values.filter { it.status == SENDING && it.sendingAt!!.isBefore(cutoff) }.take(limit)
 
-        override fun findUnknownForInquiry(maxAttempts: Int, limit: Int) =
-            transfers.values.filter { it.status == UNKNOWN && it.inquiryAttempts < maxAttempts }.take(limit)
+        override fun findUnknownForInquiry(maxAttempts: Int, sendingBefore: Instant, limit: Int) =
+            transfers.values
+                .filter { it.status == UNKNOWN && it.inquiryAttempts < maxAttempts && it.sendingAt!!.isBefore(sendingBefore) }
+                .sortedBy { it.updatedAt }.take(limit)
 
         override fun recordInquiryAttempt(id: UUID, at: Instant): Boolean {
             val current = transfers[id] ?: return false
@@ -66,7 +68,11 @@ class TransferReconcilerTest {
     )
 
     private var seq = 0
-    private fun transfer(status: TransferStatus, sendingAt: Instant? = null): Transfer {
+    private fun transfer(
+        status: TransferStatus,
+        // 실제 UNKNOWN 은 SENDING 을 거쳐 오므로 sendingAt 이 항상 있다. 기본값은 30초 유예가 지난 시각.
+        sendingAt: Instant? = if (status == UNKNOWN) now.minusSeconds(60) else null,
+    ): Transfer {
         val t = Transfer(
             id = UUID.randomUUID(), idempotencyKey = "k${++seq}", reference = "T26102100000000000%02d".format(seq),
             requestHash = "h", bankCode = "090", accountNo = "1002123456789", amount = 1_000, memo = "m",
@@ -126,6 +132,21 @@ class TransferReconcilerTest {
         assertEquals(3, store.transfers.getValue(t.id).inquiryAttempts)
         assertEquals(3, inquiry.calls)                 // 4번째에는 묻지 않는다
         assertEquals(listOf(t.id), gaveUp.map { it.id })
+    }
+
+    @Test
+    fun `UNKNOWN 이어도 sendingAt 이 30초 안쪽이면 아직 묻지 않는다 - 느린 은행의 2001 을 믿을 수 없다`() {
+        val fresh = transfer(UNKNOWN, sendingAt = now.minusSeconds(1))     // 컨슈머가 3초 타임아웃으로 방금 UNKNOWN 으로 적은 건
+        val old = transfer(UNKNOWN, sendingAt = now.minusSeconds(31))
+        inquiry.outcomes[old.reference] = { InquiryOutcome.Processed }
+
+        val result = reconciler().reconcile()
+
+        assertEquals(1, inquiry.calls)                                      // 오래된 건 하나만 묻는다
+        assertEquals(1, result.completed)
+        assertEquals(COMPLETED, store.transfers.getValue(old.id).status)
+        assertEquals(UNKNOWN, store.transfers.getValue(fresh.id).status)
+        assertEquals(0, store.transfers.getValue(fresh.id).inquiryAttempts) // 시도 횟수도 늘지 않는다
     }
 
     @Test
