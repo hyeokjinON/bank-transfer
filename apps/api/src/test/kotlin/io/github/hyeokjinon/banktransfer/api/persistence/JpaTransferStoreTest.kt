@@ -131,4 +131,52 @@ class JpaTransferStoreTest : ApiIntegrationTest() {
         assertEquals("0000", after.bankResponseCode)
         assertEquals(at, after.updatedAt)
     }
+
+    @Test
+    fun `멈춘 SENDING 조회 - 기준 시각보다 오래된 SENDING 만`() {
+        val old = newTransfer().also { store.saveWithEvent(it, requested(it)) }
+        val recent = newTransfer().also { store.saveWithEvent(it, requested(it)) }
+        val now = Instant.now()
+        store.transition(old.id, TransferStatus.RECEIVED, TransferStatus.SENDING, now.minusSeconds(60))
+        store.transition(recent.id, TransferStatus.RECEIVED, TransferStatus.SENDING, now)
+
+        val found = store.findSendingBefore(now.minusSeconds(30), 1_000).map { it.id }
+
+        assertTrue(old.id in found)
+        assertFalse(recent.id in found)
+    }
+
+    @Test
+    fun `결과조회 대상 - sending_at 이 유예 기준보다 이른 UNKNOWN 만`() {
+        val now = Instant.now()
+        val old = newTransfer().also { store.saveWithEvent(it, requested(it)) }
+        val fresh = newTransfer().also { store.saveWithEvent(it, requested(it)) }
+        listOf(old to now.minusSeconds(31), fresh to now.minusSeconds(1)).forEach { (t, sendingAt) ->
+            store.transition(t.id, TransferStatus.RECEIVED, TransferStatus.SENDING, sendingAt)
+            store.transition(t.id, TransferStatus.SENDING, TransferStatus.UNKNOWN, now)   // updated_at 은 now, sending_at 은 그대로
+        }
+
+        val found = store.findUnknownForInquiry(10, now.minusSeconds(30), 1_000).map { it.id }
+
+        assertTrue(old.id in found)
+        assertFalse(fresh.id in found)   // 방금 UNKNOWN 이 된 건은 유예 안쪽 — 아직 묻지 않는다
+    }
+
+    @Test
+    fun `결과조회 대상 - 시도 횟수가 한도 미만인 UNKNOWN, 시도 기록은 UNKNOWN 일 때만`() {
+        val unknown = newTransfer().also { store.saveWithEvent(it, requested(it)) }
+        val at = Instant.now()
+        store.transition(unknown.id, TransferStatus.RECEIVED, TransferStatus.SENDING, at)
+        store.transition(unknown.id, TransferStatus.SENDING, TransferStatus.UNKNOWN, at)
+
+        assertTrue(store.recordInquiryAttempt(unknown.id, at))
+
+        assertEquals(1, store.findById(unknown.id)!!.inquiryAttempts)
+        val graceOver = at.plusSeconds(1)   // sending_at(at) 은 이 기준보다 이르다
+        assertFalse(unknown.id in store.findUnknownForInquiry(1, graceOver, 1_000).map { it.id })
+        assertTrue(unknown.id in store.findUnknownForInquiry(2, graceOver, 1_000).map { it.id })
+
+        val received = newTransfer().also { store.saveWithEvent(it, requested(it)) }
+        assertFalse(store.recordInquiryAttempt(received.id, at))   // UNKNOWN 이 아니면 늘리지 않는다
+    }
 }

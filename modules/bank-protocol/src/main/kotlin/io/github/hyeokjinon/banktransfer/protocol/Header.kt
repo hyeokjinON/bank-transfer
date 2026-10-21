@@ -25,7 +25,8 @@ enum class MessageClass(val code: String, val isRequest: Boolean) {
 enum class BizType(val code: String) {
     POLL("PLL"),          // 링크 체크
     NAME_INQUIRY("NAM"),  // 예금주 성명조회
-    TRANSFER("TRF");      // 지급이체 (1원 인증에도 사용)
+    TRANSFER("TRF"),      // 지급이체 (1원 인증에도 사용)
+    INQUIRY("INQ");       // 결과조회 (v0.2)
 
     companion object {
         fun of(code: String): BizType =
@@ -36,6 +37,7 @@ enum class BizType(val code: String) {
 object ResponseCodes {
     const val OK = "0000"
     const val ACCOUNT_NOT_FOUND = "1001"
+    const val ORIGINAL_NOT_FOUND = "2001"   // 결과조회: 원거래 없음
     const val SYSTEM_ERROR = "9999"
 }
 

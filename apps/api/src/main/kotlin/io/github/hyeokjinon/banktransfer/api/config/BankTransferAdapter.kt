@@ -16,9 +16,9 @@ import java.util.concurrent.ExecutionException
 class BankTransferAdapter(private val client: BankGatewayClient) : BankTransferPort {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    override fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String): BankTransferOutcome =
+    override fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String, reference: String): BankTransferOutcome =
         try {
-            val response = client.transfer(bankCode, accountNo, amount, memo).get()
+            val response = client.transfer(bankCode, accountNo, amount, memo, reference).get()
             if (response.header.isOk) BankTransferOutcome.Completed else BankTransferOutcome.Rejected(response.header.responseCode)
         } catch (e: ExecutionException) {
             // 예외를 던지지 않고 NotSent 를 돌려줘야 한다: 프로세서는 포트가 던진 예외를 전부 "결과 모름(UNKNOWN)"으로 취급한다

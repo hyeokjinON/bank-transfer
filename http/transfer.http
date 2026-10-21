@@ -71,3 +71,55 @@ Content-Type: application/json
   "amount": 10000,
   "memo": "출금"
 }
+
+
+### ============================================================
+### 손 확인: 처리 후 무응답 → 결과조회로 COMPLETED (P3-3a)
+### 모의 은행 9990000000002 (예금주 "무응답") 는 이체를 처리하고 응답만 하지 않는다. 1원 이체는 정상 응답한다.
+### 순서: ① 1원인증으로 이 계좌를 VERIFIED 로 만든다 → ② 접수 → ③ 접수 몇 초 뒤 조회하면 UNKNOWN → ④ 접수 40초쯤 뒤(30초 유예 + 최대 10초 주기, 30초에 보면 아직 UNKNOWN 일 수 있다) 조회하면 COMPLETED
+### (정리 작업이 10초마다 은행에 결과조회를 보낸다. API 콘솔의 "reconcile:" 로그, 모의 은행 콘솔의 "[결과조회]" 로그로도 확인할 수 있다.)
+### ============================================================
+
+### 7-1) 1원인증 요청 (account-verification.http 와 같은 API) → 응답 id 저장
+POST http://localhost:8080/api/v1/account-verifications
+Content-Type: application/json
+
+{
+  "bankCode": "090",
+  "accountNo": "9990000000002",
+  "holderName": "무응답"
+}
+
+> {%
+    client.global.set("silentVerificationId", response.body.id);
+%}
+
+### 7-2) 코드 확인: 모의 은행 콘솔의 [통장] 9990000000002 입금 1원 적요='BT1234' 에서 숫자 4자리를 code 에 넣는다 → VERIFIED
+POST http://localhost:8080/api/v1/account-verifications/{{silentVerificationId}}/confirm
+Content-Type: application/json
+
+{
+  "code": "0000"
+}
+
+### 7-3) 그 계좌로 출금 접수 → 202 RECEIVED
+POST http://localhost:8080/api/v1/transfers
+Content-Type: application/json
+Idempotency-Key: {{$random.uuid}}
+
+{
+  "bankCode": "090",
+  "accountNo": "9990000000002",
+  "amount": 30000,
+  "memo": "결과조회"
+}
+
+> {%
+    client.global.set("silentTransferId", response.body.id);
+%}
+
+### 7-4) 접수 몇 초 뒤(3~4초) 조회 → SENDING 또는 UNKNOWN. 30초 유예 동안은 UNKNOWN 으로 남는다 (은행은 입금을 처리했지만 응답이 없어 결과를 모른다. 다시 보내지 않는다)
+GET http://localhost:8080/api/v1/transfers/{{silentTransferId}}
+
+### 7-5) 접수 40초쯤 뒤 조회 → COMPLETED (30초 유예 뒤 정리 작업의 결과조회가 0000 으로 확정; 유예 30초 + 최대 10초 주기). 모의 은행 콘솔의 입금은 1건뿐이다
+GET http://localhost:8080/api/v1/transfers/{{silentTransferId}}

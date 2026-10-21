@@ -41,6 +41,8 @@ data class Transfer(
     val status: TransferStatus,
     val bankResponseCode: String? = null,
     val sendingAt: Instant? = null,
+    /** 결과조회를 시도했는데 은행도 답하지 않은 횟수 (P3-3a). 한도에 닿으면 정리 작업이 멈춘다. */
+    val inquiryAttempts: Int = 0,
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
@@ -79,7 +81,23 @@ sealed interface BankTransferOutcome {
 
 /** 은행 출금이체 포트. 결과가 나올 때까지 호출 스레드에서 기다린다 (Kafka 컨슈머 스레드가 부른다). */
 fun interface BankTransferPort {
-    fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String): BankTransferOutcome
+    /** [reference] = 이용기관 거래번호. 결과를 모를 때 이 번호로 결과조회한다. */
+    fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String, reference: String): BankTransferOutcome
+}
+
+/** 결과조회 결과. 처리됨 · 처리 안 됨(확정) · 모름(조회에도 답이 없음 등). */
+sealed interface InquiryOutcome {
+    data object Processed : InquiryOutcome
+
+    /** 은행에 원거래가 없다 = 처리되지 않았다. [responseCode] 는 은행 처리결과 코드 (예: 2001). */
+    data class NotProcessed(val responseCode: String) : InquiryOutcome
+
+    data object Unknown : InquiryOutcome
+}
+
+/** 은행 결과조회 포트. 이체를 다시 보내지 않고 "처리했나?"만 묻는다. */
+fun interface BankInquiryPort {
+    fun inquire(reference: String): InquiryOutcome
 }
 
 data class RequestTransfer(
@@ -118,6 +136,20 @@ interface TransferStore {
      * [to] 가 SENDING 이면 sendingAt 도 [at] 으로 기록한다. bankResponseCode 는 주어진 값으로 덮어쓴다.
      */
     fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String? = null): Boolean
+
+    /** status = SENDING 이고 sendingAt 이 [cutoff] 보다 이른 건 (오래된 순, 최대 [limit]). */
+    fun findSendingBefore(cutoff: Instant, limit: Int): List<Transfer>
+
+    /**
+     * status = UNKNOWN 이고 결과조회 시도가 [maxAttempts] 미만이며 sendingAt 이 [sendingBefore] 보다 이른 건
+     * (오래 기다린 순, 최대 [limit]).
+     * sendingAt 조건이 유예 기간이다: 은행이 조금 느릴 뿐 원거래를 아직 처리 중일 수 있어, 그때 물으면 "처리 안 됨(2001)" 이
+     * 돌아와도 믿을 수 없다. 컨슈머가 타임아웃(3초)으로 UNKNOWN 을 적은 건도 같은 유예를 거친다.
+     */
+    fun findUnknownForInquiry(maxAttempts: Int, sendingBefore: Instant, limit: Int): List<Transfer>
+
+    /** UNKNOWN 인 동안에만 결과조회 시도 횟수를 1 늘린다. 늘렸으면 true. */
+    fun recordInquiryAttempt(id: UUID, at: Instant): Boolean
 }
 
 /** 저장소가 UNIQUE 제약 위반을 도메인 말로 알려 줄 때 쓴다. */

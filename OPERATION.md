@@ -23,6 +23,12 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 | `transfer.outbox.relay.enabled` | `true` | 폴링 퍼블리셔 스케줄 on/off (테스트는 끄고 직접 호출) |
 | `transfer.outbox.relay.interval-ms` | `500` | 미발행 아웃박스 폴링 간격 (이전 실행이 끝난 뒤부터 잰다) |
 | `transfer.outbox.relay.batch-size` | `100` | 한 번에 발행하는 최대 건수 |
+| `transfer.reconcile.enabled` | `true` | 정리 작업 스케줄 on/off (테스트는 끄고 직접 호출) |
+| `transfer.reconcile.interval-ms` | `10000` | 정리 작업 주기 (이전 실행이 끝난 뒤부터 잰다) |
+| `transfer.reconcile.sending-timeout` | `30s` | 이보다 오래 `SENDING` 이면 `UNKNOWN` 으로 보고 결과조회 |
+| `transfer.reconcile.max-inquiries` | `10` | 결과조회도 모르면 이 횟수에서 멈추고 경고 (일마감 대사 대상) |
+| `transfer.reconcile.batch-size` | `100` | 한 번에 처리하는 최대 건수 |
+| `spring.task.scheduling.pool.size` | `2` | 스케줄러 스레드. 발행기(0.5초)와 정리 작업(10초)이 서로 막지 않게 한다 |
 | `bank.gateway.host` / `port` | `localhost` / `9090` | 은행 FEP 주소 |
 | `bank.gateway.response-timeout` | `3s` | 응답 대기. 넘으면 504 `BANK_TIMEOUT` |
 | `bank.gateway.poll-interval` | `30s` | 쓰기 유휴 시 폴링 주기. ×3 동안 수신이 없으면 연결 종료 |
@@ -44,15 +50,33 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 
 보기: kafka-ui — `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile tools up -d` 후 http://localhost:8089 에서 토픽의 메시지와 그룹 `transfer-processor` 의 랙(밀린 메시지 수)을 본다.
 
+### 정리 작업 (결과를 모르는 이체 확정, P3-3a)
+10초마다(이전 실행이 끝난 뒤부터) 한 번에 최대 100건씩 돈다. 은행에 **다시 보내지 않고 묻기만 한다** ([ADR-0006](docs/adr/0006-inquire-instead-of-resend.md)).
+
+| 순서 | 대상 | 동작 |
+|---|---|---|
+| 1 | `status = SENDING` 이고 `sending_at` 이 30초보다 오래된 건 | `UNKNOWN` 으로 바꾼다 (컨슈머가 죽었거나 은행 응답 뒤 DB 기록이 실패한 경우) |
+| 2 | `UNKNOWN` 이고 `sending_at` 이 30초보다 오래된 건, `inquiry_attempts < 10` | 결과조회(`INQ`): 처리됨(`0000`) → `COMPLETED`, 원거래 없음(`2001`) → `FAILED`, 모름 → `inquiry_attempts + 1` |
+
+- 30초 유예는 컨슈머가 3초 타임아웃으로 적은 `UNKNOWN` 에도 똑같이 적용된다(은행이 조금 느릴 뿐이면 아직 처리 중이라 `2001` 을 믿을 수 없다). 그래서 `UNKNOWN` 은 접수 후 몇 초 만에 보이지만 `COMPLETED` / `FAILED` 는 접수로부터 대략 30~40초 뒤(유예 30초 + 최대 10초 주기)에 확정된다. 단계 1 이 방금 `UNKNOWN` 으로 바꾼 건은 이미 30초가 지났으므로 같은 주기에 바로 묻는다.
+- 10번째에도 모르면 더 묻지 않고 경고를 남긴다 → 일마감 대사(P5) 대상. 대상 조회: [database.md §9](docs/database.md).
+- 로그: `reconcile: ReconcileResult(…)` (한 일이 있을 때만, INFO) · `still UNKNOWN after 10 inquiries, leave it to daily reconciliation: …` (한도 도달, WARN) · `bank inquiry inconclusive: reference=… reason=…` (조회가 답을 못 얻음, WARN) · `reconcile failed, retrying next round` (DB 장애 등, 다음 주기에 다시).
+- 정리 작업이 먼저 `UNKNOWN` 으로 바꾼 뒤 컨슈머가 은행의 확정 결과를 받으면 컨슈머가 `UNKNOWN → COMPLETED/FAILED` 로 기록한다. 이미 반대 결과로 확정돼 있으면 `conflict: bank result differs …` 경고가 남는다 → 사람이 확인한다.
+- 알려진 한계: 게이트웨이 연결이 없을 때의 조회도 시도 1회로 센다. 10초 × 10회 ≈ 100초보다 긴 은행 점검이면 그동안의 `UNKNOWN` 이 모두 한도에 닿아 대사로 넘어간다 (P3-3b 에서 정리, [HANDOVER](HANDOVER.md)).
+
 ## 3. 모의 은행 시나리오
 | 계좌번호 | 예금주 | 동작 |
 |---|---|---|
 | `1002123456789` | 홍길동 | 정상. 이체 시 콘솔에 `[통장] … 입금 1원 적요='BT1234'` |
 | `3333012345678` | 김카뱅 | 정상 (이름을 다르게 보내면 422 불일치 확인용) |
 | `1101234567890` | 이페이 | 정상 |
+| `9990000000002` | 무응답 | **처리하고 응답만 안 한다.** 출금 이체(2원 이상)는 입금을 기록하고 응답하지 않는다 → 타임아웃 후 `UNKNOWN`, 결과조회 `INQ` 는 `0000`. **1원 이체는 정상 응답**하므로 1원인증으로 이 계좌를 VERIFIED 로 만들 수 있다 |
+| `9990000000001` | – | 테스트 전용: `MockBankServer(silentAccounts = setOf(…))` 로 지정했을 때 **처리도 응답도 안 한다** (결과조회 → `2001`). 모의 은행을 직접 띄울 때는 기본 계좌가 아니다 |
 | 그 외 | – | 성명조회 `1001` → 404 `ACCOUNT_NOT_FOUND` |
 
+처리한 이체는 이용기관 거래번호로 기억하고, 결과조회는 기억한 번호면 `0000`, 아니면 `2001` 로 답한다.
 테스트 코드에서는 `MockBankServer(silentAccounts = …)` 로 무응답(타임아웃), `responseDelay` 로 지연을 만든다.
+손 확인 절차: [`http/transfer.http`](http/transfer.http) 의 "손 확인: 처리 후 무응답" 절.
 
 ## 4. API 오류 코드
 | 상황 | HTTP | code |
@@ -92,10 +116,10 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env down -v        
 |---|---|---|
 | 은행 호출이 계속 503 | API 로그의 재접속 메시지, 모의 은행 실행 여부 | 은행 미기동/포트 불일치 → 9090 확인. 재접속은 자동 (최대 30초 간격) |
 | 504 `BANK_TIMEOUT` 이 잦음 | 은행 응답 지연, 폴링 로그 | 3초 안에 응답 없음. **이체는 은행에서 처리됐을 수 있다** → P3 부터는 결과조회로 확정 (재전송 금지) |
-| 이체가 `UNKNOWN` 으로 남아 있음 | `transfer` 의 `status`, 컨슈머 로그 | 응답 시간 초과 · 보낸 뒤 연결 끊김 · 포트 예외. 은행이 처리했을 수 있다 → **P3-3 결과조회 전까지 그대로 둔다 (재전송 금지)** |
-| 이체가 `SENDING` 에서 안 넘어감 | `sending_at` ([database.md §9](docs/database.md)) | 은행이 응답한 뒤 DB 기록이 실패했거나, `SENDING` 커밋 뒤 또는 은행 호출 도중 앱이 죽은 경우. 둘 다 P3-3 정리 작업이 30초 넘은 건을 `UNKNOWN` 으로 바꿔 처리한다 |
-| 이체가 `RECEIVED` 에서 안 넘어감 | 릴레이 로그(`outbox relay failed`) · `outbox_event.published_at` · 컨슈머 랙 · 앱 로그 | 흔한 원인: 은행 연결 없음(재시도 5회 뒤 로그만 남기고 넘어감), 컨슈머 중단 · 랙, 첫 상태 전환(`RECEIVED → SENDING`)의 DB 실패, 메시지 key 가 UUID 가 아님. 발행 전(`published_at` NULL)이면 Kafka 접속부터 확인한다. 어느 쪽이든 P3-3 전까지는 자동으로 되살리지 않는다 (P3-3 에서 재시도 토픽 · DLT) |
-| `late or unknown response tranNo=…` 경고 | 전문번호 | 타임아웃 후 도착한 응답. 현재는 로그만 남긴다 |
+| 이체가 `UNKNOWN` 으로 남아 있음 | `transfer` 의 `status` · `inquiry_attempts`, 정리 작업 로그(`reconcile:`) | 응답 시간 초과 · 보낸 뒤 연결 끊김 · 포트 예외. 은행이 처리했을 수 있다 → **정리 작업이 `sending_at` 30초 유예 뒤부터 10초마다 결과조회(그 전에는 `inquiry_attempts = 0` 이 정상), 10번 후에도 모르면 경고(`still UNKNOWN after`) → 일마감 대사.** 재전송하지 않는다. 계속 `UNKNOWN` 이면 은행 연결(503)과 `bank inquiry inconclusive` 로그를 본다 |
+| 이체가 `SENDING` 에서 안 넘어감 | `sending_at` ([database.md §9](docs/database.md)) | 은행이 응답한 뒤 DB 기록이 실패했거나, `SENDING` 커밋 뒤 또는 은행 호출 도중 앱이 죽은 경우. 둘 다 30초 뒤 정리 작업이 `UNKNOWN` 으로 바꾸고 결과조회로 확정한다 |
+| 이체가 `RECEIVED` 에서 안 넘어감 | 릴레이 로그(`outbox relay failed`) · `outbox_event.published_at` · 컨슈머 랙 · 앱 로그 | 흔한 원인: 은행 연결 없음(재시도 5회 뒤 로그만 남기고 넘어감), 컨슈머 중단 · 랙, 첫 상태 전환(`RECEIVED → SENDING`)의 DB 실패, 메시지 key 가 UUID 가 아님. 발행 전(`published_at` NULL)이면 Kafka 접속부터 확인한다. 어느 쪽이든 P3-3b 전까지는 자동으로 되살리지 않는다 (P3-3b 에서 재시도 토픽 · DLT · 오래된 `RECEIVED` 재발행) |
+| `late or unknown response tranNo=…` 경고 | 전문번호 | 타임아웃 후 도착한 응답. 로그만 남긴다 (게이트웨이). 결과는 정리 작업의 결과조회로 확정한다. **남는 위험**: 은행이 30초 유예보다 더 늦게 처리하면 조회가 `2001` 을 답해 `FAILED` 로 확정되고, 이후 도착한 이체 응답은 이 로그만 남는다(돈은 나갔는데 `FAILED`) → 일마감 대사(P5)가 맞춘다. 이 로그에는 거래번호가 없어 어느 건인지 바로 알 수 없다 (P3-3b) |
 | 길이 필드 오류로 연결이 끊김 | `CorruptedFrameException` | 스트림 경계를 잃음 → 연결 종료 후 재접속이 정상 동작 |
 | Kafka 접속은 되는데 메시지가 안 감 | `advertised.listeners` | PC 앱은 `localhost:9092`, 컨테이너는 `kafka:29092` |
 | Kafka `Invalid cluster.id` | `.env` 의 `KAFKA_CLUSTER_ID` 변경 여부 | `down -v` 후 다시 `up` |

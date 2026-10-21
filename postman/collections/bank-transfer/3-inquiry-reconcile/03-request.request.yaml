@@ -1,0 +1,28 @@
+$kind: http-request
+name: 3-3 무응답 계좌로 출금 접수 → 202 RECEIVED
+method: POST
+url: '{{baseUrl}}/api/v1/transfers'
+order: 3000
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: Idempotency-Key
+    value: '{{$guid}}'
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "9990000000002",
+      "amount": 30000,
+      "memo": "결과조회"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("202 RECEIVED", () => {
+        pm.response.to.have.status(202);
+        pm.expect(pm.response.json().status).to.eql("RECEIVED");
+      });
+      pm.collectionVariables.set("silentTransferId", pm.response.json().id);

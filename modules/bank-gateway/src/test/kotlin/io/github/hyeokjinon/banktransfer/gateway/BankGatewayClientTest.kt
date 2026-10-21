@@ -64,7 +64,7 @@ class BankGatewayClientTest {
         val client = client(bank.boundPort).start()
         waitUntil { client.isConnected }
 
-        val futures = (1..50).map { i -> client.transfer("090", "1002123456789", i.toLong(), "T$i") }
+        val futures = (1..50).map { i -> client.transfer("090", "1002123456789", i.toLong(), "T$i", "R$i") }
         val responses = futures.map { it.get(5, TimeUnit.SECONDS) }
 
         responses.forEachIndexed { i, res -> assertEquals("T${i + 1}", res.memo) }
@@ -98,7 +98,7 @@ class BankGatewayClientTest {
         val client = client(bank.boundPort, timeout = Duration.ofSeconds(5)).start()
         waitUntil { client.isConnected }
 
-        val pending = client.transfer("090", "9990000000001", 1, "x")
+        val pending = client.transfer("090", "9990000000001", 1, "x", "R1")
         bank.close()
 
         val failure = pending.awaitFailure()
@@ -125,6 +125,39 @@ class BankGatewayClientTest {
 
         waitUntil { bank.pollCount >= 2 }
         assertTrue(client.isConnected)
+    }
+
+    @Test
+    fun `결과조회 - 처리한 거래번호는 0000, 모르는 번호는 2001`() {
+        val bank = MockBankServer().start().closeLater()
+        val client = client(bank.boundPort).start()
+        waitUntil { client.isConnected }
+
+        client.transfer("090", "1002123456789", 1_000, "m", "T2610210000000000001").get(5, TimeUnit.SECONDS)
+
+        assertEquals(ResponseCodes.OK, client.inquire("T2610210000000000001").get(5, TimeUnit.SECONDS).result)
+        assertEquals(ResponseCodes.ORIGINAL_NOT_FOUND, client.inquire("T2610219999999999999").get(5, TimeUnit.SECONDS).result)
+    }
+
+    @Test
+    fun `처리하고 응답만 안 한 은행 - 이체는 시간 초과, 결과조회는 처리됨`() {
+        val bank = MockBankServer().start().closeLater()   // 9990000000002 = 처리 후 무응답 (기본값)
+        val client = client(bank.boundPort, timeout = Duration.ofMillis(300)).start()
+        waitUntil { client.isConnected }
+
+        assertIs<BankTimeoutException>(client.transfer("090", "9990000000002", 1_000, "m", "T2610210000000000002").awaitFailure())
+
+        assertTrue(bank.hasProcessed("T2610210000000000002"))
+        assertEquals(ResponseCodes.OK, client.inquire("T2610210000000000002").get(5, TimeUnit.SECONDS).result)
+    }
+
+    @Test
+    fun `처리 후 무응답 계좌도 1원 이체에는 응답한다 (1원인증으로 수취 계좌 등록)`() {
+        val bank = MockBankServer().start().closeLater()
+        val client = client(bank.boundPort).start()
+        waitUntil { client.isConnected }
+
+        assertEquals(ResponseCodes.OK, client.transfer("090", "9990000000002", 1, "BT1234", "V2610210000000000001").get(5, TimeUnit.SECONDS).header.responseCode)
     }
 
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }

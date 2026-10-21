@@ -32,7 +32,7 @@ class BankTransferAdapterTest {
     fun `연결이 없으면 NotSent`() {
         val closedPort = MockBankServer().start().use { it.boundPort }   // 닫힌 포트
         BankGatewayClient(BankGatewayConfig(host = "localhost", port = closedPort)).start().use { client ->
-            assertEquals(BankTransferOutcome.NotSent, BankTransferAdapter(client).transfer("090", "1002123456789", 1_000, "m"))
+            assertEquals(BankTransferOutcome.NotSent, BankTransferAdapter(client).transfer("090", "1002123456789", 1_000, "m", "T2610210000000000099"))
         }
     }
 
@@ -41,7 +41,7 @@ class BankTransferAdapterTest {
         mockBank().use { bank ->
             newClient(bank).use { client ->
                 awaitConnected(client)
-                assertEquals(BankTransferOutcome.ResultUnknown, BankTransferAdapter(client).transfer("090", silent, 1_000, "m"))
+                assertEquals(BankTransferOutcome.ResultUnknown, BankTransferAdapter(client).transfer("090", silent, 1_000, "m", "T2610210000000000099"))
             }
         }
     }
@@ -51,7 +51,7 @@ class BankTransferAdapterTest {
         mockBank().use { bank ->
             newClient(bank).use { client ->
                 awaitConnected(client)
-                assertEquals(BankTransferOutcome.Completed, BankTransferAdapter(client).transfer("090", "1002123456789", 1_000, "m"))
+                assertEquals(BankTransferOutcome.Completed, BankTransferAdapter(client).transfer("090", "1002123456789", 1_000, "m", "T2610210000000000099"))
             }
         }
     }
@@ -61,7 +61,7 @@ class BankTransferAdapterTest {
         mockBank().use { bank ->
             newClient(bank).use { client ->
                 awaitConnected(client)
-                assertEquals(BankTransferOutcome.Rejected("1001"), BankTransferAdapter(client).transfer("090", "5500000000009", 1_000, "m"))
+                assertEquals(BankTransferOutcome.Rejected("1001"), BankTransferAdapter(client).transfer("090", "5500000000009", 1_000, "m", "T2610210000000000099"))
             }
         }
     }
@@ -73,7 +73,7 @@ class BankTransferAdapterTest {
         try {
             newClient(bank, timeout = Duration.ofSeconds(5)).use { client ->
                 awaitConnected(client)
-                val outcome = pool.submit<BankTransferOutcome> { BankTransferAdapter(client).transfer("090", silent, 1_000, "m") }
+                val outcome = pool.submit<BankTransferOutcome> { BankTransferAdapter(client).transfer("090", silent, 1_000, "m", "T2610210000000000099") }
                 // 요청이 은행으로 나가 응답을 기다리는 상태가 될 때까지 기다린 뒤 은행을 닫는다
                 val deadline = System.currentTimeMillis() + 5_000
                 while (client.pendingCount == 0) {

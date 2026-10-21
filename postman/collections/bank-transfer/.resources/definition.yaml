@@ -1,10 +1,11 @@
 $kind: collection
-name: bank-transfer (P3-1 손 확인)
+name: bank-transfer (손 확인)
 description: |-
   P3-1 머지 전 손 확인용. 먼저 infra(docker compose)를 띄우고 IntelliJ 실행 구성 "0. Mock Bank + API" 를 실행한다.
   1) "1. 1원인증" 폴더의 요청을 위에서부터 하나씩 Send → 모의 은행 콘솔의 적요 숫자 4자리를 컬렉션 변수 code 에 넣고 "코드 확인" Send.
   2) "2. 출금이체 접수" 폴더를 위에서부터 Send 하거나, 폴더 ⋯ → Run 으로 한 번에 실행. 각 응답 아래 Test Results 에 통과/실패가 나온다.
   3) API 를 재시작한 뒤 "2-2 조회" 만 다시 Send → 같은 건이면 DB 에 저장된 것.
+  4) (P3-3a) "3. 결과조회 · 정리 작업" 폴더를 위에서부터 Send. 3-1 뒤 모의 은행 콘솔의 적요 숫자를 code 에 넣고 3-2. 3-3 접수 뒤 3~4초쯤 기다려 3-4, 접수로부터 40초쯤(30초 유예 + 최대 10초 주기) 지난 뒤 3-5. 아직 UNKNOWN 이면 몇 초 뒤 다시 Send.
   대응 파일: http/account-verification.http, http/transfer.http (IntelliJ Ultimate 용)
 variables:
   baseUrl: http://localhost:8080
@@ -13,3 +14,5 @@ variables:
   verificationId: ""
   idemKey: ""
   transferId: ""
+  silentVerificationId: ""
+  silentTransferId: ""

@@ -1,0 +1,28 @@
+$kind: http-request
+name: 3-2 코드 확인 (code 변수 먼저 입력)
+method: POST
+url: '{{baseUrl}}/api/v1/account-verifications/{{silentVerificationId}}/confirm'
+order: 2000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "code": "{{code}}"
+    }
+scripts:
+  - type: beforeRequest
+    language: text/javascript
+    code: |-
+      if (!/^\d{4}$/.test(pm.variables.get("code") || "")) {
+        throw new Error("컬렉션 변수 code 에 모의 은행 콘솔의 적요 숫자 4자리를 넣으세요");
+      }
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("200 VERIFIED", () => {
+        pm.response.to.have.status(200);
+        pm.expect(pm.response.json().status).to.eql("VERIFIED");
+      });

@@ -1,0 +1,15 @@
+$kind: http-request
+name: 3-5 접수 40초쯤 뒤 조회 → COMPLETED 0000 (30초 유예 뒤 결과조회로 확정)
+method: GET
+url: '{{baseUrl}}/api/v1/transfers/{{silentTransferId}}'
+order: 5000
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // 모의 은행 콘솔의 30000원 입금은 1건뿐이어야 한다 (재전송 없음).
+      pm.test("COMPLETED, 은행 응답코드 0000", () => {
+        pm.response.to.have.status(200);
+        pm.expect(pm.response.json().status).to.eql("COMPLETED");
+        pm.expect(pm.response.json().bankResponseCode).to.eql("0000");
+      });

@@ -9,7 +9,8 @@ import java.time.format.DateTimeFormatter
  * 개별부 레이아웃 (공통부 33바이트 뒤)
  * - 성명조회 요청: 은행코드 3 + 계좌번호 16
  * - 성명조회 응답: 요청 + 예금주명 20
- * - 이체 요청/응답: 은행코드 3 + 계좌번호 16 + 금액 13 + 적요 20
+ * - 이체 요청/응답: 은행코드 3 + 계좌번호 16 + 금액 13 + 적요 20 + 이용기관 거래번호 20 (v0.2)
+ * - 결과조회 요청: 이용기관 거래번호 20 / 응답: 거래번호 20 + 처리결과 4 (v0.2)
  */
 object BankMessageSerializer {
     private val DATE_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
@@ -21,8 +22,10 @@ object BankMessageSerializer {
             is PollRequest, is PollResponse -> Unit
             is NameInquiryRequest -> w.text(message.bankCode, 3).text(message.accountNo, 16)
             is NameInquiryResponse -> w.text(message.bankCode, 3).text(message.accountNo, 16).text(message.holderName, 20)
-            is TransferRequest -> w.transferBody(message.bankCode, message.accountNo, message.amount, message.memo)
-            is TransferResponse -> w.transferBody(message.bankCode, message.accountNo, message.amount, message.memo)
+            is TransferRequest -> w.transferBody(message.bankCode, message.accountNo, message.amount, message.memo, message.reference)
+            is TransferResponse -> w.transferBody(message.bankCode, message.accountNo, message.amount, message.memo, message.reference)
+            is InquiryRequest -> w.text(message.reference, 20)
+            is InquiryResponse -> w.text(message.reference, 20).text(message.result, 4)
         }
         return w.toByteArray()
     }
@@ -44,8 +47,13 @@ object BankMessageSerializer {
                 val accountNo = r.text(16)
                 val amount = r.number(13)
                 val memo = r.text(20)
-                if (request) TransferRequest(header, bankCode, accountNo, amount, memo)
-                else TransferResponse(header, bankCode, accountNo, amount, memo)
+                val reference = r.text(20)
+                if (request) TransferRequest(header, bankCode, accountNo, amount, memo, reference)
+                else TransferResponse(header, bankCode, accountNo, amount, memo, reference)
+            }
+            BizType.INQUIRY -> {
+                val reference = r.text(20)
+                if (request) InquiryRequest(header, reference) else InquiryResponse(header, reference, r.text(4))
             }
         }
         if (r.remaining != 0) throw ProtocolException("unexpected ${r.remaining} trailing bytes for ${header.bizType}")
@@ -70,6 +78,6 @@ object BankMessageSerializer {
         return Header(messageClass, bizType, tranNo, dateTime, r.text(4))
     }
 
-    private fun FixedLengthWriter.transferBody(bankCode: String, accountNo: String, amount: Long, memo: String) =
-        text(bankCode, 3).text(accountNo, 16).number(amount, 13).text(memo, 20)
+    private fun FixedLengthWriter.transferBody(bankCode: String, accountNo: String, amount: Long, memo: String, reference: String) =
+        text(bankCode, 3).text(accountNo, 16).number(amount, 13).text(memo, 20).text(reference, 20)
 }

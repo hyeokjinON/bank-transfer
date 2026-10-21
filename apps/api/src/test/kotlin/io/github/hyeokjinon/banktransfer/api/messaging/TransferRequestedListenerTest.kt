@@ -47,4 +47,13 @@ class TransferRequestedListenerTest {
         }
         assertEquals(0, ack.count)
     }
+
+    @Test
+    fun `은행 결과가 기록과 충돌해도 ack 한다 (재시도로 풀 수 없다, 사람이 확인)`() {
+        val ack = CountingAck()
+
+        TransferRequestedListener { ProcessResult.CONFLICT }.on(record(UUID.randomUUID()), ack)
+
+        assertEquals(1, ack.count)
+    }
 }
