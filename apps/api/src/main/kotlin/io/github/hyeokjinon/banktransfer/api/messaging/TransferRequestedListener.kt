@@ -18,7 +18,7 @@ import java.util.UUID
 class RetryLaterException(transferId: UUID) : RuntimeException("bank not reachable, transfer $transferId will be retried")
 
 /** key 가 이체 id(UUID)가 아니다. 몇 번 다시 해도 같은 결과라 재시도 없이 DLT 로 보낸다 (@RetryableTopic exclude). */
-class InvalidTransferKeyException(key: String?) : RuntimeException("message key is not a transfer id (UUID): $key")
+class InvalidTransferKeyException : RuntimeException("message key is not a transfer id (UUID)")   // 키 값은 담지 않는다: 외부 입력이라 DLT 핸들러가 정리해서 한 번만 남긴다
 
 /**
  * transfer.requested 컨슈머. key = 이체 id. 처리가 끝난 뒤에만 오프셋을 커밋한다 (수동 ack):
@@ -61,30 +61,42 @@ class TransferRequestedListener(private val process: (UUID) -> ProcessResult) {
     }
 
     /**
-     * 재시도를 다 쓴 메시지 · 재시도하지 않는 메시지. 경고만 남기고 ack 한다 (안 하면 DLT 오프셋이 커밋되지 않아 재시작마다 다시 온다).
-     * 이체는 RECEIVED 그대로다 — 은행에 보내려 한 흔적이 있으면 5분 뒤 정리 작업이 아웃박스로 다시 발행한다. 알림 채널은 P5.
-     * 메시지 값(계좌번호는 없지만)은 남기지 않는다.
+     * 재시도를 다 쓴 메시지 · 재시도하지 않는 메시지. 로그만 남기고 항상 ack 한다 (안 하면 DLT 오프셋이 커밋되지 않아 재시작마다 다시 온다).
+     * DLT 에 온 이유에 따라 이체의 다음이 다르므로 로그 수준도 다르다 ([dltKind]):
+     * - 은행 연결 없음: 은행에 보내려 한 흔적(sending_at)이 있어 5분 뒤 정리 작업이 아웃박스로 다시 발행한다 → WARN
+     * - 잘못된 key: 이체가 없다. 보낸 쪽 버그 → WARN
+     * - 그 밖(DB 장애 등): 재발행 대상이 아니다 (sending_at 이 NULL 이면 정리 작업이 건드리지 않는다) → ERROR, 사람이 확인
+     * 한 줄로만 남긴다: 예외 헤더는 줄바꿈이 섞일 수 있어 정리하고 길이를 자른다. 메시지 값 · 계좌번호는 남기지 않는다. 알림 채널은 P5.
      */
     @DltHandler
     fun onDlt(record: ConsumerRecord<String, String>, ack: Acknowledgment) {
-        log.warn(
-            "transfer message moved to DLT, stays RECEIVED until reconcile republishes it: key={} exception={} message={} original={}-{}@{}",
-            record.key(),
-            record.headerText(KafkaHeaders.EXCEPTION_CAUSE_FQCN) ?: record.headerText(KafkaHeaders.EXCEPTION_FQCN),
-            record.headerText(KafkaHeaders.EXCEPTION_MESSAGE),
-            record.headerText(KafkaHeaders.ORIGINAL_TOPIC),
-            record.headerInt(KafkaHeaders.ORIGINAL_PARTITION),
-            record.headerLong(KafkaHeaders.ORIGINAL_OFFSET),
-        )
+        val causeFqcn = record.headerText(KafkaHeaders.EXCEPTION_CAUSE_FQCN) ?: record.headerText(KafkaHeaders.EXCEPTION_FQCN)
+        val original = "${record.headerText(KafkaHeaders.ORIGINAL_TOPIC)}-${record.headerInt(KafkaHeaders.ORIGINAL_PARTITION)}@${record.headerLong(KafkaHeaders.ORIGINAL_OFFSET)}"
+        when (dltKind(causeFqcn)) {
+            DltKind.BANK_NOT_CONNECTED -> log.warn(
+                "transfer {} moved to DLT: bank not connected. stays RECEIVED, reconcile will republish it. original={}",
+                record.key(), original,
+            )
+            // 키가 UUID 가 아니라 이체 id 로 쓸 수 없다. 키는 남길 값이 이것뿐이라 한 번만, 정리해서 짧게
+            DltKind.INVALID_KEY -> log.warn(
+                "message moved to DLT: key is not a transfer id (UUID), no transfer is affected. key={} original={}",
+                logSafe(record.key(), KEY_LOG_MAX), original,
+            )
+            DltKind.OTHER -> log.error(
+                "transfer {} moved to DLT and is not retried automatically - check transfer status. " +
+                    "republish covers only bank-not-connected: a RECEIVED transfer with sending_at NULL is skipped. exception={} cause={} original={}",
+                record.key(), causeFqcn, logSafe(rootMessage(record.headerText(KafkaHeaders.EXCEPTION_MESSAGE)), MESSAGE_LOG_MAX), original,
+            )
+        }
         ack.acknowledge()
     }
 
     private fun transferIdOf(key: String?): UUID {
-        if (key == null) throw InvalidTransferKeyException(null)
+        if (key == null) throw InvalidTransferKeyException()
         return try {
             UUID.fromString(key)
         } catch (e: IllegalArgumentException) {
-            throw InvalidTransferKeyException(key)
+            throw InvalidTransferKeyException()
         }
     }
 }
@@ -97,3 +109,25 @@ private fun ConsumerRecord<*, *>.headerInt(name: String): Int? =
 
 private fun ConsumerRecord<*, *>.headerLong(name: String): Long? =
     headers().lastHeader(name)?.value()?.takeIf { it.size == Long.SIZE_BYTES }?.let { ByteBuffer.wrap(it).long }
+
+private const val KEY_LOG_MAX = 64
+private const val MESSAGE_LOG_MAX = 200
+
+/** DLT 로 온 이유. 로그 수준 · 안내가 갈린다 (테스트에서 분기만 따로 확인할 수 있게 순수 함수로 뺐다). */
+internal enum class DltKind { BANK_NOT_CONNECTED, INVALID_KEY, OTHER }
+
+internal fun dltKind(causeFqcn: String?): DltKind = when (causeFqcn) {
+    RetryLaterException::class.java.name -> DltKind.BANK_NOT_CONNECTED
+    InvalidTransferKeyException::class.java.name -> DltKind.INVALID_KEY
+    else -> DltKind.OTHER
+}
+
+/** 로그에 남길 외부 입력: 줄바꿈 · 제어문자를 `?` 로 바꾸고 길이를 자른다 (로그 위조 · 한 줄 깨짐 방지). */
+internal fun logSafe(text: String?, max: Int): String {
+    if (text == null) return "null"
+    val cleaned = text.map { if (it.isISOControl()) '?' else it }.joinToString("")
+    return if (cleaned.length <= max) cleaned else cleaned.take(max) + "..."
+}
+
+/** 리스너 예외로 감싸인 헤더 메시지에서 원래 예외의 메시지만 (Spring 이 "... nested exception is ..." 로 이어 붙이는 경우). */
+internal fun rootMessage(message: String?): String? = message?.substringAfterLast("nested exception is ")
