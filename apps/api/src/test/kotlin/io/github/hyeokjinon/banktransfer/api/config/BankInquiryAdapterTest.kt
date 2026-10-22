@@ -67,10 +67,10 @@ class BankInquiryAdapterTest {
     }
 
     @Test
-    fun `연결이 없으면 Unknown (예외를 던지지 않는다)`() {
+    fun `연결이 없으면 Unavailable - 묻지도 못했으니 시도로 세지 않는다 (예외를 던지지 않는다)`() {
         val closedPort = MockBankServer().start().use { it.boundPort }
         BankGatewayClient(BankGatewayConfig(host = "localhost", port = closedPort)).start().use { client ->
-            assertEquals(InquiryOutcome.Unknown, BankInquiryAdapter(client).inquire("T2610210000000000012"))
+            assertEquals(InquiryOutcome.Unavailable, BankInquiryAdapter(client).inquire("T2610210000000000012"))
         }
     }
 }

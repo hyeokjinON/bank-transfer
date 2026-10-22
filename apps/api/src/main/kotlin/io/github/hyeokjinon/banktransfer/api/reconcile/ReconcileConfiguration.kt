@@ -39,7 +39,7 @@ class TransferReconcilerScheduler(private val reconciler: TransferReconciler) {
     }
 
     private companion object {
-        val NOTHING = ReconcileResult(0, 0, 0, 0, 0)
+        val NOTHING = ReconcileResult(0, 0, 0, 0, 0, 0, 0)
     }
 }
 
