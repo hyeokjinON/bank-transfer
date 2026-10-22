@@ -26,8 +26,8 @@ object TransferTopics {
     /** 원래 토픽 · 재시도 토픽 · DLT 의 파티션 수. DLT 로 보낼 때 원래 파티션 번호를 그대로 쓰므로 모두 같아야 해서 한 곳에서 정한다. */
     const val PARTITIONS = 3
 
-    /** 애너테이션(@RetryableTopic numPartitions)은 문자열만 받는다. [PARTITIONS] 와 같은 값. */
-    const val PARTITIONS_STR = "3"
+    /** 애너테이션(@RetryableTopic numPartitions)은 문자열만 받는다. 템플릿으로 만들어 [PARTITIONS] 와 따로 놀 수 없다. */
+    const val PARTITIONS_STR = "$PARTITIONS"
 
     // @RetryableTopic 이 만드는 토픽 (인덱스 접미사 — 간격 설정을 바꿔도 이름이 같다). 운영 문서 · 테스트가 이름을 여기서 본다
     const val RETRY_0 = "$REQUESTED-retry-0"

@@ -24,7 +24,7 @@ class KafkaSetupTest : ApiIntegrationTest() {
     fun `transfer_requested 토픽이 파티션 3개로 만들어진다`() {
         val description = admin.describeTopics(TransferTopics.REQUESTED).getValue(TransferTopics.REQUESTED)
 
-        assertEquals(3, description.partitions().size)
+        assertEquals(TransferTopics.PARTITIONS, description.partitions().size)
     }
 
     @Test
@@ -33,6 +33,6 @@ class KafkaSetupTest : ApiIntegrationTest() {
 
         val descriptions = admin.describeTopics(*names.toTypedArray())
 
-        names.forEach { assertEquals(3, descriptions.getValue(it).partitions().size, it) }   // DLT 로 보낼 때 원래 파티션 번호를 그대로 쓴다
+        names.forEach { assertEquals(TransferTopics.PARTITIONS, descriptions.getValue(it).partitions().size, it) }   // DLT 로 보낼 때 원래 파티션 번호를 그대로 쓴다
     }
 }
