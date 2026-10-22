@@ -220,7 +220,7 @@ sequenceDiagram
     K->>L: retry-0 → 또 예외 → retry-1 (30초 뒤)
     K->>L: retry-1 → 또 예외 → retry-2 (60초 뒤)
     K->>L: retry-2 → 또 예외 → DLT
-    L->>L: DLT 핸들러: 경고 로그 + ack (이체는 RECEIVED)
+    L->>L: DLT 핸들러: 이유별 로그(은행 연결 없음 WARN / 그 밖 ERROR) + ack (이체는 RECEIVED)
     Note over R: 마지막 변경 5분 뒤, 정리 작업 ⓪
     R->>D: findRepublishable (RECEIVED, sending_at > republished_at)
     alt republish_count < 3

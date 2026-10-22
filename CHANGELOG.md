@@ -11,7 +11,7 @@
 
 ## [P3-3b] 재시도 토픽 · 제한 재발행 — 2026-10-22 ([#9](https://github.com/hyeokjinON/bank-transfer/pull/9))
 ### Added
-- 재시도 토픽 `transfer.requested-retry-0/1/2` · `transfer.requested-dlt` (5s · 30s · 60s, 설정 `transfer.retry.*`), DLT 핸들러(경고 로그 + ack), key 가 UUID 가 아니면 재시도 없이 바로 DLT (`InvalidTransferKeyException`).
+- 재시도 토픽 `transfer.requested-retry-0/1/2` · `transfer.requested-dlt` (5s · 30s · 60s, 설정 `transfer.retry.*`), DLT 핸들러(이유별 로그: 은행 연결 없음 · 잘못된 key 는 WARN, 그 밖의 예외는 자동 재처리가 없어 ERROR + ack), key 가 UUID 가 아니면 재시도 없이 바로 DLT (`InvalidTransferKeyException`).
 - 정리 작업 ⓪ 재발행 · 포기: 5분(`transfer.reconcile.republish-after`) 넘게 `RECEIVED` 이고 마지막 재발행 이후 은행에 보내려 한 흔적(`sending_at > republished_at`)이 있으면 아웃박스로 다시 발행, 3번(`max-republish`)을 다 쓰면 `FAILED` `E001`.
 - `TransferStore.findRepublishable` · `republish`(조건부 UPDATE 와 아웃박스 INSERT 를 한 트랜잭션에), `InquiryOutcome.Unavailable`, V2 마이그레이션(`republish_count` · `republished_at`).
 - 모의 은행 `pause` / `resume` (은행 장애 재현: 붙은 연결도 끊고 같은 포트로 다시 연다).
