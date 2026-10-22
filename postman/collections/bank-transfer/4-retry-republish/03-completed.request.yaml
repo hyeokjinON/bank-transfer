@@ -1,0 +1,15 @@
+$kind: http-request
+name: 4-3 Mock Bank Run 뒤 40초쯤 조회 → COMPLETED 0000 (재발행)
+method: GET
+url: '{{baseUrl}}/api/v1/transfers/{{retryTransferId}}'
+order: 3000
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // 모의 은행 콘솔의 50000원 입금은 1건뿐이어야 한다. 아직 RECEIVED 면 재접속 · 정리 작업 주기를 몇 초 더 기다린다.
+      pm.test("COMPLETED, 은행 응답코드 0000", () => {
+        pm.response.to.have.status(200);
+        pm.expect(pm.response.json().status).to.eql("COMPLETED");
+        pm.expect(pm.response.json().bankResponseCode).to.eql("0000");
+      });

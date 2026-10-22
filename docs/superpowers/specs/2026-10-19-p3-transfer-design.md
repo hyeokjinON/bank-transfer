@@ -29,7 +29,7 @@
 | P3-2 처리 | `feat/p3-2-transfer-processing` | 폴링 퍼블리셔 → Kafka → 컨슈머 → 은행 이체 전문, 수동 커밋, 상태 조건부 멱등 |
 | P3-3 실패 | – | 아래 둘로 나눈다 (2026-10-21) |
 | P3-3a 결과조회 | `feat/p3-3a-inquiry-reconcile` | 규격 v0.2(이용기관 거래번호 · 결과조회), 정리 작업, 모의 은행 시나리오, 컨슈머 경합 처리 → [ADR-0006](../../adr/0006-inquire-instead-of-resend.md) |
-| P3-3b 재시도 | `feat/p3-3b-retry-dlt` | 재시도 토픽 · DLT, 오래된 `RECEIVED` 재발행 |
+| P3-3b 재시도 | `feat/p3-3b-retry-republish` | 재시도 토픽 · DLT, 은행 시도 흔적이 있는 오래된 `RECEIVED` 의 제한 재발행 → [ADR-0007](../../adr/0007-retry-topic-and-bounded-republish.md) |
 
 ## 1. 모듈 경계
 
@@ -121,6 +121,7 @@ RECEIVED ──(컨슈머)──▶ SENDING ──▶ COMPLETED   은행 0000
    └──(미전송, 재시도)───┘
 UNKNOWN ──(결과조회)──▶ COMPLETED | FAILED
 SENDING ──(30초 초과, 정리 작업)──▶ UNKNOWN
+RECEIVED ──(재발행 3회 뒤에도 미전송, 정리 작업)──▶ FAILED (E001)
 ```
 
 | 전이 | 조건 |
@@ -130,6 +131,7 @@ SENDING ──(30초 초과, 정리 작업)──▶ UNKNOWN
 | `SENDING → COMPLETED / FAILED / UNKNOWN` | 은행 응답 · 거절 · 타임아웃 |
 | `SENDING → UNKNOWN` | 정리 작업: `sending_at` 이 30초보다 오래됨 |
 | `UNKNOWN → COMPLETED / FAILED` | 결과조회 응답 `0000` / `2001` |
+| `RECEIVED → FAILED` | 정리 작업: 재발행 한도(3회)를 다 쓰고도 은행에 못 보냄. bank_response_code = E001 (P3-3b) |
 
 - `COMPLETED`, `FAILED` 는 종결 상태. 그 밖의 전이는 도메인에서 예외(`IllegalTransition`).
 - **타임아웃은 실패가 아니다.** 은행이 처리했을 수 있으므로 `UNKNOWN` 으로 두고 재전송하지 않는다.
@@ -234,6 +236,13 @@ TransferConsumer (group transfer-processor, AckMode.MANUAL_IMMEDIATE)
 - 스케줄러 스레드는 2개(`spring.task.scheduling.pool.size: 2`).
 - **모의 은행 시나리오**: `9990000000001` = 무응답 · 처리 안 함 (테스트가 `silentAccounts` 로 지정, 조회 → `2001`). `9990000000002` = 처리하고 응답만 안 함 (기본 계좌, 예금주 `무응답`, 조회 → `0000`). 후자도 **1원 이체는 정상 응답**한다 — 1원인증으로 수취 계좌를 등록(VERIFIED)할 수 있어야 출금을 접수할 수 있기 때문이다.
 
+**2026-10-22 결정 (P3-3b)** — 자세한 설계는 [P3-3b 설계](2026-10-22-p3-3b-retry-republish-design.md), 결정 기록은 [ADR-0007](../../adr/0007-retry-topic-and-bounded-republish.md)
+- 재시도 간격은 5s · 30s · 60s (시도 4회), 토픽 이름은 인덱스 접미사(`-retry-0/1/2`, `-dlt`)라 간격을 바꿔도 같다.
+- 재발행은 정리 작업 ⓪ 이 아웃박스로 한다. 기준은 `sending_at > republished_at`(마지막 재발행 이후 은행에 보내려 한 흔적), 마지막 변경 5분 뒤, 최대 3회. 흔적이 없는 `RECEIVED`(발행 · 소비 문제)는 재발행하지 않는다.
+- 3회를 다 쓰고도 못 보내면 `RECEIVED → FAILED`(`E001`, 은행에 간 적 없음)로 포기한다.
+- 결과조회 중 연결 없음은 `Unavailable` — 그 주기의 남은 조회를 멈추고 `inquiry_attempts` 를 올리지 않는다.
+- 리스너 그룹 · 동시성은 yml 한 곳(`spring.kafka.consumer.group-id`, `spring.kafka.listener.concurrency`)에서만 정한다.
+
 ## 7. 테스트 전략
 
 | 층 | 위치 | 도구 | 대상 |
@@ -256,8 +265,10 @@ TransferConsumer (group transfer-processor, AckMode.MANUAL_IMMEDIATE)
 - [P3-3a] 처리 후 무응답 → `UNKNOWN` → 조회 → `COMPLETED` (입금 1건); 미처리 무응답 → `FAILED`
 - [P3-3a] 멈춘 `SENDING` → 정리 작업 → 확정; 한도(10회) 후 멈춤; 컨슈머와 경합
 - [P3-3a] 컨슈머가 방금 적은 `UNKNOWN` 은 `sending_at` 30초 유예 전에는 묻지 않는다 (느린 은행의 `2001` 로 잘못 `FAILED` 확정 방지)
-- [P3-3b] 은행 꺼짐 → 재시도 중 기동 → `COMPLETED`
-- [P3-3b] 깨진 메시지 → DLT
+- [P3-3b] 은행 꺼짐 → 재시도 토픽 → DLT (뒤 메시지는 처리됨, 단계마다 오프셋 커밋) → 은행 복구 → 재발행 → `COMPLETED` · 입금 1건
+- [P3-3b] 은행 계속 꺼짐 → 재발행 3회 → `FAILED` `E001` · 입금 0건
+- [P3-3b] UUID 아닌 key → 바로 DLT
+- [P3-3b] 결과조회 연결 없음 → 남은 조회 멈춤 · 횟수 그대로
 
 ## 8. 완료 기준
 
@@ -268,4 +279,4 @@ TransferConsumer (group transfer-processor, AckMode.MANUAL_IMMEDIATE)
 | P3-1 | 로컬 MySQL 로 POST/GET 동작, 재시작 후 이체·인증 기록 유지 | 0004 멱등키와 아웃박스 |
 | P3-2 | 로컬에서 요청 후 약 1초 안에 `COMPLETED`, kafka-ui 에서 메시지 확인 | 0005 Kafka 발행·소비 보장 |
 | P3-3a | 규격 v0.2, 모의 은행 시나리오 2개, 정리 작업 | 0006 불확실한 결과는 재전송하지 않고 조회한다 |
-| P3-3b | 재시도 토픽 · DLT, 오래된 `RECEIVED` 재발행 | 새 ADR (제안) |
+| P3-3b | 재시도 토픽 · DLT, 오래된 `RECEIVED` 제한 재발행 | 0007 재시도 토픽과 제한 재발행 (제안) |
