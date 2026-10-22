@@ -9,6 +9,7 @@ import io.github.hyeokjinon.banktransfer.protocol.InquiryResponse
 import io.github.hyeokjinon.banktransfer.protocol.MessageClass
 import io.github.hyeokjinon.banktransfer.protocol.ResponseCodes
 import io.github.hyeokjinon.banktransfer.transfer.InquiryOutcome
+import java.net.ServerSocket
 import java.time.Duration
 import java.time.LocalDateTime
 import java.util.concurrent.TimeUnit
@@ -71,6 +72,20 @@ class BankInquiryAdapterTest {
         val closedPort = MockBankServer().start().use { it.boundPort }
         BankGatewayClient(BankGatewayConfig(host = "localhost", port = closedPort)).start().use { client ->
             assertEquals(InquiryOutcome.Unavailable, BankInquiryAdapter(client).inquire("T2610210000000000012"))
+        }
+    }
+
+    @Test
+    fun `보냈는데 응답이 없으면(시간 초과) Unknown - 연결 없음(Unavailable)과 구분한다`() {
+        // 연결은 받아 주지만 아무 답도 하지 않는 서버. 조회 전문은 나갔으므로 BankNotSentException 이 아니라 시간 초과로 끝난다
+        ServerSocket(0).use { silent ->
+            BankGatewayClient(
+                BankGatewayConfig(host = "localhost", port = silent.localPort, responseTimeout = Duration.ofMillis(300)),
+            ).start().use { client ->
+                awaitConnected(client)
+
+                assertEquals(InquiryOutcome.Unknown, BankInquiryAdapter(client).inquire("T2610210000000000014"))
+            }
         }
     }
 }

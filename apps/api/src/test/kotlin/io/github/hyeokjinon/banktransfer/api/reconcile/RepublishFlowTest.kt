@@ -46,11 +46,12 @@ class RepublishFlowTest : ApiIntegrationTest() {
      * 재발행 대기만 1ms 로 줄인 정리 작업 (5분을 기다리는 대신). 나머지는 운영 구성과 같다.
      * 시계를 앞당기지 않는 이유: republished_at 이 미래 시각으로 적히면 컨슈머가 실제 시계로 적는 sending_at 이 그보다 이르게 되어
      * 2 · 3회차의 재발행 기준(sending_at > republished_at)이 깨진다. 그래서 각 회차는 DLT 도착을 기다린 뒤에 돌린다.
+     * 배치 크기를 키운 이유: 1ms 면 다른 테스트 클래스가 남긴 RECEIVED 도 후보라, 기본 100건 배치에서 대상 이체가 밀려날 수 있다.
      */
     private val reconciler by lazy {
         TransferReconciler(
             store, BankInquiryAdapter(gateway), Clock.systemUTC(),
-            republishAfter = Duration.ofMillis(1), maxRepublish = props.maxRepublish, onAbandon = { abandoned += it },
+            republishAfter = Duration.ofMillis(1), batchSize = 1_000, maxRepublish = props.maxRepublish, onAbandon = { abandoned += it },
         )
     }
 
