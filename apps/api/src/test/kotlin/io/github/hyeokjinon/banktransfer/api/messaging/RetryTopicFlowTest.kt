@@ -42,12 +42,16 @@ class RetryTopicFlowTest : ApiIntegrationTest() {
 
     private val references = RandomReferenceGenerator()
 
-    /** 접수 API 를 거치지 않고 RECEIVED 이체 + 아웃박스 행을 만든다 (Kafka 경로만 본다). */
+    /**
+     * 접수 API 를 거치지 않고 RECEIVED 이체 + 아웃박스 행을 만든다 (Kafka 경로만 본다).
+     * 모의 은행에 없는 계좌를 쓴다: 이 테스트들은 RECEIVED 이체를 남기는데, 나중에 다른 테스트의 정리 작업(재발행 대기 1ms)이 모든 대상을 훑을 때
+     * 은행이 살아 있어도 ACCOUNT_NOT_FOUND → FAILED 로 끝나 공용 계좌(1002123456789)에 입금이 생기지 않는다.
+     */
     private fun receivedTransfer(): Transfer {
         val now = Instant.now()
         val t = Transfer(
             id = UUID.randomUUID(), idempotencyKey = UUID.randomUUID().toString(), reference = references.next(),
-            requestHash = "h".repeat(64), bankCode = "090", accountNo = "1002123456789", amount = 1_000, memo = "retry",
+            requestHash = "h".repeat(64), bankCode = "090", accountNo = UNREGISTERED_ACCOUNT, amount = 1_000, memo = "retry",
             status = TransferStatus.RECEIVED, createdAt = now, updatedAt = now,
         )
         return store.saveWithEvent(t, TransferEvent.TransferRequested(t.id, now))
@@ -95,21 +99,24 @@ class RetryTopicFlowTest : ApiIntegrationTest() {
             val key = stuck.id.toString()
             relay.publishPending()
             // 발행기는 key 로 파티션을 고른다 (기본 파티셔너 = murmur2). 같은 파티션에 뒤 메시지를 바로 붙이려고 미리 계산한다
-            val partition = Utils.toPositive(Utils.murmur2(key.toByteArray(Charsets.UTF_8))) % PARTITIONS
+            val partition = Utils.toPositive(Utils.murmur2(key.toByteArray(Charsets.UTF_8))) % TransferTopics.PARTITIONS
 
             // 뒤 메시지: 없는 이체 id 라 은행 없이 NOT_FOUND 로 끝나고 ack 된다
             val next = kafka.send(ProducerRecord(TransferTopics.REQUESTED, partition, UUID.randomUUID().toString(), "{}"))
                 .get(5, TimeUnit.SECONDS).recordMetadata
 
-            await.atMost(Duration.ofSeconds(3)) untilAsserted {
+            // 벽시계 3초 안에 끝나는지가 아니라 "앞 메시지가 포기(DLT)되기 전에 끝났는지" 를 본다: 느린 CI 에서도 흔들리지 않게 넉넉히 기다린 뒤 순서만 비교한다
+            await.atMost(Duration.ofSeconds(10)) untilAsserted {
                 val committed = kafkaAdmin.committedOffset(GROUP, TopicPartition(TransferTopics.REQUESTED, partition))
                 assertTrue(committed != null && committed > next.offset(), "뒤 메시지(offset ${next.offset()})가 아직 처리되지 않았다: $committed")
             }
-            // 그때 앞 메시지는 아직 재시도 중이다 (간격 합 0.5 + 1 + 2 = 3.5초). 블로킹 재시도라면 뒤 메시지가 앞 메시지의 포기를 기다린다
-            assertTrue(consumerFactory.readAll(TransferTopics.DLT).none { it.key() == key }, "앞 메시지가 벌써 DLT 에 있다")
-            assertEquals(partition, consumerFactory.readAll(TransferTopics.REQUESTED).single { it.key() == key }.partition())
+            val observedAt = System.currentTimeMillis()
 
-            consumerFactory.awaitRecords(TransferTopics.DLT, key)
+            // 앞 메시지는 간격 합 0.5 + 1 + 2 = 3.5초 동안 재시도 토픽을 돈 뒤에야 DLT 에 간다 (DLT 레코드 시각 = 넘긴 시각, 같은 JVM 시계).
+            // 블로킹 재시도라면 뒤 메시지가 앞 메시지의 포기를 기다리므로 처리 확인이 DLT 시각보다 늦다
+            val dlt = consumerFactory.awaitRecords(TransferTopics.DLT, key).single()
+            assertTrue(observedAt < dlt.timestamp(), "뒤 메시지 처리 확인($observedAt)이 앞 메시지의 DLT 이동(${dlt.timestamp()})보다 늦다 — 막혔다")
+            assertEquals(partition, consumerFactory.readAll(TransferTopics.REQUESTED).single { it.key() == key }.partition())
         }
     }
 
@@ -130,6 +137,6 @@ class RetryTopicFlowTest : ApiIntegrationTest() {
 
     private companion object {
         const val GROUP = "transfer-processor"   // application.yml spring.kafka.consumer.group-id
-        const val PARTITIONS = 3
+        const val UNREGISTERED_ACCOUNT = "1002999999999"   // 모의 은행 DEFAULT_ACCOUNTS 에 없는 번호
     }
 }

@@ -62,12 +62,22 @@ abstract class ApiIntegrationTest {
      */
     protected fun <T> withBankDown(block: () -> T): T {
         bank.pause()
+        var failure: Throwable? = null
         try {
             awaitGateway(connected = false, timeout = Duration.ofSeconds(5))
             return block()
+        } catch (e: Throwable) {
+            failure = e
+            throw e
         } finally {
-            bank.resume()
-            awaitGateway(connected = true, timeout = Duration.ofSeconds(40))
+            // 정리가 실패해도 진짜 실패 원인(block 의 예외)을 가리지 않는다: 원래 예외를 주(主)로 두고 정리 실패는 suppressed 로 붙인다
+            try {
+                bank.resume()
+                awaitGateway(connected = true, timeout = Duration.ofSeconds(40))
+            } catch (cleanup: Throwable) {
+                if (failure == null) throw cleanup
+                failure.addSuppressed(cleanup)
+            }
         }
     }
 
