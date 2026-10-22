@@ -23,6 +23,12 @@ object TransferTopics {
     /** 출금 접수 신호. key = 이체 id → 같은 이체의 메시지는 같은 파티션(순서 보장). */
     const val REQUESTED = "transfer.requested"
 
+    /** 원래 토픽 · 재시도 토픽 · DLT 의 파티션 수. DLT 로 보낼 때 원래 파티션 번호를 그대로 쓰므로 모두 같아야 해서 한 곳에서 정한다. */
+    const val PARTITIONS = 3
+
+    /** 애너테이션(@RetryableTopic numPartitions)은 문자열만 받는다. [PARTITIONS] 와 같은 값. */
+    const val PARTITIONS_STR = "3"
+
     // @RetryableTopic 이 만드는 토픽 (인덱스 접미사 — 간격 설정을 바꿔도 이름이 같다). 운영 문서 · 테스트가 이름을 여기서 본다
     const val RETRY_0 = "$REQUESTED-retry-0"
     const val RETRY_1 = "$REQUESTED-retry-1"
@@ -39,7 +45,7 @@ object TransferTopics {
 class MessagingConfiguration {
 
     @Bean
-    fun transferRequestedTopic(): NewTopic = TopicBuilder.name(TransferTopics.REQUESTED).partitions(3).replicas(1).build()
+    fun transferRequestedTopic(): NewTopic = TopicBuilder.name(TransferTopics.REQUESTED).partitions(TransferTopics.PARTITIONS).replicas(1).build()
 
     /**
      * 발행기는 공용 TransactionTemplate 대신 READ COMMITTED 전용 템플릿을 쓴다 (빈으로 올리지 않는다: 공용 템플릿 자동 구성이 물러난다).

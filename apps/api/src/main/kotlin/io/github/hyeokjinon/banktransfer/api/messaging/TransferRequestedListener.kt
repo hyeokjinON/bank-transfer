@@ -39,8 +39,8 @@ class TransferRequestedListener(private val process: (UUID) -> ProcessResult) {
             multiplierString = "\${transfer.retry.multiplier:6.0}",
             maxDelayString = "\${transfer.retry.max-delay-ms:60000}",
         ),
-        // 브로커 자동 생성은 꺼져 있다. DLT 로 보낼 때 원래 파티션 번호를 그대로 쓰므로 원래 토픽과 같은 3개
-        numPartitions = "3",
+        // 브로커 자동 생성은 꺼져 있다. DLT 로 보낼 때 원래 파티션 번호를 그대로 쓰므로 원래 토픽과 같은 수
+        numPartitions = TransferTopics.PARTITIONS_STR,
         replicationFactor = "1",
         // -retry-0/1/2: 간격 설정을 바꿔도 토픽 이름이 같다 (기본값은 간격 값을 이름에 붙인다)
         topicSuffixingStrategy = TopicSuffixingStrategy.SUFFIX_WITH_INDEX_VALUE,
