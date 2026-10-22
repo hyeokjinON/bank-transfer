@@ -35,6 +35,8 @@ class TransferProcessorTest {
         override fun findSendingBefore(cutoff: Instant, limit: Int): List<Transfer> = emptyList()
         override fun findUnknownForInquiry(maxAttempts: Int, sendingBefore: Instant, limit: Int): List<Transfer> = emptyList()
         override fun recordInquiryAttempt(id: UUID, at: Instant) = false
+        override fun findRepublishable(updatedBefore: Instant, limit: Int): List<Transfer> = emptyList()
+        override fun republish(id: UUID, expectedCount: Int, at: Instant) = false
     }
 
     /** 정해 둔 결과를 돌려주고 호출 횟수를 센다 (은행에 몇 번 보냈나). */

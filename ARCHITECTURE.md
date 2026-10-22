@@ -1,6 +1,6 @@
 # ARCHITECTURE — 구조와 흐름
 
-> 기준: P3-3a 구현 완료 (2026-10-21, PR #7 리뷰 중). P3-3b 는 설계만 합의된 상태이며 아래 [§6](#6-p3-진행-상황)에 적는다.
+> 기준: P3-3b 구현 완료 (2026-10-22, PR #9 리뷰 중 — 손 확인 대기). P3 의 진행 상황은 아래 [§6](#6-p3-진행-상황)에 적는다.
 
 ## 1. 한눈에 보기
 
@@ -75,10 +75,12 @@ apps/api/src/main/kotlin/.../api/
   web/TransferController.kt         # POST/GET /api/v1/transfers (Idempotency-Key, 202/200)
   web/ApiExceptionHandler.kt        # 도메인/게이트웨이 예외 → ProblemDetail + code (표준 Spring 오류에도 code)
   persistence/                      # JPA 엔티티 · 리포지토리 · JpaVerificationRepository · JpaTransferStore (transfer + outbox_event 한 트랜잭션, 조건부 상태 UPDATE)
-  messaging/MessagingConfiguration.kt     # 토픽 · 릴레이 · 프로세서 조립, 컨슈머 에러 핸들러 (블로킹 재시도)
+  messaging/MessagingConfiguration.kt     # 토픽 · 릴레이 · 프로세서 조립, 재시도 토픽 전용 스케줄러 (RetryTopicSchedulerWrapper)
   messaging/OutboxRelay.kt                # 폴링 퍼블리셔 (SKIP LOCKED, 발행 확인 후 published_at)
-  messaging/TransferRequestedListener.kt  # transfer.requested 컨슈머 (수동 ack)
+  messaging/TransferRequestedListener.kt  # transfer.requested 컨슈머 (수동 ack, @RetryableTopic 재시도 토픽 · @DltHandler)
   reconcile/ReconcileConfiguration.kt     # 정리 작업 조립 + 10초 스케줄러 (TransferReconcilerScheduler), transfer.reconcile.* 설정
+apps/api/src/main/resources/db/migration/
+  V1__init.sql · V2__transfer_republish.sql   # V2: republish_count · republished_at (P3-3b)
 modules/account/.../account/
   AccountVerification.kt            # 엔티티, 포트, 예외 (sealed class)
   AccountVerificationService.kt     # 성명조회 → 1원 이체 → 코드 확인, 해시 저장 (InMemory 저장소는 테스트용)
@@ -86,7 +88,7 @@ modules/transfer/.../transfer/
   Transfer.kt                       # 상태 · 엔티티 · 명령 · 이벤트 · 포트 · 예외
   TransferService.kt                # 접수 규칙(검증 · 멱등 · 인증 계좌 · 거래번호 재시도), 거래번호 생성기
   TransferProcessor.kt              # 처리 규칙(조건부 SENDING → 은행 호출 → 결과 4분류 기록, 정리 작업과 경합 시 확정 결과 우선)
-  TransferReconciler.kt             # 정리 작업(멈춘 SENDING → UNKNOWN, UNKNOWN → 결과조회 → 확정). 은행에 묻기만 한다
+  TransferReconciler.kt             # 정리 작업(은행에 못 보낸 RECEIVED 재발행 · 포기, 멈춘 SENDING → UNKNOWN, UNKNOWN → 결과조회 → 확정). 은행에 묻기만 한다
 modules/bank-gateway/.../gateway/BankGatewayClient.kt
 modules/bank-protocol/.../protocol/
   BankMessage.kt · Header.kt · FixedLength.kt · BankMessageSerializer.kt
@@ -136,7 +138,7 @@ Docker Compose 한 파일로 MySQL 8.4 · Kafka 4.1(KRaft 단일 노드) · Redi
 CI `infra-smoke` 잡이 같은 파일을 띄워 `verify.sh` 로 읽기/쓰기를 확인한다. → [ADR-0003](docs/adr/0003-local-infra-docker-compose.md), [infra/README.md](infra/README.md)
 
 ## 6. P3 진행 상황
-- P3-1 접수 ✅ (ADR-0004). P3-2 처리 ✅ (ADR-0005). P3-3a 결과조회 · 정리 작업 ✅ (ADR-0006). P3-3b 재시도 토픽 · DLT 예정.
+- P3-1 접수 ✅ (ADR-0004). P3-2 처리 ✅ (ADR-0005). P3-3a 결과조회 · 정리 작업 ✅ (ADR-0006). P3-3b 재시도 토픽 · DLT · 제한 재발행 ✅ (ADR-0007).
 
 ### P3-2 처리 흐름
 ```mermaid
@@ -165,11 +167,11 @@ sequenceDiagram
     A->>B: 이체 전문
     B-->>A: 응답 / 무응답 / 연결 없음
     P->>S: COMPLETED · FAILED · UNKNOWN 기록 (미전송이면 RECEIVED 로 복귀)
-    L->>K: 처리 끝난 뒤 ack (미전송은 예외 → 재시도)
+    L->>K: 처리 끝난 뒤 ack (미전송은 예외 → 재시도 토픽)
 ```
 
 - 중복 메시지는 `RECEIVED → SENDING` 조건부 UPDATE 가 막는다(0건이면 은행에 보내지 않고 ack). 결과를 모르면 `UNKNOWN` 으로 두고 다시 보내지 않는다.
-- 미전송이면 `RECEIVED` 로 되돌리고 컨슈머가 예외를 던진다: 에러 핸들러가 1초부터 두 배씩(최대 10초) 5번 다시 처리한 뒤 로그를 남기고 넘어간다. 이체는 P3-3 까지 `RECEIVED` 로 남는다.
+- 미전송이면 `RECEIVED` 로 되돌리고 컨슈머가 예외를 던진다 → 재시도 토픽(5s · 30s · 60s) → DLT (P3-3b, 아래).
 - 은행 응답 뒤 DB 기록이 실패하면 `SENDING` 으로 남는다 (아래 P3-3a 정리 작업 대상).
 - 근거와 한계: [ADR-0005](docs/adr/0005-kafka-delivery-and-consumer-idempotency.md)
 
@@ -193,8 +195,10 @@ sequenceDiagram
             R->>D: transition(UNKNOWN → COMPLETED)
         else 2001 원거래 없음
             R->>D: transition(UNKNOWN → FAILED, 2001)
-        else 모름 (무응답 · 연결 없음 · 예외)
+        else 모름 (무응답 · 예외)
             R->>D: inquiry_attempts + 1 (10번째면 경고 → 일마감 대사)
+        else 연결 없음 (P3-3b)
+            Note over R: 이번 주기 조회 멈춤 (횟수 안 셈)
         end
     end
 ```
@@ -204,11 +208,40 @@ sequenceDiagram
 - 스케줄러 스레드 2개: 발행기(0.5초)와 정리 작업(10초)이 서로 막지 않는다.
 - 근거와 한계: [ADR-0006](docs/adr/0006-inquire-instead-of-resend.md) · 전문 [protocol.md](docs/protocol.md) v0.2
 
-합의된 방향 요약. 전체는 [P3 설계 문서](docs/superpowers/specs/2026-10-19-p3-transfer-design.md), 단계별 결정은 구현 PR 의 ADR(0004~0006)로 남긴다.
-- P3 는 4단계: **P3-1 접수**(transfer 모듈, JPA/MySQL/Flyway, Idempotency-Key, 아웃박스) → **P3-2 처리**(폴링 퍼블리셔 → Kafka → 컨슈머 → 은행) → **P3-3a 결과조회**(규격 v0.2, 정리 작업) → **P3-3b 재시도**(재시도 토픽·DLT).
+### P3-3b 재시도 · 재발행 흐름
+```mermaid
+sequenceDiagram
+    participant L as TransferRequestedListener
+    participant K as Kafka
+    participant R as TransferReconciler (10초)
+    participant D as JpaTransferStore
+    participant O as OutboxRelay
+    L->>K: 원래 토픽에서 예외 (은행 연결 없음) → retry-0 (5초 뒤)
+    K->>L: retry-0 → 또 예외 → retry-1 (30초 뒤)
+    K->>L: retry-1 → 또 예외 → retry-2 (60초 뒤)
+    K->>L: retry-2 → 또 예외 → DLT
+    L->>L: DLT 핸들러: 이유별 로그(은행 연결 없음 WARN / 그 밖 ERROR) + ack (이체는 RECEIVED)
+    Note over R: 마지막 변경 5분 뒤, 정리 작업 ⓪
+    R->>D: findRepublishable (RECEIVED, sending_at > republished_at)
+    alt republish_count < 3
+        R->>D: republish — 조건부 UPDATE + 아웃박스 INSERT (한 트랜잭션)
+        O->>K: TransferRequested 발행 → transfer.requested 처음부터
+    else 3회 모두 사용
+        R->>D: transition(RECEIVED → FAILED, E001) + 경고 로그
+    end
+```
+
+- 재시도 중인 메시지는 같은 파티션의 뒤 메시지를 막지 않는다 (논블로킹). 대신 재시도 메시지는 순서가 바뀌는데, 이체당 메시지가 1개라 무해하다.
+- 재시도 토픽으로 넘긴 레코드의 오프셋은 단계마다 프레임워크가 커밋한다 (`commitRecovered`). 수동 ack 와 함께 쓸 때의 함정을 `RetryTopicFlowTest` 가 AdminClient 로 증명한다.
+- 재발행 기준은 은행에 보내려 한 흔적(`sending_at > republished_at`)이다. 흔적이 없는 `RECEIVED`(발행 · 소비 문제)는 횟수를 쓰지 않고 복구를 기다린다.
+- 결과조회 중 연결 없음은 그 주기의 조회를 멈추고 횟수를 세지 않는다.
+- 근거와 한계: [ADR-0007](docs/adr/0007-retry-topic-and-bounded-republish.md)
+
+합의된 방향 요약. 전체는 [P3 설계 문서](docs/superpowers/specs/2026-10-19-p3-transfer-design.md), 단계별 결정은 구현 PR 의 ADR(0004~0007)로 남긴다.
+- P3 는 4단계: **P3-1 접수**(transfer 모듈, JPA/MySQL/Flyway, Idempotency-Key, 아웃박스) → **P3-2 처리**(폴링 퍼블리셔 → Kafka → 컨슈머 → 은행) → **P3-3a 결과조회**(규격 v0.2, 정리 작업) → **P3-3b 재시도**(재시도 토픽·DLT, 제한 재발행).
 - 범위: 서비스 모계좌 → **1원인증을 마친 계좌**로의 출금이체만. 잔액·동시성은 P4.
 - 새 모듈 `modules/transfer` (순수 Kotlin) + 포트 `TransferStore`(`saveWithEvent` · 조건부 `transition`), `VerifiedAccounts`, `BankTransferPort`.
-- 상태: `RECEIVED → SENDING → COMPLETED | FAILED | UNKNOWN`, `UNKNOWN → (결과조회) → COMPLETED | FAILED`. **타임아웃은 실패로 확정하지 않는다.**
+- 상태: `RECEIVED → SENDING → COMPLETED | FAILED | UNKNOWN`, `UNKNOWN → (결과조회) → COMPLETED | FAILED`, `RECEIVED → FAILED`(E001, 재발행 한도 뒤, P3-3b). **타임아웃은 실패로 확정하지 않는다.**
 - 1원인증 저장소도 메모리 → MySQL(JPA) 로 옮겼다 (P3-1).
 
 ## 7. 관련 문서
@@ -224,3 +257,4 @@ sequenceDiagram
 | [0004](docs/adr/0004-idempotency-key-and-transactional-outbox.md) | 출금 접수는 Idempotency-Key + DB UNIQUE, 처리 신호는 트랜잭셔널 아웃박스 |
 | [0005](docs/adr/0005-kafka-delivery-and-consumer-idempotency.md) | 아웃박스는 적어도 한 번 발행, 중복은 컨슈머의 상태 조건부 UPDATE 로 차단, 결과 모름은 재전송 금지 |
 | [0006](docs/adr/0006-inquire-instead-of-resend.md) | 결과를 모르는 이체는 다시 보내지 않고 이용기관 거래번호로 은행에 물어서 확정 |
+| [0007](docs/adr/0007-retry-topic-and-bounded-republish.md) | 은행에 못 보낸 출금은 논블로킹 재시도 토픽 + 은행 시도 흔적 기준의 제한 재발행, 포기는 FAILED E001 |

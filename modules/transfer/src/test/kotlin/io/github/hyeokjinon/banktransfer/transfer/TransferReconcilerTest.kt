@@ -12,6 +12,7 @@ import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class TransferReconcilerTest {
 
@@ -47,6 +48,24 @@ class TransferReconcilerTest {
             transfers[id] = current.copy(inquiryAttempts = current.inquiryAttempts + 1, updatedAt = at)
             return true
         }
+
+        val events = mutableListOf<TransferEvent>()
+
+        override fun findRepublishable(updatedBefore: Instant, limit: Int) =
+            transfers.values.filter {
+                val sendingAt = it.sendingAt
+                val republishedAt = it.republishedAt
+                it.status == RECEIVED && it.updatedAt.isBefore(updatedBefore) &&
+                    sendingAt != null && (republishedAt == null || sendingAt.isAfter(republishedAt))
+            }.sortedBy { it.updatedAt }.take(limit)
+
+        override fun republish(id: UUID, expectedCount: Int, at: Instant): Boolean {
+            val current = transfers[id] ?: return false
+            if (current.status != RECEIVED || current.republishCount != expectedCount) return false
+            transfers[id] = current.copy(republishCount = expectedCount + 1, republishedAt = at, updatedAt = at)
+            events += TransferEvent.TransferRequested(id, at)
+            return true
+        }
     }
 
     /** 거래번호별로 정해 둔 결과를 돌려주고 호출 횟수를 센다. */
@@ -63,8 +82,10 @@ class TransferReconcilerTest {
     private val store = FakeStore()
     private val inquiry = FakeInquiry()
     private val gaveUp = mutableListOf<Transfer>()
+    private val abandonedTransfers = mutableListOf<Transfer>()
     private fun reconciler(maxInquiries: Int = 10) = TransferReconciler(
-        store, inquiry, Clock.fixed(now, ZoneOffset.UTC), Duration.ofSeconds(30), maxInquiries, 100, onGiveUp = { gaveUp += it },
+        store, inquiry, Clock.fixed(now, ZoneOffset.UTC), Duration.ofSeconds(30), maxInquiries, 100,
+        onGiveUp = { gaveUp += it }, onAbandon = { abandonedTransfers += it },
     )
 
     private var seq = 0
@@ -72,11 +93,15 @@ class TransferReconcilerTest {
         status: TransferStatus,
         // 실제 UNKNOWN 은 SENDING 을 거쳐 오므로 sendingAt 이 항상 있다. 기본값은 30초 유예가 지난 시각.
         sendingAt: Instant? = if (status == UNKNOWN) now.minusSeconds(60) else null,
+        updatedAt: Instant = now,
+        republishCount: Int = 0,
+        republishedAt: Instant? = null,
     ): Transfer {
         val t = Transfer(
             id = UUID.randomUUID(), idempotencyKey = "k${++seq}", reference = "T26102100000000000%02d".format(seq),
             requestHash = "h", bankCode = "090", accountNo = "1002123456789", amount = 1_000, memo = "m",
-            status = status, sendingAt = sendingAt, createdAt = now, updatedAt = now,
+            status = status, sendingAt = sendingAt, republishCount = republishCount, republishedAt = republishedAt,
+            createdAt = now, updatedAt = updatedAt,
         )
         store.transfers[t.id] = t
         return t
@@ -172,5 +197,68 @@ class TransferReconcilerTest {
 
         assertEquals(0, result.failed)
         assertEquals(COMPLETED, store.transfers.getValue(t.id).status)
+    }
+
+    @Test
+    fun `마지막 재발행 이후 은행에 보내려다 못 보낸 RECEIVED 는 5분 뒤 다시 발행하고 횟수를 센다`() {
+        val t = transfer(RECEIVED, sendingAt = now.minusSeconds(400), updatedAt = now.minusSeconds(301))
+
+        val result = reconciler().reconcile()
+
+        assertEquals(1, result.republished)
+        val after = store.transfers.getValue(t.id)
+        assertEquals(RECEIVED, after.status)
+        assertEquals(1, after.republishCount)
+        assertEquals(now, after.republishedAt)
+        assertEquals(listOf<TransferEvent>(TransferEvent.TransferRequested(t.id, now)), store.events)   // 발행 경로는 아웃박스 하나
+    }
+
+    @Test
+    fun `은행에 보내려 한 흔적이 없거나 마지막 재발행 이전이거나 5분이 안 됐으면 건너뛴다`() {
+        val old = now.minusSeconds(600)
+        val neverTried = transfer(RECEIVED, sendingAt = null, updatedAt = old)   // Kafka · 컨슈머 장애: 은행에 시도도 못 했다
+        val notTriedSinceRepublish = transfer(
+            RECEIVED, sendingAt = now.minusSeconds(900), updatedAt = old, republishCount = 1, republishedAt = old,
+        )                                                                            // 재발행했는데 아직 아무도 안 집어 갔다
+        val recent = transfer(RECEIVED, sendingAt = now.minusSeconds(60), updatedAt = now.minusSeconds(60))   // 재시도 토픽 · DLT 가 아직 진행 중일 수 있다
+
+        val result = reconciler().reconcile()
+
+        assertEquals(0, result.republished)
+        assertEquals(0, result.abandoned)
+        assertTrue(store.events.isEmpty())
+        listOf(neverTried, notTriedSinceRepublish, recent).forEach { assertEquals(it, store.transfers.getValue(it.id)) }
+    }
+
+    @Test
+    fun `재발행 한도를 다 쓰고도 못 보냈으면 FAILED E001 로 포기하고 알린다`() {
+        val t = transfer(
+            RECEIVED, sendingAt = now.minusSeconds(400), updatedAt = now.minusSeconds(301),
+            republishCount = 3, republishedAt = now.minusSeconds(700),
+        )
+
+        val result = reconciler().reconcile()
+
+        assertEquals(1, result.abandoned)
+        assertEquals(0, result.republished)
+        assertEquals(FAILED, store.transfers.getValue(t.id).status)
+        assertEquals("E001", store.transfers.getValue(t.id).bankResponseCode)   // 은행에 간 적 없음 — 사용자가 다시 요청하면 된다
+        assertEquals(listOf(t.id), abandonedTransfers.map { it.id })
+        assertTrue(store.events.isEmpty())
+    }
+
+    @Test
+    fun `결과조회 중 은행 연결이 없으면 이번 주기의 남은 조회를 멈추고 횟수를 세지 않는다`() {
+        val first = transfer(UNKNOWN)
+        val second = transfer(UNKNOWN)
+        inquiry.outcomes[first.reference] = { InquiryOutcome.Unavailable }
+        inquiry.outcomes[second.reference] = { InquiryOutcome.Processed }
+
+        val result = reconciler().reconcile()
+
+        assertEquals(1, inquiry.calls)                                       // 연결이 없으면 남은 건도 같다 — 묻지 않는다
+        assertEquals(0, result.stillUnknown)
+        assertEquals(0, store.transfers.getValue(first.id).inquiryAttempts) // 은행이 답하지 않은 게 아니다 — 긴 점검에도 한도에 닿지 않게
+        assertEquals(UNKNOWN, store.transfers.getValue(second.id).status)
     }
 }

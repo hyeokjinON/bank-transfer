@@ -18,7 +18,8 @@ enum class TransferStatus {
     fun canMoveTo(next: TransferStatus): Boolean = next in allowedNext()
 
     private fun allowedNext(): Set<TransferStatus> = when (this) {
-        RECEIVED -> setOf(SENDING)
+        // RECEIVED -> FAILED 는 정리 작업이 재발행 한도를 다 쓰고 포기할 때만 쓴다 (은행에 간 적 없음, E001 — P3-3b)
+        RECEIVED -> setOf(SENDING, FAILED)
         // SENDING -> RECEIVED 는 "전문을 쓰기도 전에 연결이 없었다"(은행에 안 감)일 때만 쓴다 (P3-3 재시도)
         SENDING -> setOf(RECEIVED, COMPLETED, FAILED, UNKNOWN)
         UNKNOWN -> setOf(COMPLETED, FAILED)
@@ -43,6 +44,10 @@ data class Transfer(
     val sendingAt: Instant? = null,
     /** 결과조회를 시도했는데 은행도 답하지 않은 횟수 (P3-3a). 한도에 닿으면 정리 작업이 멈춘다. */
     val inquiryAttempts: Int = 0,
+    /** 정리 작업이 아웃박스로 다시 발행한 횟수 (P3-3b). 한도를 다 쓰고도 은행에 못 보내면 FAILED(E001). */
+    val republishCount: Int = 0,
+    /** 마지막 재발행 시각. 그 뒤에 sendingAt 이 있어야(은행에 보내려다 못 보냈어야) 다음 재발행을 한다. */
+    val republishedAt: Instant? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
@@ -93,6 +98,9 @@ sealed interface InquiryOutcome {
     data class NotProcessed(val responseCode: String) : InquiryOutcome
 
     data object Unknown : InquiryOutcome
+
+    /** 은행 연결이 없어 조회 전문을 보내지도 못했다 (P3-3b). 은행이 답하지 않은 게 아니므로 시도로 세지 않는다. */
+    data object Unavailable : InquiryOutcome
 }
 
 /** 은행 결과조회 포트. 이체를 다시 보내지 않고 "처리했나?"만 묻는다. */
@@ -150,6 +158,20 @@ interface TransferStore {
 
     /** UNKNOWN 인 동안에만 결과조회 시도 횟수를 1 늘린다. 늘렸으면 true. */
     fun recordInquiryAttempt(id: UUID, at: Instant): Boolean
+
+    /**
+     * 재발행 대상 (P3-3b): status = RECEIVED, updatedAt 이 [updatedBefore] 보다 이르고(재시도 토픽 · DLT 가 끝난 뒤),
+     * sendingAt 이 있고 마지막 재발행(republishedAt) 이후인 건 — 은행에 보내려다 못 보낸 흔적이 있는 것만 (오래된 순, 최대 [limit]).
+     * Kafka · 컨슈머 장애로 시도조차 못 한 건은 고르지 않는다: 복구되면 밀린 메시지가 처리되고, 횟수를 쓰면 실패로 잘못 확정된다.
+     */
+    fun findRepublishable(updatedBefore: Instant, limit: Int): List<Transfer>
+
+    /**
+     * RECEIVED 이고 republishCount 가 [expectedCount] 일 때만 횟수 +1, republishedAt · updatedAt = [at] 으로 바꾸고
+     * 같은 트랜잭션에서 TransferRequested 이벤트를 하나 더 기록한다 (발행 경로는 아웃박스 하나). 바꿨으면 true.
+     * 0건(다른 쪽이 먼저 바꿈)이면 이벤트도 남기지 않는다.
+     */
+    fun republish(id: UUID, expectedCount: Int, at: Instant): Boolean
 }
 
 /** 저장소가 UNIQUE 제약 위반을 도메인 말로 알려 줄 때 쓴다. */

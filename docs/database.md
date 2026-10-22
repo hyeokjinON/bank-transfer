@@ -107,9 +107,11 @@ erDiagram
 | `amount` | `BIGINT` | N | 금액, 원 단위. 1 ~ 10,000,000 |
 | `memo` | `VARCHAR(20)` | N | 적요 (EUC-KR 20바이트 이내) |
 | `status` | `VARCHAR(10)` | N | `RECEIVED` · `SENDING` · `COMPLETED` · `FAILED` · `UNKNOWN` |
-| `bank_response_code` | `VARCHAR(4)` | Y | 은행 응답코드 (`0000`, `1001` …) |
+| `bank_response_code` | `VARCHAR(4)` | Y | 은행 응답코드 (`0000`, `1001` …). `E001` 은 은행 코드가 아니라 자체 코드: 은행에 보내지 못하고 포기(`RECEIVED → FAILED`, 돈은 움직이지 않음) |
 | `sending_at` | `DATETIME(6)` | Y | `SENDING` 으로 바뀐 시각. 멈춘 건 탐지 기준. 미전송으로 `RECEIVED` 에 되돌려도 남으므로 대상은 `status = SENDING` 과 함께 고른다 |
 | `inquiry_attempts` | `INT` | N | 결과조회에도 답이 없던 횟수 (정리 작업이 10에서 멈춘다), 기본 0 |
+| `republish_count` | `INT` | N | 정리 작업이 아웃박스로 다시 발행한 횟수 (3에서 멈추고 FAILED E001), 기본 0. V2 (P3-3b) |
+| `republished_at` | `DATETIME(6)` | Y | 마지막 재발행 시각. `sending_at` 이 이보다 늦어야(재발행 뒤 은행에 보내려다 못 보냈어야) 다음 재발행 대상 |
 | `created_at` | `DATETIME(6)` | N | 접수 시각 |
 | `updated_at` | `DATETIME(6)` | N | 마지막 변경 시각 |
 | `version` | `BIGINT` | N | JPA `@Version` 낙관적 락 |
@@ -117,14 +119,14 @@ erDiagram
 인덱스:
 - `uk_transfer_idempotency (idempotency_key)` — 중복 접수 차단 (동시 요청의 마지막 방어선)
 - `uk_transfer_reference (reference)` — 거래번호 충돌 차단, 결과조회 응답 매핑
-- `idx_transfer_status (status, sending_at)` — 정리 작업의 "30초 넘은 SENDING", "30초 유예가 지난 UNKNOWN 목록" 조회
+- `idx_transfer_status (status, sending_at)` — 정리 작업의 "30초 넘은 SENDING", "30초 유예가 지난 UNKNOWN 목록" 조회. 재발행 대상(`status = 'RECEIVED'`) 조회도 이 인덱스의 앞 컬럼으로 좁힌다
 
 ### 4-3. `outbox_event` — 트랜잭셔널 아웃박스 (P3-1 생성, P3-2 부터 발행)
 | 컬럼 | 타입 | NULL | 설명 |
 |---|---|---|---|
 | `id` | `BIGINT AUTO_INCREMENT` | N | PK. 발행 순서 기준. 발행할 때 메시지의 `eventId` 가 된다 |
 | `aggregate_id` | `CHAR(36)` | N | 대상 집합 id (`transfer.id`). Kafka 메시지 key |
-| `event_type` | `VARCHAR(50)` | N | `TransferRequested` |
+| `event_type` | `VARCHAR(50)` | N | `TransferRequested`. 재발행도 같은 `TransferRequested` 한 줄을 더 쓴다 (P3-3b) |
 | `payload` | `JSON` | N | `{"transferId", "occurredAt"}`. eventId 는 이 행의 `id` 라 발행할 때 `JSON_SET(payload, '$.eventId', id)` 로 메시지에 붙인다 |
 | `created_at` | `DATETIME(6)` | N | 이벤트 기록 시각 (이체 저장과 같은 트랜잭션) |
 | `published_at` | `DATETIME(6)` | Y | Kafka 발행 완료 시각. `NULL` = 미발행. 브로커가 받았다고 확인한 뒤 `NOW(6)`로 기록한다. `NOW(6)` 은 세션 시간대를 따르고, 세션 시간대는 JDBC `forceConnectionTimeZoneToSession=true` + `connectionTimeZone=Asia/Seoul` 이 KST 로 맞춘다 (서버 시간대만의 결과가 아니다, §2) |
@@ -139,7 +141,7 @@ erDiagram
 | 테이블 | 값 | 종결 |
 |---|---|---|
 | `account_verification.status` | `SENT` → `VERIFIED` / `EXPIRED` / `LOCKED` | `VERIFIED`, `EXPIRED`, `LOCKED` |
-| `transfer.status` | `RECEIVED` → `SENDING` → `COMPLETED` / `FAILED` / `UNKNOWN`, `UNKNOWN` → `COMPLETED` / `FAILED` | `COMPLETED`, `FAILED` |
+| `transfer.status` | `RECEIVED` → `SENDING` → `COMPLETED` / `FAILED` / `UNKNOWN`, `UNKNOWN` → `COMPLETED` / `FAILED`, `RECEIVED` → `FAILED` (E001, 재발행 한도 뒤) | `COMPLETED`, `FAILED` |
 
 전이 규칙 전체: [설계 문서 §3](superpowers/specs/2026-10-19-p3-transfer-design.md#3-상태-모델).
 
@@ -151,6 +153,7 @@ erDiagram
 | 아웃박스 발행 (앱 여러 대) | 잠긴 행 건너뛰기 | `SELECT … WHERE published_at IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED`. 발행기는 READ COMMITTED 로 돈다: 기본 REPEATABLE READ 에서는 gap 락 때문에 접수의 INSERT 가 막힌다 ([ADR-0005](adr/0005-kafka-delivery-and-consumer-idempotency.md)) |
 | 이체 상태 변경 (중복 메시지) | 조건부 UPDATE | `UPDATE transfer SET status='SENDING', sending_at=? … WHERE id=? AND status='RECEIVED'` → 0건이면 건너뜀 |
 | 정리 작업과 컨슈머가 같은 이체를 확정 | 조건부 UPDATE (`UNKNOWN` 에서만 확정) | `UPDATE transfer SET status=?, bank_response_code=? … WHERE id=? AND status='UNKNOWN'` → 0건이면 다른 쪽이 먼저 확정한 것이라 건너뜀. 결과조회 횟수 증가도 `AND status='UNKNOWN'` 조건부다 |
+| 재발행 (정리 작업 여러 대 · 컨슈머와 겹침) | 조건부 UPDATE + 같은 트랜잭션 아웃박스 INSERT | `UPDATE transfer SET republish_count = republish_count + 1, republished_at = ? … WHERE id = ? AND status = 'RECEIVED' AND republish_count = ?` → 1건일 때만 `INSERT INTO outbox_event`. 포기는 `transition(RECEIVED → FAILED)` 조건부 |
 | 엔티티 동시 수정 | 낙관적 락 | `@Version` → `… WHERE id=? AND version=?` |
 
 잔액 차감의 락 비교(비관적 · 낙관적 · Redis 분산락)는 P4 에서 이 표에 추가한다.
@@ -164,7 +167,7 @@ erDiagram
 - 개인정보 원문(인증코드)은 저장하지 않는다. 계좌번호 마스킹: `Transfer.toString()` 은 뒤 4자리만 남겨 로그에 원문이 찍히지 않는다. API 응답 마스킹은 인증 도입 때 적용한다.
 
 ## 8. 마이그레이션 규칙 (Flyway)
-- 파일명: `V<번호>__<설명>.sql` (예 `V1__init.sql`, `V2__transfer_reference_index.sql`).
+- 파일명: `V<번호>__<설명>.sql` (예 `V1__init.sql`, `V2__transfer_republish.sql`).
 - **이미 적용된 파일은 고치지 않는다.** 바꿀 게 있으면 새 버전을 추가한다 (체크섬 불일치로 기동 실패).
 - 앱 기동 시 자동 적용. 테스트(Testcontainers)도 같은 파일로 스키마를 만든다.
 - 큰 테이블 변경(인덱스 추가 등)은 운영 반영 방법(온라인 DDL)을 PR 에 적는다.
@@ -187,6 +190,18 @@ SELECT id, reference, inquiry_attempts FROM transfer
 
 -- 결과조회 한도에 닿은 UNKNOWN (일마감 대사 대상)
 SELECT id, reference, inquiry_attempts FROM transfer WHERE status = 'UNKNOWN' AND inquiry_attempts >= 10;
+
+-- 재발행 대상 (5분 넘게 RECEIVED, 마지막 재발행 이후 은행 시도 흔적)
+SELECT id, reference, republish_count, sending_at, republished_at FROM transfer
+ WHERE status = 'RECEIVED' AND updated_at < NOW(6) - INTERVAL 5 MINUTE
+   AND sending_at IS NOT NULL AND (republished_at IS NULL OR sending_at > republished_at) ORDER BY updated_at;
+
+-- 은행에 못 보내고 포기한 출금 (E001)
+SELECT id, reference, republish_count, updated_at FROM transfer
+ WHERE status = 'FAILED' AND bank_response_code = 'E001' ORDER BY updated_at DESC LIMIT 20;
+
+-- 발행 · 소비가 안 돼 오래 RECEIVED (sending_at 없음 — 재발행 대상 아님, Kafka · 컨슈머 확인)
+SELECT id, created_at FROM transfer WHERE status = 'RECEIVED' AND sending_at IS NULL AND created_at < NOW(6) - INTERVAL 5 MINUTE;
 
 -- 아직 Kafka 로 안 나간 이벤트
 SELECT id, aggregate_id, created_at FROM outbox_event WHERE published_at IS NULL ORDER BY id LIMIT 20;
@@ -216,3 +231,4 @@ EXPLAIN SELECT id FROM outbox_event WHERE published_at IS NULL ORDER BY id LIMIT
 | 2026-10-19 | `idempotency_key` · `reference` 를 `ascii_bin` 으로 (대소문자·악센트 구분), 키는 보이는 ASCII 1~64자만 허용 | 최종 리뷰 (P3-1) |
 | 2026-10-20 | 스키마 변경 없음. 아웃박스 발행 메시지 모양 · `published_at` 기록 방식, 동시성 표(SKIP LOCKED · 조건부 UPDATE) 확정, 운영 조회 추가 | PR #5 (P3-2) |
 | 2026-10-21 | 스키마 변경 없음. `inquiry_attempts` 의미(결과조회에도 답이 없던 횟수, 10에서 멈춤), 정리 작업 ↔ 컨슈머 경합의 조건부 UPDATE, 한도에 닿은 `UNKNOWN` 운영 쿼리 | [PR #7](https://github.com/hyeokjinON/bank-transfer/pull/7) (P3-3a) |
+| 2026-10-22 | V2: republish_count · republished_at (제한 재발행), RECEIVED → FAILED(E001), 재발행 동시성 · 운영 쿼리 | [PR #9](https://github.com/hyeokjinON/bank-transfer/pull/9) (P3-3b) |

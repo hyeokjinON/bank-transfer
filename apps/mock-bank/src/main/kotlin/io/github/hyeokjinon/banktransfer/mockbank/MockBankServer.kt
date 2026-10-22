@@ -15,6 +15,9 @@ import io.netty.bootstrap.ServerBootstrap
 import io.netty.channel.Channel
 import io.netty.channel.ChannelHandlerContext
 import io.netty.channel.ChannelInitializer
+import io.netty.channel.ChannelOption
+import io.netty.channel.group.DefaultChannelGroup
+import io.netty.util.concurrent.GlobalEventExecutor
 import io.netty.channel.MultiThreadIoEventLoopGroup
 import io.netty.channel.SimpleChannelInboundHandler
 import io.netty.channel.nio.NioIoHandler
@@ -37,6 +40,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * - silentAccounts: 응답을 보내지 않는다 (타임아웃 테스트용)
  * - 결과조회(v0.2): 처리한 이체의 이용기관 거래번호면 0000, 아니면 2001
  * - silentAfterProcessingAccounts: 이체를 처리(입금 · 거래번호 기록)하고 응답만 보내지 않는다. 단 1원 이체는 정상 응답 — 1원인증으로 수취 계좌를 등록할 수 있게 (결과조회 시나리오용)
+ * - pause/resume: 은행 장애 흉내 (새 연결을 받지 않고 붙은 연결도 끊었다가, 같은 포트로 다시 연다). 입금 · 처리 기록은 그대로 (P3-3b)
  */
 class MockBankServer(
     private val port: Int = 0,
@@ -53,21 +57,46 @@ class MockBankServer(
     private val processedReferences: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val pollCounter = AtomicInteger()
     private lateinit var serverChannel: Channel
+    private val clients = DefaultChannelGroup(GlobalEventExecutor.INSTANCE)
 
-    val boundPort: Int get() = (serverChannel.localAddress() as InetSocketAddress).port
+    /** port = 0 이면 OS 가 고른 포트를 기억해 둔다 — resume 이 같은 포트로 다시 열어야 게이트웨이가 그대로 다시 붙는다. */
+    @Volatile private var listenPort = port
+
+    private val bootstrap: ServerBootstrap = ServerBootstrap()
+        .group(boss, workers)
+        .channel(NioServerSocketChannel::class.java)
+        // pause 가 끊은 연결이 TIME_WAIT 로 남아도 같은 포트에 다시 bind 할 수 있게 (리눅스 CI)
+        .option(ChannelOption.SO_REUSEADDR, true)
+        .childHandler(object : ChannelInitializer<SocketChannel>() {
+            override fun initChannel(ch: SocketChannel) {
+                clients.add(ch)
+                ch.pipeline().addBankCodec().addLast(BankHandler())
+            }
+        })
+
+    val boundPort: Int get() = listenPort
     val pollCount: Int get() = pollCounter.get()
 
     fun start(): MockBankServer {
-        serverChannel = ServerBootstrap()
-            .group(boss, workers)
-            .channel(NioServerSocketChannel::class.java)
-            .childHandler(object : ChannelInitializer<SocketChannel>() {
-                override fun initChannel(ch: SocketChannel) {
-                    ch.pipeline().addBankCodec().addLast(BankHandler())
-                }
-            })
-            .bind(port).sync().channel()
-        log.info("mock bank listening on {}", boundPort)
+        serverChannel = bootstrap.bind(listenPort).sync().channel()
+        listenPort = (serverChannel.localAddress() as InetSocketAddress).port
+        log.info("mock bank listening on {}", listenPort)
+        return this
+    }
+
+    /** 은행 장애 흉내: 새 연결을 받지 않고, 붙어 있던 연결도 끊는다. 입금 내역 · 처리한 거래번호는 남긴다. */
+    fun pause() {
+        if (serverChannel.isOpen) serverChannel.close().syncUninterruptibly()
+        clients.close().awaitUninterruptibly(1, TimeUnit.SECONDS)
+        log.info("mock bank paused on {}", listenPort)
+    }
+
+    /** pause 전과 같은 포트로 다시 연다. 이미 열려 있으면 아무것도 하지 않는다. */
+    fun resume(): MockBankServer {
+        if (!serverChannel.isOpen) {
+            serverChannel = bootstrap.bind(listenPort).sync().channel()
+            log.info("mock bank resumed on {}", listenPort)
+        }
         return this
     }
 
