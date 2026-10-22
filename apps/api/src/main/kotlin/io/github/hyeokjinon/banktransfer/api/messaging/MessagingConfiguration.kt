@@ -11,9 +11,9 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.kafka.config.TopicBuilder
 import org.springframework.kafka.core.KafkaTemplate
-import org.springframework.kafka.listener.DefaultErrorHandler
-import org.springframework.kafka.support.ExponentialBackOffWithMaxRetries
+import org.springframework.kafka.retrytopic.RetryTopicSchedulerWrapper
 import org.springframework.scheduling.annotation.EnableScheduling
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
@@ -22,10 +22,16 @@ import java.time.Clock
 object TransferTopics {
     /** 출금 접수 신호. key = 이체 id → 같은 이체의 메시지는 같은 파티션(순서 보장). */
     const val REQUESTED = "transfer.requested"
+
+    // @RetryableTopic 이 만드는 토픽 (인덱스 접미사 — 간격 설정을 바꿔도 이름이 같다). 운영 문서 · 테스트가 이름을 여기서 본다
+    const val RETRY_0 = "$REQUESTED-retry-0"
+    const val RETRY_1 = "$REQUESTED-retry-1"
+    const val RETRY_2 = "$REQUESTED-retry-2"
+    const val DLT = "$REQUESTED-dlt"
 }
 
 /**
- * Kafka 쪽 조립. 토픽은 코드로 선언한다 (브로커의 자동 생성은 꺼 두었다 — 오타 토픽 방지).
+ * Kafka 쪽 조립. 토픽은 코드로 선언한다 (브로커의 자동 생성은 꺼 두었다 — 오타 토픽 방지). 재시도 · DLT 토픽은 리스너의 @RetryableTopic 이 만든다.
  * OutboxRelayProperties 는 BankTransferApplication 의 @ConfigurationPropertiesScan 이 등록한다.
  */
 @Configuration(proxyBeanMethods = false)
@@ -66,19 +72,15 @@ class MessagingConfiguration {
     fun transferRequestedListener(processor: TransferProcessor) = TransferRequestedListener(processor::process)
 
     /**
-     * 컨슈머 예외 처리 (P3-2): 1초부터 두 배씩, 최대 10초 간격으로 5번 다시 시도한 뒤 로그를 남기고 넘어간다.
-     * 그동안 같은 파티션의 다음 메시지는 기다린다 (블로킹 재시도).
-     * 다 실패한 이체는 RECEIVED 로 남는다 → P3-3 에서 재시도 토픽 + DLT 로 바꾼다.
-     * 넘어간 레코드의 오프셋은 커밋한다(isCommitRecovered): manual_immediate 에서는 기본값이 커밋하지 않아,
-     * 재시작 뒤 그 메시지가 다시 올지 말지가 우연에 달린다. "넘김 = 커밋"으로 정해 둔다. 이체는 P3-3 까지 RECEIVED 로 남는다.
+     * 재시도 토픽에서 "아직 때가 안 된" 파티션을 멈췄다가 다시 여는 스케줄러. Spring Kafka 는 이 빈을 TaskScheduler 보다 먼저 찾는다.
+     * 따로 두는 이유: 없으면 공용 스케줄러(스레드 2개)를 쓰는데, 발행기와 정리 작업(은행이 느리면 한 주기가 길다)이 둘 다 잡고 있으면
+     * 파티션 재개가 늦어져 재시도 간격이 설정보다 길어진다.
      */
     @Bean
-    fun kafkaErrorHandler(): DefaultErrorHandler =
-        DefaultErrorHandler(
-            ExponentialBackOffWithMaxRetries(5).apply {
-                initialInterval = 1_000
-                multiplier = 2.0
-                maxInterval = 10_000
-            },
-        ).apply { setCommitRecovered(true) }
+    fun retryTopicSchedulerWrapper() = RetryTopicSchedulerWrapper(
+        ThreadPoolTaskScheduler().apply {
+            poolSize = 1
+            setThreadNamePrefix("retry-topic-")
+        },
+    )
 }

@@ -3,10 +3,13 @@ package io.github.hyeokjinon.banktransfer.api.messaging
 import io.github.hyeokjinon.banktransfer.transfer.ProcessResult
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.springframework.kafka.support.Acknowledgment
+import org.springframework.kafka.support.KafkaHeaders
+import java.nio.ByteBuffer
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 
 class TransferRequestedListenerTest {
 
@@ -55,5 +58,35 @@ class TransferRequestedListenerTest {
         TransferRequestedListener { ProcessResult.CONFLICT }.on(record(UUID.randomUUID()), ack)
 
         assertEquals(1, ack.count)
+    }
+
+    @Test
+    fun `key 가 UUID 가 아니면 InvalidTransferKeyException - 재시도 없이 DLT 로 보낸다`() {
+        val ack = CountingAck()
+        var called = false
+        val bad = ConsumerRecord(TransferTopics.REQUESTED, 0, 0L, "not-a-uuid", "{}")
+
+        assertFailsWith<InvalidTransferKeyException> {
+            TransferRequestedListener { called = true; ProcessResult.COMPLETED }.on(bad, ack)
+        }
+        assertFalse(called)
+        assertEquals(0, ack.count)
+    }
+
+    @Test
+    fun `DLT 메시지는 경고만 남기고 ack 한다 - 다시 처리하지 않고 이체는 정리 작업이 이어받는다`() {
+        val ack = CountingAck()
+        var called = false
+        val dlt = ConsumerRecord(TransferTopics.DLT, 1, 7L, UUID.randomUUID().toString(), "{}").apply {
+            headers().add(KafkaHeaders.ORIGINAL_TOPIC, TransferTopics.REQUESTED.toByteArray())
+            headers().add(KafkaHeaders.ORIGINAL_PARTITION, ByteBuffer.allocate(Int.SIZE_BYTES).putInt(1).array())
+            headers().add(KafkaHeaders.ORIGINAL_OFFSET, ByteBuffer.allocate(Long.SIZE_BYTES).putLong(42).array())
+            headers().add(KafkaHeaders.EXCEPTION_CAUSE_FQCN, RetryLaterException::class.java.name.toByteArray())
+        }
+
+        TransferRequestedListener { called = true; ProcessResult.COMPLETED }.onDlt(dlt, ack)
+
+        assertEquals(1, ack.count)
+        assertFalse(called)
     }
 }
