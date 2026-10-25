@@ -41,6 +41,8 @@ class TransferEntity(
     var bankResponseCode: String? = null,
     var sendingAt: Instant? = null,
     var inquiryAttempts: Int = 0,
+    var republishCount: Int = 0,
+    var republishedAt: Instant? = null,
     var createdAt: Instant = Instant.EPOCH,
     var updatedAt: Instant = Instant.EPOCH,
     /** 낙관적 락. null 이면 Spring Data 가 새 엔티티로 보고 INSERT(persist) 한다. */
@@ -49,7 +51,8 @@ class TransferEntity(
     fun toDomain() = Transfer(
         id = UUID.fromString(id), idempotencyKey = idempotencyKey, reference = reference, requestHash = requestHash,
         bankCode = bankCode, accountNo = accountNo, amount = amount, memo = memo, status = status,
-        bankResponseCode = bankResponseCode, sendingAt = sendingAt, inquiryAttempts = inquiryAttempts, createdAt = createdAt, updatedAt = updatedAt,
+        bankResponseCode = bankResponseCode, sendingAt = sendingAt, inquiryAttempts = inquiryAttempts,
+        republishCount = republishCount, republishedAt = republishedAt, createdAt = createdAt, updatedAt = updatedAt,
     )
 
     companion object {
@@ -61,6 +64,7 @@ class TransferEntity(
             id = t.id.toString(), idempotencyKey = t.idempotencyKey, reference = t.reference, requestHash = t.requestHash,
             bankCode = t.bankCode, accountNo = t.accountNo, amount = t.amount, memo = t.memo, status = t.status,
             bankResponseCode = t.bankResponseCode, sendingAt = t.sendingAt?.toDbPrecision(), inquiryAttempts = t.inquiryAttempts,
+            republishCount = t.republishCount, republishedAt = t.republishedAt?.toDbPrecision(),
             createdAt = t.createdAt.toDbPrecision(), updatedAt = t.updatedAt.toDbPrecision(),
         )
     }
@@ -94,6 +98,33 @@ interface TransferJpaRepository : JpaRepository<TransferEntity, String> {
             "t.version = t.version + 1 where t.id = :id and t.status = :status",
     )
     fun incrementInquiryAttempts(@Param("id") id: String, @Param("status") status: TransferStatus, @Param("at") at: Instant): Int
+
+    /**
+     * 재발행 대상 (P3-3b). 두 컬럼 비교(sending_at > republished_at)라 메서드 이름 쿼리로는 쓸 수 없다.
+     * status 조건이 idx_transfer_status(status, sending_at) 로 범위를 좁힌다.
+     */
+    @Query(
+        "select t from TransferEntity t where t.status = :status and t.updatedAt < :updatedBefore " +
+            "and t.sendingAt is not null and (t.republishedAt is null or t.sendingAt > t.republishedAt) order by t.updatedAt",
+    )
+    fun findRepublishable(
+        @Param("status") status: TransferStatus,
+        @Param("updatedBefore") updatedBefore: Instant,
+        limit: Limit,
+    ): List<TransferEntity>
+
+    /** 재발행 횟수 +1 (P3-3b). 상태나 횟수가 기대와 다르면(다른 쪽이 먼저 바꿈) 0 건. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(
+        "update TransferEntity t set t.republishCount = t.republishCount + 1, t.republishedAt = :at, t.updatedAt = :at, " +
+            "t.version = t.version + 1 where t.id = :id and t.status = :status and t.republishCount = :expected",
+    )
+    fun incrementRepublishCount(
+        @Param("id") id: String,
+        @Param("status") status: TransferStatus,
+        @Param("expected") expected: Int,
+        @Param("at") at: Instant,
+    ): Int
 
     /** 조건부 상태 변경 (SENDING 으로 갈 때 sending_at 도 기록). 현재 상태가 from 이 아니면 0 건. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
@@ -159,14 +190,7 @@ class JpaTransferStore(
             tx.execute {
                 // flush 로 UNIQUE 위반을 여기서 터뜨려야 아래 catch 에서 StoreConflict 로 바꿀 수 있다 (커밋 시점까지 미루지 않는다)
                 val saved = transfers.saveAndFlush(TransferEntity.from(transfer))
-                outbox.saveAndFlush(
-                    OutboxEventEntity(
-                        aggregateId = transfer.id.toString(),
-                        eventType = event::class.simpleName!!,
-                        payload = payloadOf(event),
-                        createdAt = event.occurredAt.toDbPrecision(),
-                    ),
-                )
+                outbox.saveAndFlush(outboxRow(event))
                 saved.toDomain()
             }!!
         } catch (e: DataIntegrityViolationException) {
@@ -214,4 +238,29 @@ class JpaTransferStore(
 
     override fun recordInquiryAttempt(id: UUID, at: Instant): Boolean =
         tx.execute { transfers.incrementInquiryAttempts(id.toString(), TransferStatus.UNKNOWN, at.toDbPrecision()) == 1 }!!
+
+    override fun findRepublishable(updatedBefore: Instant, limit: Int): List<Transfer> =
+        transfers.findRepublishable(TransferStatus.RECEIVED, updatedBefore.toDbPrecision(), Limit.of(limit)).map { it.toDomain() }
+
+    /**
+     * 조건부 UPDATE 와 아웃박스 INSERT 를 한 트랜잭션에 쓴다: INSERT 가 실패하면 횟수 증가도 롤백된다
+     * (횟수만 늘고 메시지는 없는 상태가 생기면 한도를 헛되이 쓴다). UPDATE 가 0건이면 INSERT 하지 않는다.
+     */
+    override fun republish(id: UUID, expectedCount: Int, at: Instant): Boolean =
+        tx.execute {
+            val dbAt = at.toDbPrecision()
+            if (transfers.incrementRepublishCount(id.toString(), TransferStatus.RECEIVED, expectedCount, dbAt) != 1) {
+                return@execute false
+            }
+            outbox.saveAndFlush(outboxRow(TransferEvent.TransferRequested(id, dbAt)))
+            true
+        }!!
+
+    /** 아웃박스 한 줄. 접수(saveWithEvent)와 재발행(republish)이 같은 모양을 쓰도록 한곳에서 만든다. */
+    private fun outboxRow(event: TransferEvent) = OutboxEventEntity(
+        aggregateId = event.transferId.toString(),
+        eventType = event::class.simpleName!!,
+        payload = payloadOf(event),
+        createdAt = event.occurredAt.toDbPrecision(),
+    )
 }

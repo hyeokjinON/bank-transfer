@@ -1,0 +1,29 @@
+$kind: http-request
+name: 4-1 Mock Bank 를 Stop 한 뒤 접수 → 202 RECEIVED
+method: POST
+url: '{{baseUrl}}/api/v1/transfers'
+order: 1000
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: Idempotency-Key
+    value: '{{$guid}}'
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "{{accountNo}}",
+      "amount": 50000,
+      "memo": "재발행"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // 은행이 내려가 있어도 접수는 된다 (아웃박스에 저장). 처리는 재시도 토픽 → DLT 로 간다.
+      pm.test("202 RECEIVED", () => {
+        pm.response.to.have.status(202);
+        pm.expect(pm.response.json().status).to.eql("RECEIVED");
+      });
+      pm.collectionVariables.set("retryTransferId", pm.response.json().id);

@@ -1,15 +1,18 @@
 package io.github.hyeokjinon.banktransfer.api.config
 
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
+import io.github.hyeokjinon.banktransfer.gateway.BankNotSentException
 import io.github.hyeokjinon.banktransfer.protocol.InquiryResponse
 import io.github.hyeokjinon.banktransfer.protocol.ResponseCodes
 import io.github.hyeokjinon.banktransfer.transfer.BankInquiryPort
 import io.github.hyeokjinon.banktransfer.transfer.InquiryOutcome
 import org.slf4j.LoggerFactory
+import java.util.concurrent.ExecutionException
 
 /**
- * 결과조회 포트를 게이트웨이에 연결한다. 확실한 답(처리됨 0000 · 원거래 없음 2001)만 확정으로 돌려주고,
- * 그 밖(조회 전문 거절, 모르는 처리결과, 시간 초과, 연결 없음 …)은 모두 Unknown — 다음 주기에 다시 묻는다.
+ * 결과조회 포트를 게이트웨이에 연결한다. 확실한 답(처리됨 0000 · 원거래 없음 2001)만 확정으로 돌려준다.
+ * 연결이 없어 보내지도 못했으면 Unavailable — 정리 작업이 그 주기의 남은 조회를 멈추고 횟수를 세지 않는다 (P3-3b).
+ * 그 밖(조회 전문 거절, 모르는 처리결과, 시간 초과, 보낸 뒤 끊김 …)은 Unknown — 다음 주기에 다시 묻는다.
  * 예외를 던지지 않는다.
  */
 class BankInquiryAdapter(private val client: BankGatewayClient) : BankInquiryPort {
@@ -21,9 +24,17 @@ class BankInquiryAdapter(private val client: BankGatewayClient) : BankInquiryPor
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
             unknown(reference, e.toString())
+        } catch (e: ExecutionException) {
+            val cause = e.cause ?: e
+            if (cause is BankNotSentException) unavailable(reference) else unknown(reference, cause.toString())
         } catch (e: Exception) {
             unknown(reference, (e.cause ?: e).toString())
         }
+
+    private fun unavailable(reference: String): InquiryOutcome {
+        log.warn("bank not connected, inquiries paused until next round: reference={}", reference)
+        return InquiryOutcome.Unavailable
+    }
 
     /**
      * 응답이 우리가 물은 거래번호에 대한 것인지 본다. 다른 거래의 "처리 안 됨(2001)" 을 이 건의 FAILED 로 확정하면

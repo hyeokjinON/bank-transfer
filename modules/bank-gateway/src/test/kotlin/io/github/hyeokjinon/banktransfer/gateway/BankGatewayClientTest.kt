@@ -160,5 +160,22 @@ class BankGatewayClientTest {
         assertEquals(ResponseCodes.OK, client.transfer("090", "9990000000002", 1, "BT1234", "V2610210000000000001").get(5, TimeUnit.SECONDS).header.responseCode)
     }
 
+    @Test
+    fun `모의 은행을 잠시 내렸다 올리면 같은 포트로 다시 붙는다 (은행 장애 시나리오용)`() {
+        val bank = MockBankServer().start().closeLater()
+        val client = client(bank.boundPort).start()
+        waitUntil { client.isConnected }
+        val port = bank.boundPort
+
+        bank.pause()
+        waitUntil { !client.isConnected }   // 붙어 있던 연결도 끊긴다
+        assertIs<BankNotSentException>(client.inquire("T2610220000000000001").awaitFailure())   // 은행에 가지 않았다
+
+        bank.resume()
+        waitUntil { client.isConnected }
+        assertEquals(port, bank.boundPort)
+        assertEquals(ResponseCodes.ORIGINAL_NOT_FOUND, client.inquire("T2610220000000000001").get(5, TimeUnit.SECONDS).result)
+    }
+
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }
 }

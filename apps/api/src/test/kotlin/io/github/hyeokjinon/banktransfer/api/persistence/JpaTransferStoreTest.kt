@@ -10,6 +10,7 @@ import io.github.hyeokjinon.banktransfer.transfer.TransferStore
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import kotlin.test.Test
@@ -178,5 +179,97 @@ class JpaTransferStoreTest : ApiIntegrationTest() {
 
         val received = newTransfer().also { store.saveWithEvent(it, requested(it)) }
         assertFalse(store.recordInquiryAttempt(received.id, at))   // UNKNOWN 이 아니면 늘리지 않는다
+    }
+
+    @Test
+    fun `재발행 - RECEIVED 이고 기대 횟수가 맞으면 횟수 +1 과 republished_at, 접수와 같은 모양의 이벤트를 아웃박스에 한 줄 더`() {
+        val t = newTransfer().also { store.saveWithEvent(it, requested(it)) }
+        val at = Instant.parse("2026-10-22T01:00:00.654321Z")
+
+        assertTrue(store.republish(t.id, 0, at))
+
+        val after = store.findById(t.id)!!
+        assertEquals(TransferStatus.RECEIVED, after.status)
+        assertEquals(1, after.republishCount)
+        assertEquals(at, after.republishedAt)
+        assertEquals(at, after.updatedAt)
+        val rows = jdbc.queryForList(
+            "SELECT event_type, JSON_UNQUOTE(JSON_EXTRACT(payload, '$.transferId')) AS transfer_id, " +
+                "JSON_UNQUOTE(JSON_EXTRACT(payload, '$.occurredAt')) AS occurred_at, published_at " +
+                "FROM outbox_event WHERE aggregate_id = ? ORDER BY id",
+            t.id.toString(),
+        )
+        assertEquals(2, rows.size)
+        assertEquals("TransferRequested", rows[1]["event_type"])
+        assertEquals(t.id.toString(), rows[1]["transfer_id"])
+        assertEquals(at.toString(), rows[1]["occurred_at"])
+        assertNull(rows[1]["published_at"])   // 발행기가 평소처럼 내보낸다
+    }
+
+    @Test
+    fun `재발행 - 기대 횟수가 다르거나 RECEIVED 가 아니면 0건이고 아웃박스도 그대로`() {
+        val raced = newTransfer().also { store.saveWithEvent(it, requested(it)) }
+        val sending = newTransfer().also { store.saveWithEvent(it, requested(it)) }
+        store.transition(sending.id, TransferStatus.RECEIVED, TransferStatus.SENDING, Instant.now())
+
+        assertFalse(store.republish(raced.id, 1, Instant.now()))     // 다른 인스턴스가 먼저 0 → 1 로 바꾼 상황
+        assertFalse(store.republish(sending.id, 0, Instant.now()))   // 그 사이 컨슈머가 집어 갔다
+
+        assertEquals(0, store.findById(raced.id)!!.republishCount)
+        assertEquals(1, outbox.countByAggregateId(raced.id.toString()))
+        assertEquals(1, outbox.countByAggregateId(sending.id.toString()))
+    }
+
+    @Test
+    fun `재발행 - 아웃박스 INSERT 가 실패하면 횟수 증가도 롤백된다`() {
+        val broken = JpaTransferStore(transfers, outbox, tx, payloadOf = { "not-json" })
+        val t = newTransfer().also { store.saveWithEvent(it, requested(it)) }
+
+        assertFails { broken.republish(t.id, 0, Instant.now()) }
+
+        val after = store.findById(t.id)!!
+        assertEquals(0, after.republishCount)   // 횟수만 늘고 메시지는 없는 상태가 생기지 않는다
+        assertNull(after.republishedAt)
+        assertEquals(1, outbox.countByAggregateId(t.id.toString()))
+    }
+
+    @Test
+    fun `재발행 대상 - 오래된 RECEIVED 중 마지막 재발행 이후 은행에 보내려 한 흔적이 있는 것만`() {
+        val now = Instant.now()
+        fun saved() = newTransfer().also { store.saveWithEvent(it, requested(it)) }
+        fun triedAndReverted(t: Transfer, at: Instant) {
+            store.transition(t.id, TransferStatus.RECEIVED, TransferStatus.SENDING, at)
+            store.transition(t.id, TransferStatus.SENDING, TransferStatus.RECEIVED, at)   // 미전송 → RECEIVED (sending_at 은 남는다)
+        }
+
+        val tried = saved().also { triedAndReverted(it, now.minusSeconds(600)) }
+        val fresh = saved().also { triedAndReverted(it, now.minusSeconds(60)) }
+        val neverTried = saved()                                                        // updated_at 은 2026-10-19 (오래됨), sending_at 없음
+        val republishedNotTried = saved().also {
+            triedAndReverted(it, now.minusSeconds(1_200))
+            store.republish(it.id, 0, now.minusSeconds(600))
+        }
+        val republishedThenTried = saved().also {
+            triedAndReverted(it, now.minusSeconds(1_800))
+            store.republish(it.id, 0, now.minusSeconds(1_200))
+            triedAndReverted(it, now.minusSeconds(600))
+        }
+        // 컨트롤러 지시: 재발행과 같은 시각의 시도는 "재발행 이후" 가 아니다 (엄격한 > 경계)
+        val sameInstant = saved().also {
+            triedAndReverted(it, now.minusSeconds(900))
+            store.republish(it.id, 0, now.minusSeconds(900))
+        }
+        val sending = saved().also { store.transition(it.id, TransferStatus.RECEIVED, TransferStatus.SENDING, now.minusSeconds(600)) }
+
+        val found = store.findRepublishable(now.minus(Duration.ofMinutes(5)), 1_000).map { it.id }
+
+        assertTrue(tried.id in found)
+        assertTrue(republishedThenTried.id in found)   // 2회차: republish_count = 1 이고 sending_at 이 republished_at 보다 나중
+        assertEquals(1, store.findById(republishedThenTried.id)!!.republishCount)
+        assertFalse(fresh.id in found)                 // 5분이 안 됐다 (재시도 토픽 · DLT 진행 중일 수 있다)
+        assertFalse(neverTried.id in found)            // 은행에 시도도 못 했다 (Kafka · 컨슈머 장애)
+        assertFalse(republishedNotTried.id in found)   // 재발행한 뒤 아직 아무도 안 집어 갔다
+        assertFalse(sameInstant.id in found)           // sending_at == republished_at 은 제외 (엄격한 >)
+        assertFalse(sending.id in found)
     }
 }

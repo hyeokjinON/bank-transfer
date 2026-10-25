@@ -48,6 +48,8 @@ class TransferServiceTest {
         override fun findSendingBefore(cutoff: Instant, limit: Int): List<Transfer> = throw UnsupportedOperationException()
         override fun findUnknownForInquiry(maxAttempts: Int, sendingBefore: Instant, limit: Int): List<Transfer> = throw UnsupportedOperationException()
         override fun recordInquiryAttempt(id: UUID, at: Instant): Boolean = throw UnsupportedOperationException()
+        override fun findRepublishable(updatedBefore: Instant, limit: Int): List<Transfer> = throw UnsupportedOperationException()
+        override fun republish(id: UUID, expectedCount: Int, at: Instant): Boolean = throw UnsupportedOperationException()
     }
 
     private val store = FakeStore()

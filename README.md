@@ -26,7 +26,8 @@
 - **출금이체 접수 API (P3-1)**: `Idempotency-Key` 로 멱등 접수(202), 1원인증 계좌만 허용, 이체와 처리 신호(아웃박스)를 한 트랜잭션에 저장. MySQL(Flyway) 사용
 - **출금이체 처리 (P3-2)**: 아웃박스 → Kafka(`transfer.requested`) → 컨슈머 → 은행 → `COMPLETED` / `FAILED` / `UNKNOWN`. 발행은 적어도 한 번, 중복 메시지는 상태 조건부 UPDATE 로 막고, 결과를 모르면 다시 보내지 않음 ([ADR-0005](docs/adr/0005-kafka-delivery-and-consumer-idempotency.md))
 - **결과조회와 정리 작업 (P3-3a)**: 응답을 못 받은 이체(`UNKNOWN`)와 30초 넘게 멈춘 `SENDING` 을 다시 보내지 않고, 이용기관 거래번호로 은행에 결과조회(`INQ`, 전문 규격 v0.2)해 보낸 지 30초 유예 뒤 10초마다 `COMPLETED` / `FAILED` 로 확정. 10번 물어도 모르면 멈추고 경고(일마감 대사 대상) ([ADR-0006](docs/adr/0006-inquire-instead-of-resend.md))
-- **테스트 135개**: 전문 직렬화, 쪼개진 TCP 패킷, 동시 요청 50건 매칭, 타임아웃, 재접속, API 통합(HTTP → TCP), MySQL · Kafka 통합(Testcontainers: 같은 키 동시 10건, 아웃박스 원자성, 발행기 2개 동시 발행 · 접수가 발행기에 막히지 않음, 같은 메시지 두 번 → 은행 1건, 처리 후 무응답 → 결과조회로 확정 · 입금 1건)
+- **재시도 토픽 · 제한 재발행 (P3-3b)**: 은행에 보내지도 못한 출금은 재시도 토픽(5s · 30s · 60s, 뒤 메시지를 막지 않음) → DLT → 정리 작업이 아웃박스로 최대 3번 다시 발행, 그래도 안 되면 FAILED E001 (돈은 움직이지 않음). 결과조회 중 연결 없음은 시도로 세지 않음 ([ADR-0007](docs/adr/0007-retry-topic-and-bounded-republish.md))
+- **테스트 161개**: 전문 직렬화, 쪼개진 TCP 패킷, 동시 요청 50건 매칭, 타임아웃, 재접속, API 통합(HTTP → TCP), MySQL · Kafka 통합(Testcontainers: 같은 키 동시 10건, 아웃박스 원자성, 발행기 2개 동시 발행 · 접수가 발행기에 막히지 않음, 같은 메시지 두 번 → 은행 1건, 처리 후 무응답 → 결과조회로 확정 · 입금 1건, 은행 장애 → 재시도 토픽 → DLT → 재발행 → 입금 1건)
 
 ## 구조
 
@@ -89,7 +90,8 @@ sequenceDiagram
 2. 오른쪽 위 실행 목록에 `.run/` 의 구성이 자동으로 뜹니다.
    - `0. Mock Bank + API` : 모의 은행(9090)과 API(8080)를 한 번에 실행
    - `1. Mock Bank (9090)` / `2. API (8080)` : 하나씩 실행 (벌레 아이콘으로 디버그)
-   - `3. All Tests` : 테스트 135개
+   - `3. All Tests` : 테스트 161개
+   - `4. API (재발행 손 확인)` : 재시도 간격 2초 · 4초 · 8초, 재발행 대기 30초로 줄인 API (P3-3b 손 확인용, [`http/transfer.http`](http/transfer.http) 8절)
 3. `http/account-verification.http` 를 열고 요청 왼쪽 ▶ 버튼으로 호출합니다.
    1번 요청이 응답의 `id` 를 저장하고, 모의 은행 콘솔의 `적요='BT1234'` 숫자를 2번 요청의 `code` 에 넣으면 `VERIFIED` 가 됩니다.
 
@@ -112,7 +114,7 @@ bash infra/verify.sh
 요구사항: JDK 21 (Gradle 은 래퍼가 내려받습니다)
 
 ```bash
-./gradlew build                                   # 컴파일 + 테스트 135개
+./gradlew build                                   # 컴파일 + 테스트 161개
 ./gradlew :apps:mock-bank:run --args="9090"       # 터미널 1: 모의 은행
 ./gradlew :apps:api:bootRun                       # 터미널 2: API (localhost:8080)
 ```
@@ -160,11 +162,11 @@ curl -X POST localhost:8080/api/v1/account-verifications/{id}/confirm -H 'Conten
 - [x] **P1** 1원 계좌인증 API (동기 계약, 논블로킹 대기)
 - [x] **P2** Netty 모의 은행, 프레이밍, 폴링, 재접속, 응답 매칭
 - [x] **P3-0** 로컬 인프라: Docker Compose 로 MySQL 8.4 · Kafka 4.1(KRaft) · Redis 7.4, CI 연기 테스트 → [infra/](infra/README.md) · [ADR-0003](docs/adr/0003-local-infra-docker-compose.md)
-- [ ] **P3** 입출금 비동기 처리: Kafka + Transactional Outbox + 멱등키 + DLT
+- [x] **P3** 입출금 비동기 처리: Kafka + Transactional Outbox + 멱등키 + DLT
   - [x] P3-1 접수: Idempotency-Key · 아웃박스 · 1원인증 MySQL 이전 → [ADR-0004](docs/adr/0004-idempotency-key-and-transactional-outbox.md)
   - [x] P3-2 처리: 폴링 퍼블리셔 → Kafka → 컨슈머 → 은행 → [ADR-0005](docs/adr/0005-kafka-delivery-and-consumer-idempotency.md)
   - [x] P3-3a 결과조회: 규격 v0.2 · 정리 작업 (PR #7) → [ADR-0006](docs/adr/0006-inquire-instead-of-resend.md)
-  - [ ] P3-3b 재시도: 재시도 토픽 · DLT · 오래된 `RECEIVED` 재발행
+  - [x] P3-3b 재시도: 재시도 토픽 · DLT · 제한 재발행 (PR #9) → [ADR-0007](docs/adr/0007-retry-topic-and-bounded-republish.md)
 - [ ] **P4** 잔액 동시성: 비관적 락 vs 낙관적 락 vs Redis 분산락, k6 부하테스트
 - [ ] **P5** Spring Batch 일마감 대사 + 텔레그램 알림
 - [ ] **P6** WebFlux / Coroutines 버전과 성능 비교

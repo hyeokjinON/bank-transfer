@@ -1,0 +1,14 @@
+$kind: http-request
+name: 4-2 DLT 뒤(15초쯤) 조회 → RECEIVED
+method: GET
+url: '{{baseUrl}}/api/v1/transfers/{{retryTransferId}}'
+order: 2000
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // kafka-ui 에서 transfer.requested-dlt 에 이 id 가 key 인 메시지가 보여야 한다. 이체는 정리 작업이 이어받는다.
+      pm.test("RECEIVED (은행에 못 보냄, 재발행 대기)", () => {
+        pm.response.to.have.status(200);
+        pm.expect(pm.response.json().status).to.eql("RECEIVED");
+      });
