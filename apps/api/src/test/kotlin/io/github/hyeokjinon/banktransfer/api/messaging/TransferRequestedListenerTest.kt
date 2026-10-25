@@ -145,7 +145,7 @@ class TransferRequestedListenerTest {
         val ack = CountingAck()
         val id = UUID.randomUUID().toString()
         val dbError = "org.springframework.dao.DataAccessResourceFailureException"
-        val message = "Listener method threw exception; nested exception is $dbError: could not\nconnect " + "y".repeat(500)
+        val message = realDltMessage("could not\nconnect " + "y".repeat(500))
 
         val logs = captureLogs { listener.onDlt(dltRecord(id, dbError, message), ack) }
 
@@ -157,6 +157,8 @@ class TransferRequestedListenerTest {
         assertTrue(text.contains("sending_at"))
         assertTrue(text.contains(id))
         assertTrue(text.contains("DataAccessResourceFailureException"))
+        assertTrue(text.contains("cause=could not?connect"))      // 래퍼 문구가 아니라 원래 예외 메시지가 보인다
+        assertFalse(text.contains("Endpoint handler details"))
         assertTrue(text.contains("${TransferTopics.REQUESTED}-1@42"))
         assertFalse(text.contains('\n'))
         assertTrue(text.length < 700)                           // 500자짜리 메시지가 잘린다
@@ -193,9 +195,18 @@ class TransferRequestedListenerTest {
     }
 
     @Test
-    fun `rootMessage - nested exception 뒤만 남긴다`() {
-        assertEquals("X: boom", rootMessage("Listener method 'a' threw exception; nested exception is X: boom"))
+    fun `rootMessage - spring-kafka 4_1 의 래퍼 메시지 뒤 원래 예외 메시지만 남긴다 (그 안의 세미콜론은 지킨다)`() {
+        assertEquals("boom; retry later", rootMessage(realDltMessage("boom; retry later")))
         assertEquals("plain", rootMessage("plain"))
         assertNull(rootMessage(null))
     }
+
+    /** spring-kafka 4.1.1 DeadLetterRecordManager 가 EXCEPTION_MESSAGE 헤더에 넣는 모양: 래퍼 메시지 + "; " + 원래 예외 메시지. */
+    private fun realDltMessage(rootCause: String) =
+        "Listener method 'public void io.github.hyeokjinon.banktransfer.api.messaging.TransferRequestedListener.on(" +
+            "org.apache.kafka.clients.consumer.ConsumerRecord,org.springframework.kafka.support.Acknowledgment)' threw exception\n" +
+            "Endpoint handler details:\n" +
+            "Method [public void io.github.hyeokjinon.banktransfer.api.messaging.TransferRequestedListener.on(" +
+            "org.apache.kafka.clients.consumer.ConsumerRecord,org.springframework.kafka.support.Acknowledgment)]\n" +
+            "Bean [io.github.hyeokjinon.banktransfer.api.messaging.TransferRequestedListener@1a2b3c]; " + rootCause
 }

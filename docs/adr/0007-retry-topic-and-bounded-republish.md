@@ -1,6 +1,6 @@
 # ADR-0007 은행에 못 보낸 출금은 논블로킹 재시도 토픽으로 다시 시도하고, 은행 시도 흔적이 있을 때만 횟수를 제한해 재발행한 뒤 FAILED E001 로 확정한다
 
-- 상태: 제안 (2026-10-22, PR #9 — 머지 뒤 채택으로 바꾼다)
+- 상태: 채택 (2026-10-26, PR #9 머지)
 - 단계: P3-3b · 설계: [P3-3b 설계](../superpowers/specs/2026-10-22-p3-3b-retry-republish-design.md) · [ADR-0005](0005-kafka-delivery-and-consumer-idempotency.md) 결정 8 을 대체 · [ADR-0006](0006-inquire-instead-of-resend.md) · [database.md](../database.md) §4-2
 
 ## 맥락
