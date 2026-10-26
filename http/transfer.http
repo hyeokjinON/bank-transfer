@@ -181,3 +181,86 @@ X-User-Id: user-1
 ### 8-3) Mock Bank 를 다시 띄우고 40초쯤 뒤 조회 → COMPLETED 0000 (정리 작업이 아웃박스로 재발행 → 처음부터 처리)
 GET http://localhost:8080/api/v1/transfers/{{retryTransferId}}
 X-User-Id: user-1
+
+
+### ============================================================
+### 손 확인: 원화 잔고 — 충전 → 출금 → 잔고 · 보류 → 잔고보다 큰 출금 422 → 은행이 거절하는 출금 → FAILED 뒤 잔고 복원 (P4-1)
+### 준비: 실행 구성 "0. Mock Bank + API". 1002123456789 는 user-1 로 인증해 둔다 (account-verification.http 1) · 2)).
+###       "은행이 거절하는 출금"은 모의 은행에 없는 계좌라 1원인증을 API 로 마칠 수 없다 → MySQL 에 인증 행을 한 번 넣어 둔다:
+###       docker compose -f infra/docker-compose.yml --env-file infra/.env exec mysql mysql -ubank -p bank_transfer
+###       INSERT INTO account_verification (id, user_id, bank_code, account_no, holder_name, code_hash, status, failed_attempts, expires_at, verified_at, created_at)
+###       VALUES (UUID(), 'user-1', '090', '5500000000001', '손확인', REPEAT('0', 64), 'VERIFIED', 0, NOW(6), NOW(6), NOW(6));
+### ============================================================
+
+### 9-1) 충전 10만 원 → 200, balance 기록
+POST http://localhost:8080/api/v1/wallet/deposits
+Content-Type: application/json
+X-User-Id: user-1
+
+{
+  "amount": 100000
+}
+
+> {%
+    client.global.set("walletBalance", response.body.balance);
+%}
+
+### 9-2) 출금 3만 원 → 202 (접수 트랜잭션에서 잔고 차감)
+POST http://localhost:8080/api/v1/transfers
+Content-Type: application/json
+X-User-Id: user-1
+Idempotency-Key: {{$random.uuid}}
+
+{
+  "bankCode": "090",
+  "accountNo": "1002123456789",
+  "amount": 30000,
+  "memo": "잔고"
+}
+
+### 9-3) 지갑 조회 → balance = 9-1 - 30000. pending 은 처리 전이면 30000, 처리(COMPLETED) 뒤면 0 (확정 — 잔고는 빠진 채)
+GET http://localhost:8080/api/v1/wallet
+X-User-Id: user-1
+
+> {%
+    client.global.set("walletBalance", response.body.balance);
+    client.global.set("overAmount", response.body.balance + 1);
+%}
+
+### 9-4) 잔고보다 1원 큰 출금 → 422 INSUFFICIENT_BALANCE (잔고가 1천만 원 이상이면 1회 한도 INVALID_AMOUNT 가 먼저 난다)
+POST http://localhost:8080/api/v1/transfers
+Content-Type: application/json
+X-User-Id: user-1
+Idempotency-Key: {{$random.uuid}}
+
+{
+  "bankCode": "090",
+  "accountNo": "1002123456789",
+  "amount": {{overAmount}},
+  "memo": "잔고초과"
+}
+
+### 9-5) 은행에 없는 계좌(위 SQL 로 인증)로 2만 원 → 202. 몇 초 안에 은행이 1001 로 거절한다
+POST http://localhost:8080/api/v1/transfers
+Content-Type: application/json
+X-User-Id: user-1
+Idempotency-Key: {{$random.uuid}}
+
+{
+  "bankCode": "090",
+  "accountNo": "5500000000001",
+  "amount": 20000,
+  "memo": "환불확인"
+}
+
+> {%
+    client.global.set("refundTransferId", response.body.id);
+%}
+
+### 9-6) 몇 초 뒤 조회 → FAILED 1001
+GET http://localhost:8080/api/v1/transfers/{{refundTransferId}}
+X-User-Id: user-1
+
+### 9-7) 지갑 조회 → balance 가 9-3 과 같다 (실패 확정과 같은 트랜잭션에서 환불). DB 원장: WITHDRAW 20000 → REFUND 20000
+GET http://localhost:8080/api/v1/wallet
+X-User-Id: user-1

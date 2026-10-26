@@ -1,0 +1,21 @@
+$kind: http-request
+name: 5-3 지갑 조회 → 잔고 3만 원 감소 (COMPLETED 여도 빠진 채)
+method: GET
+url: '{{baseUrl}}/api/v1/wallet'
+order: 3000
+headers:
+  - key: X-User-Id
+    value: '{{userId}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // pending = 이 사용자의 RECEIVED · SENDING · UNKNOWN 출금 합. 5-2 가 처리 전이면 30000 이 보이고, 다른 폴더의 UNKNOWN 이 남아 있으면 그만큼 더 보인다.
+      const body = pm.response.json();
+      pm.test("잔고 = 5-1 잔고 - 30000", () => {
+        pm.response.to.have.status(200);
+        pm.expect(body.balance).to.eql(Number(pm.collectionVariables.get("walletBalance")) - 30000);
+      });
+      console.log("pending = " + body.pending);
+      pm.collectionVariables.set("walletBalance", String(body.balance));
+      pm.collectionVariables.set("overAmount", String(body.balance + 1));

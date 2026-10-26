@@ -9,6 +9,19 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
+## [P4-1] 원화 잔고 — 2026-10-26 ([#11](https://github.com/hyeokjinON/bank-transfer/pull/11))
+### Added
+- `wallet` · `wallet_ledger`(V3), 잔고 SQL 한 곳 `WalletLedger`, 지갑 API(`POST /api/v1/wallet/deposits` 관리 · 테스트용 충전, `GET /api/v1/wallet` 잔고 · 보류).
+- `TransferStore.fail()`: 실패 확정과 환불을 한 트랜잭션에. 오류 코드 `USER_ID_REQUIRED` · `INSUFFICIENT_BALANCE`.
+- ADR-0008, 동시성 테스트(출금 100건 동시 → 정확히 10건 · 잔고 0, 같은 키 20건 → 차감 1번), 손 확인(`http/transfer.http` 9절 · Postman 5 폴더).
+### Changed (**호환 깨짐**)
+- 모든 출금 · 1원인증 API 에 `X-User-Id` 헤더 필수.
+- 출금은 접수할 때 잔고에서 차감 (충전이 필요하고, 모자라면 422).
+- 멱등키 UNIQUE 를 `(user_id, idempotency_key)` 로 (사용자마다 같은 키를 쓸 수 있다).
+- 받는 계좌는 내가 인증한 계좌만. 남의 출금 조회 · 남의 인증 확인은 404.
+- `transition(…, FAILED)` 금지: 실패 확정 4경로 모두 `fail()`.
+- `CONFLICT` 경고에 "잔고 그대로".
+
 ## [P3-3b] 재시도 토픽 · 제한 재발행 — 2026-10-26 ([#9](https://github.com/hyeokjinON/bank-transfer/pull/9), 머지 후 정리 [#10](https://github.com/hyeokjinON/bank-transfer/pull/10))
 ### Added
 - 재시도 토픽 `transfer.requested-retry-0/1/2` · `transfer.requested-dlt` (5s · 30s · 60s, 설정 `transfer.retry.*`), DLT 핸들러(이유별 로그: 은행 연결 없음 · 잘못된 key 는 WARN, 그 밖의 예외는 자동 재처리가 없어 ERROR + ack), key 가 UUID 가 아니면 재시도 없이 바로 DLT (`InvalidTransferKeyException`).

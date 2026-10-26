@@ -1,0 +1,17 @@
+$kind: http-request
+name: 5-7 지갑 조회 → 잔고 복원 (실패 확정과 같은 트랜잭션에서 환불)
+method: GET
+url: '{{baseUrl}}/api/v1/wallet'
+order: 7000
+headers:
+  - key: X-User-Id
+    value: '{{userId}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // DB 원장(database.md §9 "사용자 원장 최근 20줄")에는 이 출금의 WITHDRAW 20000 · REFUND 20000 이 보인다.
+      pm.test("잔고 = 5-3 의 잔고 (2만 원이 돌아왔다)", () => {
+        pm.response.to.have.status(200);
+        pm.expect(pm.response.json().balance).to.eql(Number(pm.collectionVariables.get("walletBalance")));
+      });

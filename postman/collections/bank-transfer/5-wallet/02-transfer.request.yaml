@@ -1,0 +1,30 @@
+$kind: http-request
+name: 5-2 출금 3만 원 → 202 (접수 트랜잭션에서 잔고 차감)
+method: POST
+url: '{{baseUrl}}/api/v1/transfers'
+order: 2000
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: X-User-Id
+    value: '{{userId}}'
+  - key: Idempotency-Key
+    value: '{{$guid}}'
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "{{accountNo}}",
+      "amount": 30000,
+      "memo": "잔고"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // 1. 폴더에서 같은 사용자로 {{accountNo}} 를 인증해 두어야 한다 (남이 인증한 계좌는 422 ACCOUNT_NOT_VERIFIED).
+      pm.test("202 RECEIVED", () => {
+        pm.response.to.have.status(202);
+        pm.expect(pm.response.json().status).to.eql("RECEIVED");
+      });

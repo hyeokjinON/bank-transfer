@@ -8,6 +8,7 @@ description: |-
   3) API 를 재시작한 뒤 "2-2 조회" 만 다시 Send → 같은 건이면 DB 에 저장된 것.
   4) (P3-3a) "3. 결과조회 · 정리 작업" 폴더를 위에서부터 Send. 3-1 뒤 모의 은행 콘솔의 적요 숫자를 code 에 넣고 3-2. 3-3 접수 뒤 3~4초쯤 기다려 3-4, 접수로부터 40초쯤(30초 유예 + 최대 10초 주기) 지난 뒤 3-5. 아직 UNKNOWN 이면 몇 초 뒤 다시 Send.
   5) (P3-3b) "4. 재시도 · 재발행" 폴더: 실행 구성 "4. API (재발행 손 확인)" 으로 API 를 띄우고 Mock Bank 를 Stop → 4-1 → 15초쯤 뒤 4-2(RECEIVED) → Mock Bank Run → 40초쯤 뒤 4-3(COMPLETED). 대응: http/transfer.http 8-1 ~ 8-3.
+  6) (P4-1) "5. 원화 잔고" 폴더: 먼저 1. 폴더로 user-1 이 {{accountNo}} 를 인증하고, MySQL 에 5500000000001 인증 행을 넣는다(SQL 은 http/transfer.http 9절 머리말). 5-1 → 5-7 을 차례로 Send (5-6 · 5-7 은 5-5 뒤 몇 초 기다린다). 대응: http/transfer.http 9-1 ~ 9-7.
   대응 파일: http/account-verification.http, http/transfer.http (IntelliJ Ultimate 용)
 variables:
   baseUrl: http://localhost:8080
@@ -20,3 +21,6 @@ variables:
   silentVerificationId: ""
   silentTransferId: ""
   retryTransferId: ""
+  walletBalance: ""
+  overAmount: ""
+  refundTransferId: ""
