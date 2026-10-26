@@ -38,7 +38,8 @@ class JpaTransferStoreTest : ApiIntegrationTest() {
         key: String = UUID.randomUUID().toString(),
         reference: String = references.next(),
         userId: String = user,
-        accountNo: String = "1002123456789",
+        // 모의 은행에 없는 계좌: 남는 RECEIVED 를 나중에 다른 테스트가 발행해도 공용 계좌에 입금이 생기지 않는다
+        accountNo: String = unregisteredAccount(),
     ): Transfer {
         val now = Instant.parse("2026-10-19T01:00:00.123456Z")
         return Transfer(

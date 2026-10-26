@@ -17,6 +17,13 @@ class AccountVerificationApiTest : ApiIntegrationTest() {
 
     private val user = newUserId()
 
+    /**
+     * 공용 계좌(1002123456789)에는 다른 테스트의 출금 입금도 쌓이므로 `last()` 가 1원인증 입금이라는 보장이 없다.
+     * 1원인증 입금은 적요가 "BT" + 코드다 — 그중 가장 최근 것을 쓴다.
+     */
+    private fun latestVerificationCode(accountNo: String): String =
+        bank.depositsOf(accountNo).last { it.memo.startsWith("BT") }.memo.removePrefix("BT")
+
     private fun post(path: String, body: Map<String, String>, userId: String = user): Pair<Int, Map<String, Any?>> =
         client.post().uri(path)
             .contentType(MediaType.APPLICATION_JSON)
@@ -34,7 +41,7 @@ class AccountVerificationApiTest : ApiIntegrationTest() {
         assertEquals("SENT", created["status"])
 
         // 사용자가 자기 통장에서 1원 입금 적요("BT1234")를 확인하는 단계
-        val code = bank.depositsOf("1002123456789").last().memo.removePrefix("BT")
+        val code = latestVerificationCode("1002123456789")
 
         val (confirmStatus, confirmed) = post("/api/v1/account-verifications/${created["id"]}/confirm", mapOf("code" to code))
         assertEquals(200, confirmStatus)
@@ -47,14 +54,22 @@ class AccountVerificationApiTest : ApiIntegrationTest() {
             "/api/v1/account-verifications",
             mapOf("bankCode" to "090", "accountNo" to "1002123456789", "holderName" to "홍길동"),
         )
-        val code = bank.depositsOf("1002123456789").last().memo.removePrefix("BT")
+        val code = latestVerificationCode("1002123456789")
 
-        val (otherStatus, other) = post("/api/v1/account-verifications/${created["id"]}/confirm", mapOf("code" to code), userId = newUserId())
+        // 남이 틀린 코드를 보내도 404 이고, 주인의 실패 횟수에는 쓰이지 않는다
+        val wrong = if (code == "0".repeat(code.length)) "1".repeat(code.length) else "0".repeat(code.length)
+        val (otherStatus, other) = post("/api/v1/account-verifications/${created["id"]}/confirm", mapOf("code" to wrong), userId = newUserId())
         assertEquals(404, otherStatus)
         assertEquals("VERIFICATION_NOT_FOUND", other["code"])
 
+        // 주인이 한 번 틀리면 남은 횟수가 (최대 - 1) 이어야 한다 — 남의 시도가 셌다면 더 적다
+        val (wrongStatus, wrongBody) = post("/api/v1/account-verifications/${created["id"]}/confirm", mapOf("code" to wrong))
+        assertEquals(400, wrongStatus)
+        assertEquals("WRONG_CODE", wrongBody["code"])
+        assertEquals(4, wrongBody["remainingAttempts"])
+
         val (mineStatus, mine) = post("/api/v1/account-verifications/${created["id"]}/confirm", mapOf("code" to code))
-        assertEquals(200, mineStatus)                // 남의 시도는 실패 횟수도 쓰지 않았다
+        assertEquals(200, mineStatus)
         assertEquals("VERIFIED", mine["status"])
     }
 

@@ -24,6 +24,14 @@ class WalletApiTest : ApiIntegrationTest() {
             .body(mapOf("amount" to amount))
             .exchange { _, r -> Response(r.statusCode.value(), r.bodyTo(mapType) ?: emptyMap()) }
 
+    /** 직렬화를 거치지 않고 JSON 문자열을 그대로 보낸다 (소수 · 문자열 · 누락 금액 같은 잘못된 형식을 재현). */
+    private fun depositRaw(userId: String, json: String): Response =
+        client.post().uri("/api/v1/wallet/deposits")
+            .contentType(MediaType.APPLICATION_JSON)
+            .header(USER_ID_HEADER, userId)
+            .body(json)
+            .exchange { _, r -> Response(r.statusCode.value(), r.bodyTo(mapType) ?: emptyMap()) }
+
     private fun wallet(userId: String): Response =
         client.get().uri("/api/v1/wallet").header(USER_ID_HEADER, userId)
             .exchange { _, r -> Response(r.statusCode.value(), r.bodyTo(mapType) ?: emptyMap()) }
@@ -85,6 +93,19 @@ class WalletApiTest : ApiIntegrationTest() {
 
         assertEquals(200, deposit(user, 100_000_000).status)   // 한도 정확히는 받는다
         assertEquals(100_000_000L, wallet(user).long("balance"))
+    }
+
+    @Test
+    fun `충전 금액이 소수이거나 문자열이거나 없으면 400 INVALID_REQUEST 이고 잔고는 그대로`() {
+        val user = newUserId()
+        for (json in listOf("""{"amount": 50000.5}""", """{"amount": "30000"}""", "{}")) {
+            val r = depositRaw(user, json)
+            assertEquals(400, r.status, json)
+            assertEquals("INVALID_REQUEST", r.body["code"], json)
+        }
+
+        assertEquals(0L, wallet(user).long("balance"))
+        assertEquals(0L, ledgerSum(user))
     }
 
     @Test
