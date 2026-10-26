@@ -12,7 +12,7 @@
 | P3-2 처리 | ✅ 완료 (2026-10-21, [#5](https://github.com/hyeokjinON/bank-transfer/pull/5)) | ADR-0005 채택, 테스트 107개. CI `build` · `infra-smoke` 통과. 손 확인 절차: Postman 2-1 → 2-9 `COMPLETED`, kafka-ui 로 메시지 · 컨슈머 Lag (OPERATION.md Kafka 절) |
 | P3-3a 결과조회 · 정리 작업 | ✅ 완료 (2026-10-21, [#7](https://github.com/hyeokjinON/bank-transfer/pull/7)) | ADR-0006 채택, 테스트 135개. CI `build` · `infra-smoke` 통과. 손 확인: Postman 3-1 → 3-5 로 무응답 계좌 출금 5건 모두 `COMPLETED 0000`, `sending_at` 뒤 32~38초에 확정(30초 유예 + 주기), `inquiry_attempts` 0 |
 | P3-3b 재시도 | ✅ 완료 (2026-10-26, [#9](https://github.com/hyeokjinON/bank-transfer/pull/9)) | ADR-0007 채택, 테스트 161개. CI `build` · `infra-smoke` 통과. 재시도 토픽 · DLT · 제한 재발행 · `FAILED E001`. 손 확인: 은행을 내린 채 접수한 2건이 재시도 토픽 경로로 은행 복구 뒤 `COMPLETED 0000` (재발행 0회, `sending_at` 은 접수 약 95초 뒤 = 5s·30s·60s 마지막 재시도). 재발행 경로(DLT → 재발행 → `COMPLETED` / 3회 뒤 `E001`)는 자동 흐름 테스트로만 증명 — 손으로 보려면 실행 구성 `4. API (재발행 손 확인)` 으로 은행을 15초 넘게 내려 둔다 |
-| P4-1 원화 잔고 | 🟡 PR [#11](https://github.com/hyeokjinON/bank-transfer/pull/11) 리뷰 중 (손 확인 대기) | ADR-0008 제안, 테스트 202개. 접수 차감 · 실패 환불 · 사용자 범위. 손 확인(Postman 5 폴더, `http/transfer.http` 9절)은 머지 전에 사람이 한다 |
+| P4-1 원화 잔고 | 🟡 PR [#11](https://github.com/hyeokjinON/bank-transfer/pull/11) 리뷰 중 (손 확인 대기) | ADR-0008 제안, 테스트 206개. 접수 차감 · 실패 환불 · 사용자 범위. 손 확인(Postman 5 폴더, `http/transfer.http` 9절)은 머지 전에 사람이 한다 |
 | P4-2 ~ P9 | ⬜ 예정 | README 로드맵 |
 
 ## 2. P3 설계 (합의된 것)
@@ -60,7 +60,8 @@ P3-1 (PR #3) · P3-2 (PR #5) · P3-3a (PR #7) · P3-3b (PR #9) 모두 머지됐�
 - `CONFLICT` 자동 보정 없음 — 경고만, 수동 확인 · 일마감 대사 (P5).
 - P3 시절 출금(`user_id` NULL)은 아무도 조회할 수 없다 (소유자가 없다). 차감한 적이 없어 환불도 없다.
 - 원장 보존 정책(파티셔닝 · 보관)은 P5.
-- (P4-1 리뷰) 정리 작업 루프의 `fail()` 호출에 건별 `catch` 가 없다: 환불이 예외를 던지는 깨진 행이 있으면 그 주기의 나머지 대상이 밀리고 같은 행이 매 주기 앞에서 다시 던질 수 있다.
+- (P4-1 리뷰) 정리 작업은 ⓪ 재발행 · 포기와 ② 결과조회 확정을 건마다 예외 격리한다: 환불이 예외를 던지는 깨진 행(지갑 행 없음, REFUND 중복 등)은 건너뛰고 `onItemError` 로 ERROR 로그(`reconcile skipped transfer …`)를 남긴 채 나머지를 계속 처리한다. 그 행은 상태가 그대로라 손으로 고칠 때까지 매 주기 다시 시도되고 다시 ERROR 가 찍힌다 (`ReconcileResult.errors` 로 센다).
+- (P4-1 리뷰) 충전 API 는 인증 없이 항상 켜져 있다 → 운영이라면 설정 플래그(`wallet.deposit-api.enabled`)나 관리자 인증 뒤로.
 - (P4-1 리뷰) `fail()` 은 `refund() = false`(`WITHDRAW` 원장 없음)를 조용히 넘긴다: `user_id` 가 있는데 원장이 없는 비정상 행도 P3 시절 출금과 같이 상태만 바뀐다 (경고 로그 후보).
 - (P4-1 리뷰) 충전 응답의 `balance` 와 `pending` 은 같은 스냅샷이 아니다 (별도 쿼리).
 
