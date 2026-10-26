@@ -129,5 +129,15 @@ internal fun logSafe(text: String?, max: Int): String {
     return if (cleaned.length <= max) cleaned else cleaned.take(max) + "..."
 }
 
-/** 리스너 예외로 감싸인 헤더 메시지에서 원래 예외의 메시지만 (Spring 이 "... nested exception is ..." 로 이어 붙이는 경우). */
-internal fun rootMessage(message: String?): String? = message?.substringAfterLast("nested exception is ")
+/**
+ * DLT 헤더 메시지에서 원래 예외의 메시지만 남긴다.
+ * spring-kafka 4.1 은 "<리스너 래퍼 메시지>; <원래 예외 메시지>" 로 붙이고, 래퍼 메시지는
+ * "Listener method '…' threw exception\nEndpoint handler details:\nMethod […]\nBean […]" 처럼 길어서
+ * 그대로 자르면 원인이 잘려 나간다. 원래 메시지 안에도 "; " 가 있을 수 있으니 마지막이 아니라 `Bean [` 뒤의 첫 "]; " 로 가른다.
+ */
+internal fun rootMessage(message: String?): String? {
+    if (message == null) return null
+    val bean = message.indexOf("\nBean [")
+    val separator = if (bean < 0) -1 else message.indexOf("]; ", bean)
+    return if (separator < 0) message else message.substring(separator + 3)
+}

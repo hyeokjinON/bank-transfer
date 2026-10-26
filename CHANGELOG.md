@@ -9,7 +9,7 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
-## [P3-3b] 재시도 토픽 · 제한 재발행 — 2026-10-22 ([#9](https://github.com/hyeokjinON/bank-transfer/pull/9))
+## [P3-3b] 재시도 토픽 · 제한 재발행 — 2026-10-26 ([#9](https://github.com/hyeokjinON/bank-transfer/pull/9), 머지 후 정리 [#10](https://github.com/hyeokjinON/bank-transfer/pull/10))
 ### Added
 - 재시도 토픽 `transfer.requested-retry-0/1/2` · `transfer.requested-dlt` (5s · 30s · 60s, 설정 `transfer.retry.*`), DLT 핸들러(이유별 로그: 은행 연결 없음 · 잘못된 key 는 WARN, 그 밖의 예외는 자동 재처리가 없어 ERROR + ack), key 가 UUID 가 아니면 재시도 없이 바로 DLT (`InvalidTransferKeyException`).
 - 정리 작업 ⓪ 재발행 · 포기: 5분(`transfer.reconcile.republish-after`) 넘게 `RECEIVED` 이고 마지막 재발행 이후 은행에 보내려 한 흔적(`sending_at > republished_at`)이 있으면 아웃박스로 다시 발행, 3번(`max-republish`)을 다 쓰면 `FAILED` `E001`.
@@ -22,6 +22,9 @@
 - 리스너 그룹 · 동시성을 yml 한 곳으로 (`spring.kafka.consumer.group-id`, `listener.concurrency: 3`). 재시도 · DLT 그룹은 접미사로 나뉜다.
 - 결과조회 중 연결 없음은 그 주기의 남은 조회를 멈추고 `inquiry_attempts` 를 올리지 않는다.
 - 재시도 토픽 전용 1스레드 스케줄러 (`RetryTopicSchedulerWrapper`).
+
+### Fixed (머지 후 정리)
+- DLT ERROR 로그의 `cause=` 가 spring-kafka 래퍼 문구 대신 원래 예외 메시지를 보여 준다 (실제 4.1 헤더 모양 "래퍼; 원인" 으로 가른다).
 
 ## [P3-3a] 결과조회와 정리 작업 — 2026-10-21 ([#7](https://github.com/hyeokjinON/bank-transfer/pull/7))
 ### Added
