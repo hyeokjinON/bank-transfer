@@ -26,10 +26,11 @@ class JpaVerificationRepositoryTest : ApiIntegrationTest() {
     private lateinit var jdbc: JdbcTemplate
 
     private fun newVerification(
+        userId: String = "user-1",
         accountNo: String = "77" + Random.nextLong(10_000_000_000, 99_999_999_999),
         expiresAt: Instant = Instant.parse("2026-10-19T00:05:00.123456789Z"),
     ) = AccountVerification(
-        id = UUID.randomUUID(), bankCode = "090", accountNo = accountNo, holderName = "홍길동",
+        id = UUID.randomUUID(), userId = userId, bankCode = "090", accountNo = accountNo, holderName = "홍길동",
         codeHash = "a".repeat(64), status = VerificationStatus.SENT, failedAttempts = 0, expiresAt = expiresAt,
     )
 
@@ -39,6 +40,7 @@ class JpaVerificationRepositoryTest : ApiIntegrationTest() {
 
         assertEquals(saved, repository.findById(saved.id))
         assertEquals(Instant.parse("2026-10-19T00:05:00.123456Z"), saved.expiresAt)   // DATETIME(6) 에 맞춰 자른다
+        assertEquals("user-1", repository.findById(saved.id)!!.userId)
     }
 
     @Test
@@ -71,14 +73,15 @@ class JpaVerificationRepositoryTest : ApiIntegrationTest() {
     }
 
     @Test
-    fun `VERIFIED 가 된 계좌만 existsVerified`() {
-        val saved = repository.save(newVerification())
-        assertFalse(repository.existsVerified("090", saved.accountNo))
+    fun `이 사용자가 VERIFIED 로 만든 계좌만 existsVerified (사용자 범위)`() {
+        val saved = repository.save(newVerification(userId = "user-1"))
+        assertFalse(repository.existsVerified("user-1", "090", saved.accountNo))
 
         repository.update(saved.id) { it.copy(status = VerificationStatus.VERIFIED, verifiedAt = Instant.now()) }
 
-        assertTrue(repository.existsVerified("090", saved.accountNo))
-        assertFalse(repository.existsVerified("004", saved.accountNo))
+        assertTrue(repository.existsVerified("user-1", "090", saved.accountNo))
+        assertFalse(repository.existsVerified("user-2", "090", saved.accountNo))   // 남이 인증한 계좌로는 출금할 수 없다
+        assertFalse(repository.existsVerified("user-1", "004", saved.accountNo))
     }
 
     @Test

@@ -1,9 +1,7 @@
 package io.github.hyeokjinon.banktransfer.api.messaging
 
-import io.github.hyeokjinon.banktransfer.account.AccountVerification
-import io.github.hyeokjinon.banktransfer.account.VerificationRepository
-import io.github.hyeokjinon.banktransfer.account.VerificationStatus
 import io.github.hyeokjinon.banktransfer.api.support.ApiIntegrationTest
+import io.github.hyeokjinon.banktransfer.api.web.USER_ID_HEADER
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus
 import io.github.hyeokjinon.banktransfer.transfer.TransferStore
 import org.apache.kafka.clients.admin.AdminClient
@@ -16,7 +14,6 @@ import org.springframework.http.MediaType
 import org.springframework.kafka.core.KafkaAdmin
 import org.springframework.kafka.core.KafkaTemplate
 import java.time.Duration
-import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.random.Random
@@ -31,7 +28,6 @@ import kotlin.test.assertTrue
  */
 class TransferProcessingFlowTest : ApiIntegrationTest() {
 
-    @Autowired private lateinit var verifications: VerificationRepository
     @Autowired private lateinit var relay: OutboxRelay
     @Autowired private lateinit var store: TransferStore
     @Autowired private lateinit var kafka: KafkaTemplate<String, String>
@@ -39,20 +35,14 @@ class TransferProcessingFlowTest : ApiIntegrationTest() {
 
     private val mapType = object : ParameterizedTypeReference<Map<String, Any?>>() {}
 
-    private fun verify(accountNo: String) {
-        verifications.save(
-            AccountVerification(
-                id = UUID.randomUUID(), bankCode = "090", accountNo = accountNo, holderName = "홍길동",
-                codeHash = "0".repeat(64), status = VerificationStatus.VERIFIED, failedAttempts = 0,
-                expiresAt = Instant.now(), verifiedAt = Instant.now(),
-            ),
-        )
-    }
+    /** 이 테스트의 사용자 (테스트마다 새로 [FUNDED] 원 충전 — 출금은 이 지갑에서 빠진다, P4-1). */
+    private val user by lazy { fundedUser(FUNDED) }
 
     /** 접수하고 이체 id 를 돌려준다. 적요는 테스트마다 달라서 모의 은행 입금 내역에서 이 건만 셀 수 있다. */
     private fun request(accountNo: String, memo: String): UUID {
         val body = client.post().uri("/api/v1/transfers")
             .contentType(MediaType.APPLICATION_JSON)
+            .header(USER_ID_HEADER, user)
             .header("Idempotency-Key", UUID.randomUUID().toString())
             .body(mapOf("bankCode" to "090", "accountNo" to accountNo, "amount" to 30_000, "memo" to memo))
             .retrieve().body(mapType)!!
@@ -71,7 +61,7 @@ class TransferProcessingFlowTest : ApiIntegrationTest() {
     @Test
     fun `인증 계좌로 접수하면 은행 처리 후 COMPLETED, 은행 입금은 1건`() {
         val account = "1002123456789"
-        verify(account)
+        verifiedBy(user, account)
         val memo = uniqueMemo()
 
         val id = request(account, memo)
@@ -79,34 +69,42 @@ class TransferProcessingFlowTest : ApiIntegrationTest() {
 
         assertEquals("0000", store.findById(id)!!.bankResponseCode)
         assertEquals(1, bank.depositsOf(account).count { it.memo == memo })
+        assertEquals(FUNDED - 30_000, wallets.balanceOf(user))   // COMPLETED = 확정, 잔고는 빠진 채
+        assertEquals(0L, wallets.pendingOf(user))
+        assertEquals(listOf("WITHDRAW"), ledgerTypes(id))
     }
 
     @Test
     fun `은행에 없는 계좌면 FAILED 와 응답코드 1001`() {
         val account = "55" + Random.nextLong(10_000_000_000, 99_999_999_999)
-        verify(account)
+        verifiedBy(user, account)
 
         val id = request(account, uniqueMemo())
         awaitStatus(id, TransferStatus.FAILED)
 
         assertEquals("1001", store.findById(id)!!.bankResponseCode)
+        assertEquals(FUNDED, wallets.balanceOf(user))                 // 은행 거절 → fail() 이 같은 트랜잭션에서 환불
+        assertEquals(listOf("WITHDRAW", "REFUND"), ledgerTypes(id))
+        assertEquals(wallets.balanceOf(user), ledgerSum(user))
     }
 
     @Test
     fun `은행이 응답하지 않으면 UNKNOWN 이고 다시 보내지 않는다`() {
         val account = "9990000000001"
-        verify(account)
+        verifiedBy(user, account)
 
         val id = request(account, uniqueMemo())
         awaitStatus(id, TransferStatus.UNKNOWN)
 
         assertNull(store.findById(id)!!.bankResponseCode)
+        assertEquals(FUNDED - 30_000, wallets.balanceOf(user))   // 결과를 모르는 돈은 다른 출금에 쓰지 못하게 묶어 둔다 (보류)
+        assertEquals(30_000L, wallets.pendingOf(user))
     }
 
     @Test
     fun `같은 메시지가 두 번 와도 은행에는 한 번만 보낸다`() {
         val account = "1002123456789"
-        verify(account)
+        verifiedBy(user, account)
         val memo = uniqueMemo()
         val id = request(account, memo)
         awaitStatus(id, TransferStatus.COMPLETED)
@@ -125,5 +123,9 @@ class TransferProcessingFlowTest : ApiIntegrationTest() {
 
         assertEquals(1, bank.depositsOf(account).count { it.memo == memo })
         assertEquals(TransferStatus.COMPLETED, store.findById(id)!!.status)
+    }
+
+    private companion object {
+        const val FUNDED = 1_000_000L
     }
 }

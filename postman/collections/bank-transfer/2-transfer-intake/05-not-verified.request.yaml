@@ -6,6 +6,8 @@ order: 5000
 headers:
   - key: Content-Type
     value: application/json
+  - key: X-User-Id
+    value: '{{userId}}'
   - key: Idempotency-Key
     value: '{{$guid}}'
 body:

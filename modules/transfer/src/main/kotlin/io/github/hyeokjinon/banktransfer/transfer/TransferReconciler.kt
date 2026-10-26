@@ -20,6 +20,8 @@ data class ReconcileResult(
     val republished: Int,
     /** ⓪ 재발행 한도를 다 쓰고 FAILED(E001) 로 포기한 건 (P3-3b). */
     val abandoned: Int,
+    /** ⓪ ② 에서 예외가 나 건너뛴 건 — 깨진 데이터 등. 손으로 고칠 때까지 매 주기 다시 나온다. */
+    val errors: Int,
 )
 
 /**
@@ -34,6 +36,10 @@ data class ReconcileResult(
  *    결과조회: 처리됨 → COMPLETED(0000), 처리 안 됨 → FAILED(은행 코드), 모름 → 시도 횟수 +1,
  *    연결 없음(Unavailable) → 이번 주기의 남은 조회를 멈추고 횟수를 세지 않는다 (긴 은행 점검에도 한도에 닿지 않게).
  *    [maxInquiries] 번 모르면 더 묻지 않고 [onGiveUp] 으로 알린다 → 일마감 대사(P5)에서 맞춘다.
+ * 실패 확정(② 처리 안 됨, ⓪ 포기)은 [TransferStore.fail] 로 한다 — 상태 전이와 환불이 한 트랜잭션이다 (P4-1).
+ * ⓪ ② 는 건마다 예외를 격리한다: 한 건의 [TransferStore.fail] · [TransferStore.republish] · 확정이 예외(깨진 지갑 행, 환불 중복 등)를 던지면
+ *    그 건만 건너뛰고 [onItemError] 로 알린 뒤 계속한다. 격리하지 않으면 같은 건이 매 주기 맨 앞에서 터져 뒤의 ① ② 가 모든 사용자에게 멈춘다.
+ *    건너뛴 건은 상태가 그대로라 다음 주기에 다시 시도되고 다시 알려진다 — 손으로 고칠 때까지.
  * 상태 변경은 모두 조건부라, 그 사이 컨슈머가 먼저 바꿨다면 아무것도 바꾸지 않는다.
  */
 class TransferReconciler(
@@ -47,11 +53,13 @@ class TransferReconciler(
     private val maxRepublish: Int = 3,
     private val onGiveUp: (Transfer) -> Unit = {},
     private val onAbandon: (Transfer) -> Unit = {},
+    /** 건너뛴 건과 그 예외 (도메인은 로거를 모른다 — 로그는 조립하는 쪽에서). */
+    private val onItemError: (Transfer, Exception) -> Unit = { _, _ -> },
 ) {
 
     fun reconcile(): ReconcileResult {
         val now = clock.instant()
-        val (republished, abandoned) = republishOrAbandon(now)
+        val sweep = republishOrAbandon(now)
 
         val cutoff = now.minus(sendingTimeout)   // ① ② 가 같은 기준 — 방금 UNKNOWN 이 된 건은 이미 cutoff 보다 오래라 같은 주기에 바로 묻는다
         val markedUnknown = store.findSendingBefore(cutoff, batchSize)
@@ -61,47 +69,61 @@ class TransferReconciler(
         var failed = 0
         var stillUnknown = 0
         var gaveUp = 0
+        var errors = sweep.errors
         inquiries@ for (transfer in store.findUnknownForInquiry(maxInquiries, cutoff, batchSize)) {
             val outcome = try {
                 bank.inquire(transfer.reference)
             } catch (e: Exception) {
                 InquiryOutcome.Unknown   // 포트가 분류하지 못한 예외도 "모름" — 다음 주기에 다시 묻는다
             }
-            when (outcome) {
-                InquiryOutcome.Processed ->
-                    if (store.transition(transfer.id, UNKNOWN, COMPLETED, now, BANK_OK)) completed++
-                is InquiryOutcome.NotProcessed ->
-                    if (store.transition(transfer.id, UNKNOWN, FAILED, now, outcome.responseCode)) failed++
-                InquiryOutcome.Unknown ->
-                    if (store.recordInquiryAttempt(transfer.id, now)) {
-                        val attempts = transfer.inquiryAttempts + 1
-                        if (attempts >= maxInquiries) {
-                            gaveUp++
-                            onGiveUp(transfer.copy(inquiryAttempts = attempts))
-                        } else {
-                            stillUnknown++
+            try {
+                when (outcome) {
+                    InquiryOutcome.Processed ->
+                        if (store.transition(transfer.id, UNKNOWN, COMPLETED, now, BANK_OK)) completed++
+                    is InquiryOutcome.NotProcessed ->
+                        if (store.fail(transfer.id, UNKNOWN, now, outcome.responseCode)) failed++
+                    InquiryOutcome.Unknown ->
+                        if (store.recordInquiryAttempt(transfer.id, now)) {
+                            val attempts = transfer.inquiryAttempts + 1
+                            if (attempts >= maxInquiries) {
+                                gaveUp++
+                                onGiveUp(transfer.copy(inquiryAttempts = attempts))
+                            } else {
+                                stillUnknown++
+                            }
                         }
-                    }
-                // 연결이 없으면 남은 건도 똑같다: 건마다 기다리지 않고 다음 주기에 다시 묻는다. 시도로 세지 않는다
-                InquiryOutcome.Unavailable -> break@inquiries
+                    // 연결이 없으면 남은 건도 똑같다: 건마다 기다리지 않고 다음 주기에 다시 묻는다. 시도로 세지 않는다
+                    InquiryOutcome.Unavailable -> break@inquiries
+                }
+            } catch (e: Exception) {
+                errors++   // 이 건만 건너뛴다 — 뒤의 건은 계속 묻는다
+                onItemError(transfer, e)
             }
         }
-        return ReconcileResult(markedUnknown, completed, failed, stillUnknown, gaveUp, republished, abandoned)
+        return ReconcileResult(markedUnknown, completed, failed, stillUnknown, gaveUp, sweep.republished, sweep.abandoned, errors)
     }
 
-    /** ⓪ 재발행 · 포기. 둘 다 조건부라 인스턴스가 여럿이어도 한 번만 반영된다. 돌려주는 값 = (재발행 수, 포기 수). */
-    private fun republishOrAbandon(now: Instant): Pair<Int, Int> {
+    private class Sweep(val republished: Int, val abandoned: Int, val errors: Int)
+
+    /** ⓪ 재발행 · 포기. 둘 다 조건부라 인스턴스가 여럿이어도 한 번만 반영된다. 건마다 예외를 격리한다. */
+    private fun republishOrAbandon(now: Instant): Sweep {
         var republished = 0
         var abandoned = 0
+        var errors = 0
         for (transfer in store.findRepublishable(now.minus(republishAfter), batchSize)) {
-            if (transfer.republishCount < maxRepublish) {
-                if (store.republish(transfer.id, transfer.republishCount, now)) republished++
-            } else if (store.transition(transfer.id, RECEIVED, FAILED, now, NOT_SENT)) {
-                abandoned++
-                onAbandon(transfer.copy(status = FAILED, bankResponseCode = NOT_SENT, updatedAt = now))
+            try {
+                if (transfer.republishCount < maxRepublish) {
+                    if (store.republish(transfer.id, transfer.republishCount, now)) republished++
+                } else if (store.fail(transfer.id, RECEIVED, now, NOT_SENT)) {
+                    abandoned++
+                    onAbandon(transfer.copy(status = FAILED, bankResponseCode = NOT_SENT, updatedAt = now))
+                }
+            } catch (e: Exception) {
+                errors++
+                onItemError(transfer, e)
             }
         }
-        return republished to abandoned
+        return Sweep(republished, abandoned, errors)
     }
 
     private companion object {

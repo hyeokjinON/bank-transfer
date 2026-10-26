@@ -1,13 +1,11 @@
 package io.github.hyeokjinon.banktransfer.api.reconcile
 
-import io.github.hyeokjinon.banktransfer.account.AccountVerification
-import io.github.hyeokjinon.banktransfer.account.VerificationRepository
-import io.github.hyeokjinon.banktransfer.account.VerificationStatus
 import io.github.hyeokjinon.banktransfer.api.config.BankInquiryAdapter
 import io.github.hyeokjinon.banktransfer.api.messaging.OutboxRelay
 import io.github.hyeokjinon.banktransfer.api.messaging.TransferTopics
 import io.github.hyeokjinon.banktransfer.api.support.ApiIntegrationTest
 import io.github.hyeokjinon.banktransfer.api.support.awaitRecords
+import io.github.hyeokjinon.banktransfer.api.web.USER_ID_HEADER
 import io.github.hyeokjinon.banktransfer.transfer.Transfer
 import io.github.hyeokjinon.banktransfer.transfer.TransferReconciler
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus
@@ -20,7 +18,6 @@ import org.springframework.http.MediaType
 import org.springframework.kafka.core.ConsumerFactory
 import java.time.Clock
 import java.time.Duration
-import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.random.Random
@@ -34,7 +31,6 @@ import kotlin.test.assertTrue
  */
 class RepublishFlowTest : ApiIntegrationTest() {
 
-    @Autowired private lateinit var verifications: VerificationRepository
     @Autowired private lateinit var relay: OutboxRelay
     @Autowired private lateinit var store: TransferStore
     @Autowired private lateinit var consumerFactory: ConsumerFactory<String, String>
@@ -57,19 +53,13 @@ class RepublishFlowTest : ApiIntegrationTest() {
 
     private val mapType = object : ParameterizedTypeReference<Map<String, Any?>>() {}
 
-    private fun verify(accountNo: String) {
-        verifications.save(
-            AccountVerification(
-                id = UUID.randomUUID(), bankCode = "090", accountNo = accountNo, holderName = "홍길동",
-                codeHash = "0".repeat(64), status = VerificationStatus.VERIFIED, failedAttempts = 0,
-                expiresAt = Instant.now(), verifiedAt = Instant.now(),
-            ),
-        )
-    }
+    /** 이 테스트의 사용자 (테스트마다 새로 [FUNDED] 원 충전 — 출금은 이 지갑에서 빠진다, P4-1). */
+    private val user by lazy { fundedUser(FUNDED) }
 
     private fun request(accountNo: String): UUID {
         val body = client.post().uri("/api/v1/transfers")
             .contentType(MediaType.APPLICATION_JSON)
+            .header(USER_ID_HEADER, user)
             .header("Idempotency-Key", UUID.randomUUID().toString())
             .body(mapOf("bankCode" to "090", "accountNo" to accountNo, "amount" to 30_000, "memo" to "P" + Random.nextInt(100_000, 999_999)))
             .retrieve().body(mapType)!!
@@ -92,7 +82,7 @@ class RepublishFlowTest : ApiIntegrationTest() {
     @Test
     fun `은행이 DLT 뒤에 살아나면 정리 작업이 재발행해 COMPLETED, 은행 입금은 1건`() {
         val account = "1002123456789"
-        verify(account)
+        verifiedBy(user, account)
         val id = withBankDown {
             val id = request(account)
             relay.publishPending()
@@ -110,12 +100,14 @@ class RepublishFlowTest : ApiIntegrationTest() {
         val after = store.findById(id)!!
         assertEquals("0000", after.bankResponseCode)
         assertEquals(1, bank.depositsOf(account).count { it.reference == after.reference })   // 은행 호출은 한 번
+        assertEquals(FUNDED - 30_000, wallets.balanceOf(user))   // 재발행으로 끝내 완료 — 차감은 한 번
+        assertEquals(listOf("WITHDRAW"), ledgerTypes(id))
     }
 
     @Test
     fun `은행이 계속 내려가 있으면 재발행 3회 뒤 FAILED E001, 은행 입금은 0건`() {
         val account = "1002123456789"
-        verify(account)
+        verifiedBy(user, account)
         withBankDown {
             val id = request(account)
             relay.publishPending()
@@ -138,6 +130,12 @@ class RepublishFlowTest : ApiIntegrationTest() {
             assertEquals(props.maxRepublish, after.republishCount)
             assertTrue(abandoned.any { it.id == id })
             assertEquals(0, bank.depositsOf(account).count { it.reference == after.reference })   // 돈이 움직이지 않았다
+            assertEquals(FUNDED, wallets.balanceOf(user))             // 정리 작업 ⓪ 의 포기(E001)도 환불한다 — 돈은 은행에 간 적이 없다
+            assertEquals(listOf("WITHDRAW", "REFUND"), ledgerTypes(id))
         }
+    }
+
+    private companion object {
+        const val FUNDED = 1_000_000L
     }
 }

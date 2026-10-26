@@ -1,6 +1,7 @@
 package io.github.hyeokjinon.banktransfer.api
 
 import io.github.hyeokjinon.banktransfer.api.support.ApiIntegrationTest
+import io.github.hyeokjinon.banktransfer.api.web.USER_ID_HEADER
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.MediaType
 import kotlin.test.Test
@@ -8,14 +9,25 @@ import kotlin.test.assertEquals
 
 /**
  * 실제 HTTP -> Spring MVC -> 도메인 -> Netty 게이트웨이 -> 모의 은행(TCP) 까지 한 번에 검증한다.
+ * 인증 건은 요청자(X-User-Id)의 것이다 — 확인도 본인만 (P4-1).
  */
 class AccountVerificationApiTest : ApiIntegrationTest() {
 
     private val mapType = object : ParameterizedTypeReference<Map<String, Any?>>() {}
 
-    private fun post(path: String, body: Map<String, String>): Pair<Int, Map<String, Any?>> =
+    private val user = newUserId()
+
+    /**
+     * 공용 계좌(1002123456789)에는 다른 테스트의 출금 입금도 쌓이므로 `last()` 가 1원인증 입금이라는 보장이 없다.
+     * 1원인증 입금은 적요가 "BT" + 코드다 — 그중 가장 최근 것을 쓴다.
+     */
+    private fun latestVerificationCode(accountNo: String): String =
+        bank.depositsOf(accountNo).last { it.memo.startsWith("BT") }.memo.removePrefix("BT")
+
+    private fun post(path: String, body: Map<String, String>, userId: String = user): Pair<Int, Map<String, Any?>> =
         client.post().uri(path)
             .contentType(MediaType.APPLICATION_JSON)
+            .header(USER_ID_HEADER, userId)
             .body(body)
             .exchange { _, response -> response.statusCode.value() to (response.bodyTo(mapType) ?: emptyMap()) }
 
@@ -29,11 +41,36 @@ class AccountVerificationApiTest : ApiIntegrationTest() {
         assertEquals("SENT", created["status"])
 
         // 사용자가 자기 통장에서 1원 입금 적요("BT1234")를 확인하는 단계
-        val code = bank.depositsOf("1002123456789").last().memo.removePrefix("BT")
+        val code = latestVerificationCode("1002123456789")
 
         val (confirmStatus, confirmed) = post("/api/v1/account-verifications/${created["id"]}/confirm", mapOf("code" to code))
         assertEquals(200, confirmStatus)
         assertEquals("VERIFIED", confirmed["status"])
+    }
+
+    @Test
+    fun `남의 인증 건을 확인하면 404 VERIFICATION_NOT_FOUND, 본인은 그 뒤에도 확인할 수 있다`() {
+        val (_, created) = post(
+            "/api/v1/account-verifications",
+            mapOf("bankCode" to "090", "accountNo" to "1002123456789", "holderName" to "홍길동"),
+        )
+        val code = latestVerificationCode("1002123456789")
+
+        // 남이 틀린 코드를 보내도 404 이고, 주인의 실패 횟수에는 쓰이지 않는다
+        val wrong = if (code == "0".repeat(code.length)) "1".repeat(code.length) else "0".repeat(code.length)
+        val (otherStatus, other) = post("/api/v1/account-verifications/${created["id"]}/confirm", mapOf("code" to wrong), userId = newUserId())
+        assertEquals(404, otherStatus)
+        assertEquals("VERIFICATION_NOT_FOUND", other["code"])
+
+        // 주인이 한 번 틀리면 남은 횟수가 (최대 - 1) 이어야 한다 — 남의 시도가 셌다면 더 적다
+        val (wrongStatus, wrongBody) = post("/api/v1/account-verifications/${created["id"]}/confirm", mapOf("code" to wrong))
+        assertEquals(400, wrongStatus)
+        assertEquals("WRONG_CODE", wrongBody["code"])
+        assertEquals(4, wrongBody["remainingAttempts"])
+
+        val (mineStatus, mine) = post("/api/v1/account-verifications/${created["id"]}/confirm", mapOf("code" to code))
+        assertEquals(200, mineStatus)
+        assertEquals("VERIFIED", mine["status"])
     }
 
     @Test

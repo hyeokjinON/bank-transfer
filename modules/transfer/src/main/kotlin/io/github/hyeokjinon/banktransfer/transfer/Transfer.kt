@@ -30,6 +30,8 @@ enum class TransferStatus {
 /** 출금이체 한 건. 서비스 모계좌 -> 1원인증을 마친 사용자 계좌. */
 data class Transfer(
     val id: UUID,
+    /** 출금한 사용자 (P4-1, `X-User-Id`). P3 시절 행은 null — 어떤 사용자에게도 보이지 않고 잔고와도 무관하다(차감한 적이 없다). */
+    val userId: String? = null,
     val idempotencyKey: String,
     /** 이용기관 거래번호 20자. 은행에 보내는 업무 키 (전문번호와 다르다). */
     val reference: String,
@@ -58,7 +60,7 @@ data class Transfer(
 
     /** 로그에 계좌번호 · 적요가 그대로 남지 않게 한다 (data class 기본 toString 은 모든 필드를 찍는다). */
     override fun toString(): String =
-        "Transfer(id=$id, reference=$reference, status=$status, bankCode=$bankCode, accountNo=${maskAccountNo(accountNo)}, " +
+        "Transfer(id=$id, userId=$userId, reference=$reference, status=$status, bankCode=$bankCode, accountNo=${maskAccountNo(accountNo)}, " +
             "amount=$amount, bankResponseCode=$bankResponseCode)"
 }
 
@@ -109,6 +111,8 @@ fun interface BankInquiryPort {
 }
 
 data class RequestTransfer(
+    /** 요청한 사용자. 웹 계층이 X-User-Id 에서 꺼내 형식을 검사한 값이다 (인증은 범위 밖, P4-1). */
+    val userId: String,
     val idempotencyKey: String,
     val bankCode: String,
     val accountNo: String,
@@ -131,17 +135,23 @@ sealed interface TransferEvent {
  * 구현(같은 DB 트랜잭션 + 아웃박스 테이블)은 apps/api 의 어댑터가 맡는다.
  */
 interface TransferStore {
-    /** UNIQUE 위반이면 [StoreConflict] 를 던진다. */
+    /**
+     * 이체 저장 · 잔고 차감 · 이벤트 기록은 함께 성공하거나 함께 실패한다 (P4-1: 차감 추가).
+     * [transfer] 의 userId 지갑에서 amount 를 뺀다 — 잔고가 모자라면(지갑이 없어도 잔고 0) [StoreConflict.InsufficientBalance] 이고 아무것도 남지 않는다.
+     * UNIQUE 위반이면 [StoreConflict] 를 던진다.
+     */
     fun saveWithEvent(transfer: Transfer, event: TransferEvent): Transfer
 
     fun findById(id: UUID): Transfer?
 
-    fun findByIdempotencyKey(key: String): Transfer?
+    /** 멱등키는 사용자 범위다 (P4-1): 다른 사용자의 같은 키는 다른 출금이다. */
+    fun findByIdempotencyKey(userId: String, key: String): Transfer?
 
     /**
      * 현재 상태가 [from] 일 때만 [to] 로 바꾼다 (조건부 UPDATE). 바뀌었으면 true.
      * 같은 메시지를 두 번 받아도 두 번째는 false 라서 은행에 다시 보내지 않는다 — 도메인 상태가 곧 멱등키다.
      * [to] 가 SENDING 이면 sendingAt 도 [at] 으로 기록한다. bankResponseCode 는 주어진 값으로 덮어쓴다.
+     * [to] 가 FAILED 면 거부한다(IllegalArgumentException) — 실패 확정은 환불과 한 트랜잭션인 [fail] 로만 한다 (P4-1).
      */
     fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String? = null): Boolean
 
@@ -172,17 +182,30 @@ interface TransferStore {
      * 0건(다른 쪽이 먼저 바꿈)이면 이벤트도 남기지 않는다.
      */
     fun republish(id: UUID, expectedCount: Int, at: Instant): Boolean
+
+    /**
+     * 실패 확정 (P4-1). 현재 상태가 [from] 일 때만 FAILED([bankResponseCode]) 로 바꾸고, 같은 트랜잭션에서 차감했던 금액을 지갑에 돌려주며
+     * 원장에 REFUND 를 남긴다. 바꿨으면 true. 0건(다른 쪽이 먼저 확정)이면 환불도 하지 않는다 → 두 번 불러도 환불은 한 번.
+     * 차감 기록(WITHDRAW)이 없는 P3 시절 출금은 상태만 바꾼다. FAILED 로 가는 길은 이것 하나다 — 새 실패 경로가 생겨도 환불을 빠뜨릴 수 없게.
+     */
+    fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String): Boolean
 }
 
 /** 저장소가 UNIQUE 제약 위반을 도메인 말로 알려 줄 때 쓴다. */
 sealed class StoreConflict(message: String) : RuntimeException(message) {
     class DuplicateIdempotencyKey(key: String) : StoreConflict("idempotency key '$key' already exists")
     class DuplicateReference(reference: String) : StoreConflict("reference '$reference' already exists")
+
+    /** 잔고가 출금액보다 적다 (지갑이 없으면 잔고 0). 저장소는 아무것도 남기지 않고 롤백한다 (P4-1). */
+    class InsufficientBalance(userId: String, amount: Long) : StoreConflict("balance of '$userId' is less than $amount")
 }
 
-/** "이 계좌는 1원인증을 마쳤나?" transfer 모듈은 account 모듈을 import 하지 않는다. 연결은 apps/api 에서 한다. */
+/**
+ * "이 사용자가 이 계좌의 1원인증을 마쳤나?" (P4-1: 사용자 범위 — 남이 인증한 계좌로는 출금할 수 없다).
+ * transfer 모듈은 account 모듈을 import 하지 않는다. 연결은 apps/api 에서 한다.
+ */
 fun interface VerifiedAccounts {
-    fun isVerified(bankCode: String, accountNo: String): Boolean
+    fun isVerified(userId: String, bankCode: String, accountNo: String): Boolean
 }
 
 fun interface ReferenceGenerator {
@@ -195,6 +218,7 @@ sealed class TransferException(message: String) : RuntimeException(message) {
     class InvalidMemo : TransferException("memo must fit in 20 bytes of EUC-KR")
     class InvalidAccount : TransferException("bankCode must be 3 digits and accountNo 10-16 digits")
     class AccountNotVerified : TransferException("account is not verified")
+    class InsufficientBalance : TransferException("wallet balance is not enough for this transfer")
     class IdempotencyKeyReused : TransferException("idempotency key was already used with a different request")
     class TransferNotFound(id: UUID) : TransferException("transfer $id not found")
     class IllegalTransition(from: TransferStatus, to: TransferStatus) : TransferException("cannot move from $from to $to")

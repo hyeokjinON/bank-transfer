@@ -9,6 +9,7 @@ import io.github.hyeokjinon.banktransfer.api.persistence.JpaTransferStore
 import io.github.hyeokjinon.banktransfer.api.persistence.JpaVerificationRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.OutboxEventJpaRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.TransferJpaRepository
+import io.github.hyeokjinon.banktransfer.api.persistence.WalletLedger
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
 import io.github.hyeokjinon.banktransfer.protocol.ResponseCodes
@@ -21,6 +22,7 @@ import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
 import java.time.Duration
@@ -94,15 +96,23 @@ class AppConfiguration {
     fun verificationRepository(jpa: AccountVerificationJpaRepository, tx: TransactionTemplate): VerificationRepository =
         JpaVerificationRepository(jpa, tx, Clock.systemUTC())
 
+    /** 잔고 SQL 한 곳 (P4-1). 접수 · 실패 확정 트랜잭션 안에서 JpaTransferStore 가 부르고, 충전 · 조회는 WalletController 가 부른다. */
     @Bean
-    fun transferStore(transfers: TransferJpaRepository, outbox: OutboxEventJpaRepository, tx: TransactionTemplate): TransferStore =
-        JpaTransferStore(transfers, outbox, tx)
+    fun walletLedger(jdbc: NamedParameterJdbcTemplate, tx: TransactionTemplate) = WalletLedger(jdbc, tx, Clock.systemUTC())
+
+    @Bean
+    fun transferStore(
+        transfers: TransferJpaRepository,
+        outbox: OutboxEventJpaRepository,
+        tx: TransactionTemplate,
+        wallets: WalletLedger,
+    ): TransferStore = JpaTransferStore(transfers, outbox, tx, wallets)
 
     /** transfer 모듈은 account 모듈을 모른다. "인증된 계좌인가?"를 1원인증 저장소에 연결하는 곳은 여기뿐이다. */
     @Bean
     fun transferService(store: TransferStore, verifications: VerificationRepository) = TransferService(
         store = store,
-        verifiedAccounts = VerifiedAccounts { bankCode, accountNo -> verifications.existsVerified(bankCode, accountNo) },
+        verifiedAccounts = VerifiedAccounts { userId, bankCode, accountNo -> verifications.existsVerified(userId, bankCode, accountNo) },
         referenceGenerator = RandomReferenceGenerator(prefix = 'T'),
         clock = Clock.systemUTC(),
     )

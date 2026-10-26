@@ -53,8 +53,9 @@ class TransferRequestedListener(private val process: (UUID) -> ProcessResult) {
         val result = process(transferId)
         if (result == ProcessResult.RETRY_LATER) throw RetryLaterException(transferId)
         if (result == ProcessResult.CONFLICT) {
-            // 재시도로 풀 수 없다: 은행이 확정한 결과가 이미 기록된 최종 상태와 다르다. 오프셋은 넘기고 사람이 확인하게 경고만 남긴다
-            log.warn("transfer {} conflict: bank result differs from the recorded final status — needs manual check", transferId)
+            // 재시도로 풀 수 없다: 은행이 확정한 결과가 이미 기록된 최종 상태와 다르다. 오프셋은 넘기고 사람이 확인하게 경고만 남긴다.
+            // 잔고도 자동으로 고치지 않는다 (P4-1): 예컨대 FAILED 로 확정 · 환불한 뒤 은행이 완료라고 답했다면 환불된 돈이 실제로 나간 상태다 → 수동 확인 · P5 대사
+            log.warn("transfer {} conflict: bank result differs from the recorded final status — wallet balance left as is, needs manual check", transferId)
         }
         log.info("transfer {} processed: {} ({} partition {}, offset {})", transferId, result, record.topic(), record.partition(), record.offset())
         ack.acknowledge()

@@ -2,14 +2,18 @@ $kind: collection
 name: bank-transfer (손 확인)
 description: |-
   P3-1 머지 전 손 확인용. 먼저 infra(docker compose)를 띄우고 IntelliJ 실행 구성 "0. Mock Bank + API" 를 실행한다.
+  0) (P4-1) 모든 요청에 X-User-Id = 컬렉션 변수 userId(기본 user-1). 출금 전에 "2-0 충전" 을 한 번 Send (폴더 3 · 4 출금 몫까지 100만 원). 인증도 같은 사용자로 해야 그 계좌로 출금된다.
   1) "1. 1원인증" 폴더의 요청을 위에서부터 하나씩 Send → 모의 은행 콘솔의 적요 숫자 4자리를 컬렉션 변수 code 에 넣고 "코드 확인" Send.
   2) "2. 출금이체 접수" 폴더를 위에서부터 Send 하거나, 폴더 ⋯ → Run 으로 한 번에 실행. 각 응답 아래 Test Results 에 통과/실패가 나온다.
   3) API 를 재시작한 뒤 "2-2 조회" 만 다시 Send → 같은 건이면 DB 에 저장된 것.
   4) (P3-3a) "3. 결과조회 · 정리 작업" 폴더를 위에서부터 Send. 3-1 뒤 모의 은행 콘솔의 적요 숫자를 code 에 넣고 3-2. 3-3 접수 뒤 3~4초쯤 기다려 3-4, 접수로부터 40초쯤(30초 유예 + 최대 10초 주기) 지난 뒤 3-5. 아직 UNKNOWN 이면 몇 초 뒤 다시 Send.
   5) (P3-3b) "4. 재시도 · 재발행" 폴더: 실행 구성 "4. API (재발행 손 확인)" 으로 API 를 띄우고 Mock Bank 를 Stop → 4-1 → 15초쯤 뒤 4-2(RECEIVED) → Mock Bank Run → 40초쯤 뒤 4-3(COMPLETED). 대응: http/transfer.http 8-1 ~ 8-3.
+  6) (P4-1) "5. 원화 잔고" 폴더: 먼저 1. 폴더로 user-1 이 {{accountNo}} 를 인증하고, MySQL 에 5500000000001 인증 행을 넣는다(SQL 은 http/transfer.http 9절 머리말). 5-1 → 5-7 을 차례로 Send (5-6 · 5-7 은 5-5 뒤 몇 초 기다린다). 대응: http/transfer.http 9-1 ~ 9-7.
+  5-3 · 5-7 은 잔고를 정확한 값으로 확인하므로, 앞 폴더에서 처리 중인 출금이 그 사이 FAILED(환불)되면 값이 달라질 수 있다 — 새 `userId` 로 돌리거나 앞 출금이 끝난 뒤 실행.
   대응 파일: http/account-verification.http, http/transfer.http (IntelliJ Ultimate 용)
 variables:
   baseUrl: http://localhost:8080
+  userId: user-1
   accountNo: "1002123456789"
   code: ""
   verificationId: ""
@@ -18,3 +22,6 @@ variables:
   silentVerificationId: ""
   silentTransferId: ""
   retryTransferId: ""
+  walletBalance: ""
+  overAmount: ""
+  refundTransferId: ""

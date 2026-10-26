@@ -3,6 +3,9 @@ name: 4-3 Mock Bank Run 뒤 40초쯤 조회 → COMPLETED 0000 (재발행)
 method: GET
 url: '{{baseUrl}}/api/v1/transfers/{{retryTransferId}}'
 order: 3000
+headers:
+  - key: X-User-Id
+    value: '{{userId}}'
 scripts:
   - type: afterResponse
     language: text/javascript

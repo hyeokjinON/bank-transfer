@@ -22,15 +22,33 @@ class TransferReconcilerTest {
 
         override fun saveWithEvent(transfer: Transfer, event: TransferEvent): Transfer = transfer.also { transfers[it.id] = it }
         override fun findById(id: UUID) = transfers[id]
-        override fun findByIdempotencyKey(key: String) = transfers.values.firstOrNull { it.idempotencyKey == key }
+        override fun findByIdempotencyKey(userId: String, key: String) =
+            transfers.values.firstOrNull { it.userId == userId && it.idempotencyKey == key }
 
         override fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?): Boolean {
+            require(to != FAILED) { "FAILED 는 fail() 로만 간다 (환불을 빠뜨리지 않게)" }
             val current = transfers[id] ?: return false
             if (current.status != from) return false
             transfers[id] = current.copy(
                 status = to, updatedAt = at, bankResponseCode = bankResponseCode,
                 sendingAt = if (to == SENDING) at else current.sendingAt,
             )
+            return true
+        }
+
+        /** 실제로 FAILED 로 바꾼 fail() 호출 (id, from, 은행 코드). 실제 저장소는 바로 이때 같은 트랜잭션에서 환불한다. */
+        val failCalls = mutableListOf<Triple<UUID, TransferStatus, String>>()
+
+        /** 깨진 데이터(지갑 행 없음 · REFUND 중복 등)로 예외를 던지는 행. */
+        val failThrowsFor = mutableSetOf<UUID>()
+        val republishThrowsFor = mutableSetOf<UUID>()
+
+        override fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String): Boolean {
+            if (id in failThrowsFor) throw IllegalStateException("corrupted row $id")
+            val current = transfers[id] ?: return false
+            if (current.status != from) return false
+            transfers[id] = current.copy(status = FAILED, updatedAt = at, bankResponseCode = bankResponseCode)
+            failCalls += Triple(id, from, bankResponseCode)
             return true
         }
 
@@ -60,6 +78,7 @@ class TransferReconcilerTest {
             }.sortedBy { it.updatedAt }.take(limit)
 
         override fun republish(id: UUID, expectedCount: Int, at: Instant): Boolean {
+            if (id in republishThrowsFor) throw IllegalStateException("corrupted row $id")
             val current = transfers[id] ?: return false
             if (current.status != RECEIVED || current.republishCount != expectedCount) return false
             transfers[id] = current.copy(republishCount = expectedCount + 1, republishedAt = at, updatedAt = at)
@@ -83,9 +102,11 @@ class TransferReconcilerTest {
     private val inquiry = FakeInquiry()
     private val gaveUp = mutableListOf<Transfer>()
     private val abandonedTransfers = mutableListOf<Transfer>()
+    private val itemErrors = mutableListOf<Pair<Transfer, Exception>>()
     private fun reconciler(maxInquiries: Int = 10) = TransferReconciler(
         store, inquiry, Clock.fixed(now, ZoneOffset.UTC), Duration.ofSeconds(30), maxInquiries, 100,
         onGiveUp = { gaveUp += it }, onAbandon = { abandonedTransfers += it },
+        onItemError = { t, e -> itemErrors += t to e },
     )
 
     private var seq = 0
@@ -143,6 +164,7 @@ class TransferReconcilerTest {
         assertEquals(1, result.failed)
         assertEquals(FAILED, store.transfers.getValue(t.id).status)
         assertEquals("2001", store.transfers.getValue(t.id).bankResponseCode)
+        assertEquals(listOf(Triple(t.id, UNKNOWN, "2001")), store.failCalls)   // 환불 경로
     }
 
     @Test
@@ -243,6 +265,7 @@ class TransferReconcilerTest {
         assertEquals(0, result.republished)
         assertEquals(FAILED, store.transfers.getValue(t.id).status)
         assertEquals("E001", store.transfers.getValue(t.id).bankResponseCode)   // 은행에 간 적 없음 — 사용자가 다시 요청하면 된다
+        assertEquals(listOf(Triple(t.id, RECEIVED, "E001")), store.failCalls)   // 은행에 간 적 없음 → 차감액을 돌려준다
         assertEquals(listOf(t.id), abandonedTransfers.map { it.id })
         assertTrue(store.events.isEmpty())
     }
@@ -260,5 +283,69 @@ class TransferReconcilerTest {
         assertEquals(0, result.stillUnknown)
         assertEquals(0, store.transfers.getValue(first.id).inquiryAttempts) // 은행이 답하지 않은 게 아니다 — 긴 점검에도 한도에 닿지 않게
         assertEquals(UNKNOWN, store.transfers.getValue(second.id).status)
+    }
+
+    @Test
+    fun `포기하다 예외가 나는 행은 건너뛰고 알리며 나머지 행은 계속 처리한다`() {
+        val broken = transfer(
+            RECEIVED, sendingAt = now.minusSeconds(650), updatedAt = now.minusSeconds(600),
+            republishCount = 3, republishedAt = now.minusSeconds(700),
+        )
+        val healthy = transfer(
+            RECEIVED, sendingAt = now.minusSeconds(400), updatedAt = now.minusSeconds(301),
+            republishCount = 3, republishedAt = now.minusSeconds(700),
+        )
+        store.failThrowsFor += broken.id
+
+        val result = reconciler().reconcile()
+
+        assertEquals(1, result.errors)
+        assertEquals(1, result.abandoned)                                       // 깨진 행 뒤의 행도 처리됐다
+        assertEquals(listOf(broken.id), itemErrors.map { it.first.id })
+        assertEquals("corrupted row ${broken.id}", itemErrors.single().second.message)
+        assertEquals(RECEIVED, store.transfers.getValue(broken.id).status)      // 손으로 고칠 때까지 그대로 — 다음 주기에 다시 시도 · 기록된다
+        assertEquals(FAILED, store.transfers.getValue(healthy.id).status)
+    }
+
+    @Test
+    fun `재발행하다 예외가 나는 행도 건너뛰고 나머지를 재발행한다`() {
+        val broken = transfer(RECEIVED, sendingAt = now.minusSeconds(900), updatedAt = now.minusSeconds(600))
+        val healthy = transfer(RECEIVED, sendingAt = now.minusSeconds(400), updatedAt = now.minusSeconds(301))
+        store.republishThrowsFor += broken.id
+
+        val result = reconciler().reconcile()
+
+        assertEquals(1, result.errors)
+        assertEquals(1, result.republished)
+        assertEquals(listOf(broken.id), itemErrors.map { it.first.id })
+        assertEquals(1, store.transfers.getValue(healthy.id).republishCount)
+    }
+
+    @Test
+    fun `결과조회 뒤 확정하다 예외가 나는 행은 건너뛰고 뒤의 UNKNOWN 을 계속 묻는다`() {
+        val broken = transfer(UNKNOWN, sendingAt = now.minusSeconds(120))
+        val healthy = transfer(UNKNOWN, sendingAt = now.minusSeconds(60))
+        inquiry.outcomes[broken.reference] = { InquiryOutcome.NotProcessed("2001") }
+        inquiry.outcomes[healthy.reference] = { InquiryOutcome.Processed }
+        store.failThrowsFor += broken.id
+
+        val result = reconciler().reconcile()
+
+        assertEquals(1, result.errors)
+        assertEquals(0, result.failed)
+        assertEquals(1, result.completed)
+        assertEquals(listOf(broken.id), itemErrors.map { it.first.id })
+        assertEquals(UNKNOWN, store.transfers.getValue(broken.id).status)
+        assertEquals(COMPLETED, store.transfers.getValue(healthy.id).status)
+    }
+
+    @Test
+    fun `예외가 없으면 errors 는 0 이고 onItemError 는 부르지 않는다`() {
+        transfer(UNKNOWN).also { inquiry.outcomes[it.reference] = { InquiryOutcome.Processed } }
+
+        val result = reconciler().reconcile()
+
+        assertEquals(0, result.errors)
+        assertTrue(itemErrors.isEmpty())
     }
 }

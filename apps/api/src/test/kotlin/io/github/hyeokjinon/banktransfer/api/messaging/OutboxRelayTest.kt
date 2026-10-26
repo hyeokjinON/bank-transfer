@@ -25,6 +25,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
+/** 아웃박스 발행기 (P3-2). 사용자는 테스트마다 새로 충전한다 (접수 = 차감, P4-1). */
 class OutboxRelayTest : ApiIntegrationTest() {
 
     @Autowired private lateinit var relay: OutboxRelay
@@ -33,12 +34,13 @@ class OutboxRelayTest : ApiIntegrationTest() {
     @Autowired private lateinit var consumerFactory: ConsumerFactory<String, String>
 
     private val references = RandomReferenceGenerator()
+    private val user by lazy { fundedUser() }
 
     /** 계좌는 모의 은행에 없는 번호라 컨슈머가 처리하면 FAILED 가 된다 (이 테스트는 발행만 본다). */
     private fun saveTransfer(): Transfer {
         val now = Instant.now()
         val t = Transfer(
-            id = UUID.randomUUID(), idempotencyKey = UUID.randomUUID().toString(), reference = references.next(),
+            id = UUID.randomUUID(), userId = user, idempotencyKey = UUID.randomUUID().toString(), reference = references.next(),
             requestHash = "h".repeat(64), bankCode = "090", accountNo = "5500000000000", amount = 1_000, memo = "relay",
             status = TransferStatus.RECEIVED, createdAt = now, updatedAt = now,
         )

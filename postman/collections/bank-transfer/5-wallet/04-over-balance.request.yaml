@@ -1,0 +1,36 @@
+$kind: http-request
+name: 5-4 잔고보다 1원 큰 출금 → 422 INSUFFICIENT_BALANCE
+method: POST
+url: '{{baseUrl}}/api/v1/transfers'
+order: 4000
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: X-User-Id
+    value: '{{userId}}'
+  - key: Idempotency-Key
+    value: '{{$guid}}'
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "{{accountNo}}",
+      "amount": {{overAmount}},
+      "memo": "잔고초과"
+    }
+scripts:
+  - type: beforeRequest
+    language: text/javascript
+    code: |-
+      const over = Number(pm.collectionVariables.get("overAmount"));
+      if (!(over > 0) || over > 10000000) {
+        throw new Error("overAmount 가 비었거나 1천만 원(1회 한도)을 넘습니다 — 5-3 을 먼저 Send 하세요. 잔고가 1천만 원 이상이면 INVALID_AMOUNT 가 먼저 납니다");
+      }
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("422 INSUFFICIENT_BALANCE (출금도 차감도 남지 않는다)", () => {
+        pm.response.to.have.status(422);
+        pm.expect(pm.response.json().code).to.eql("INSUFFICIENT_BALANCE");
+      });

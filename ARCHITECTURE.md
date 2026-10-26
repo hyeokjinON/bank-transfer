@@ -1,6 +1,6 @@
 # ARCHITECTURE — 구조와 흐름
 
-> 기준: P3 완료 (2026-10-26, P3-3b PR #9 머지). P3 의 진행 상황은 아래 [§6](#6-p3-진행-상황)에 적는다.
+> 기준: P4-1 원화 잔고 (2026-10-26, PR #11 리뷰 중). P3 완료(P3-3b PR #9 머지). P3 · P4 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p4)에 적는다.
 
 ## 1. 한눈에 보기
 
@@ -10,10 +10,12 @@ flowchart LR
 
     subgraph app ["apps/api (Spring Boot, 단일 배포)"]
         API[REST Controller] --> SVC[도메인 서비스<br/>modules/account]
+        WAL[WalletController] -- "충전 · 잔고 · 보류" --> WL[WalletLedger<br/>api/persistence]
         SVC -- "BankPort" --> ADP[BankGatewayAdapter]
         SVC -- "VerificationRepository" --> REPO[(MySQL<br/>Flyway)]
         API --> TRF[도메인 서비스<br/>modules/transfer]
-        TRF -- "TransferStore" --> REPO
+        TRF -- "TransferStore (차감 · 환불)" --> REPO
+        WL --> REPO
         RELAY[OutboxRelay<br/>api/messaging] -- "미발행 행 읽기" --> REPO
         LSN[TransferRequestedListener] --> PROC[TransferProcessor<br/>modules/transfer]
         PROC -- "BankTransferPort" --> TADP[BankTransferAdapter]
@@ -38,6 +40,7 @@ flowchart LR
 
 - **모듈러 모놀리스**: 배포는 `apps/api` 하나, 경계는 Gradle 모듈로 나눈다. 나중(P8)에 경계를 그대로 서비스로 떼어낸다.
 - **포트/어댑터**: 도메인은 인터페이스(포트)만 알고, Netty·DB 를 붙이는 구현(어댑터)은 `apps/api` 에서 조립한다.
+- **사용자 식별**: `X-User-Id` 를 `RequestUserResolver` 한 곳에서 꺼낸다 (인증은 범위 밖, P4-1).
 
 ## 2. 모듈
 
@@ -46,8 +49,8 @@ flowchart LR
 | `modules/bank-protocol` | 전문 모델(`sealed interface BankMessage`), 고정길이 직렬화, Netty 프레임 디코더/코덱 | `netty-handler` (api) | Netty |
 | `modules/bank-gateway` | 은행 접속 클라이언트: 폴링, 재접속(지수 백오프), 전문번호 기반 응답 매칭, 타임아웃 | `bank-protocol` (api) | Netty |
 | `modules/account` | 1원 계좌인증 도메인 + 포트(`BankPort`, `VerificationRepository`, `CodeGenerator`) | **없음** | 없음 |
-| `modules/transfer` | 출금이체 도메인: 상태 전이, 멱등 접수, 거래번호, 처리(`TransferProcessor`), 정리 작업(`TransferReconciler`) + 포트(`TransferStore`, `VerifiedAccounts`, `ReferenceGenerator`, `BankTransferPort`, `BankInquiryPort`) | **없음** | 없음 |
-| `apps/api` | REST API, 예외 → HTTP 매핑, 조립(`AppConfiguration`), 어댑터, JPA 저장소(`persistence/`), Kafka 발행 · 소비(`messaging/`) | `account`, `transfer`, `bank-gateway` | Spring Boot 4 (MVC, JPA, Kafka) |
+| `modules/transfer` | 출금이체 도메인: 상태 전이, 사용자 범위 멱등 접수, 실패 확정 포트 `fail()`, 거래번호, 처리(`TransferProcessor`), 정리 작업(`TransferReconciler`) + 포트(`TransferStore`, `VerifiedAccounts`, `ReferenceGenerator`, `BankTransferPort`, `BankInquiryPort`) | **없음** | 없음 |
+| `apps/api` | REST API, 예외 → HTTP 매핑, 조립(`AppConfiguration`), 어댑터, 잔고 SQL(`WalletLedger`), JPA 저장소(`persistence/`), Kafka 발행 · 소비(`messaging/`) | `account`, `transfer`, `bank-gateway` | Spring Boot 4 (MVC, JPA, Kafka) |
 | `apps/mock-bank` | 모의 은행 FEP 서버. 실행 가능 + 테스트 픽스처 | `bank-protocol` (api) | Netty |
 
 의존 방향 (화살표 = "의존한다"):
@@ -72,21 +75,24 @@ apps/api/src/main/kotlin/.../api/
   config/BankTransferAdapter.kt     # BankTransferPort 구현: 게이트웨이 예외를 완료 · 거절 · 결과 모름 · 미전송으로 분류
   config/BankInquiryAdapter.kt      # BankInquiryPort 구현: 확실한 답(0000 · 2001)만 확정, 나머지는 모름 (예외 없음)
   web/AccountVerificationController.kt
-  web/TransferController.kt         # POST/GET /api/v1/transfers (Idempotency-Key, 202/200)
+  web/TransferController.kt         # POST/GET /api/v1/transfers (X-User-Id, Idempotency-Key, 202/200)
+  web/RequestUser.kt                # X-User-Id → RequestUser (헤더를 읽는 유일한 곳), WebConfiguration
+  web/WalletController.kt           # POST /api/v1/wallet/deposits (관리 · 테스트용), GET /api/v1/wallet
   web/ApiExceptionHandler.kt        # 도메인/게이트웨이 예외 → ProblemDetail + code (표준 Spring 오류에도 code)
-  persistence/                      # JPA 엔티티 · 리포지토리 · JpaVerificationRepository · JpaTransferStore (transfer + outbox_event 한 트랜잭션, 조건부 상태 UPDATE)
+  persistence/                      # JPA 엔티티 · 리포지토리 · JpaVerificationRepository · JpaTransferStore (transfer + 차감 + outbox_event 한 트랜잭션, 조건부 상태 UPDATE, fail() = 전이 + 환불)
+  persistence/WalletLedger.kt       # 충전 · 차감 · 환불 · 잔고 · 보류 SQL 한 곳 (P4-2 이음새)
   messaging/MessagingConfiguration.kt     # 토픽 · 릴레이 · 프로세서 조립, 재시도 토픽 전용 스케줄러 (RetryTopicSchedulerWrapper)
   messaging/OutboxRelay.kt                # 폴링 퍼블리셔 (SKIP LOCKED, 발행 확인 후 published_at)
   messaging/TransferRequestedListener.kt  # transfer.requested 컨슈머 (수동 ack, @RetryableTopic 재시도 토픽 · @DltHandler)
   reconcile/ReconcileConfiguration.kt     # 정리 작업 조립 + 10초 스케줄러 (TransferReconcilerScheduler), transfer.reconcile.* 설정
 apps/api/src/main/resources/db/migration/
-  V1__init.sql · V2__transfer_republish.sql   # V2: republish_count · republished_at (P3-3b)
+  V1__init.sql · V2__transfer_republish.sql · V3__wallet.sql   # V2: republish_count · republished_at (P3-3b), V3: wallet · wallet_ledger · user_id (P4-1)
 modules/account/.../account/
   AccountVerification.kt            # 엔티티, 포트, 예외 (sealed class)
   AccountVerificationService.kt     # 성명조회 → 1원 이체 → 코드 확인, 해시 저장 (InMemory 저장소는 테스트용)
 modules/transfer/.../transfer/
   Transfer.kt                       # 상태 · 엔티티 · 명령 · 이벤트 · 포트 · 예외
-  TransferService.kt                # 접수 규칙(검증 · 멱등 · 인증 계좌 · 거래번호 재시도), 거래번호 생성기
+  TransferService.kt                # 접수 규칙(검증 · 사용자 범위 멱등 · 내가 인증한 계좌 · 거래번호 재시도 · 잔고 부족 422), 거래번호 생성기
   TransferProcessor.kt              # 처리 규칙(조건부 SENDING → 은행 호출 → 결과 4분류 기록, 정리 작업과 경합 시 확정 결과 우선)
   TransferReconciler.kt             # 정리 작업(은행에 못 보낸 RECEIVED 재발행 · 포기, 멈춘 SENDING → UNKNOWN, UNKNOWN → 결과조회 → 확정). 은행에 묻기만 한다
 modules/bank-gateway/.../gateway/BankGatewayClient.kt
@@ -137,8 +143,8 @@ sequenceDiagram
 Docker Compose 한 파일로 MySQL 8.4 · Kafka 4.1(KRaft 단일 노드) · Redis 7.4. 리스너는 컨테이너용 `kafka:29092` / PC 용 `localhost:9092` 로 분리, 토픽 자동 생성 끔, 데이터는 이름 있는 볼륨.
 CI `infra-smoke` 잡이 같은 파일을 띄워 `verify.sh` 로 읽기/쓰기를 확인한다. → [ADR-0003](docs/adr/0003-local-infra-docker-compose.md), [infra/README.md](infra/README.md)
 
-## 6. P3 진행 상황
-- P3-1 접수 ✅ (ADR-0004). P3-2 처리 ✅ (ADR-0005). P3-3a 결과조회 · 정리 작업 ✅ (ADR-0006). P3-3b 재시도 토픽 · DLT · 제한 재발행 ✅ (ADR-0007).
+## 6. 진행 상황 (P3 · P4)
+- P3-1 접수 ✅ (ADR-0004). P3-2 처리 ✅ (ADR-0005). P3-3a 결과조회 · 정리 작업 ✅ (ADR-0006). P3-3b 재시도 토픽 · DLT · 제한 재발행 ✅ (ADR-0007). P4-1 원화 잔고 🟡 (ADR-0008, PR #11 리뷰 중 — 머지 때 ✅).
 
 ### P3-2 처리 흐름
 ```mermaid
@@ -194,7 +200,7 @@ sequenceDiagram
         alt 0000 처리됨
             R->>D: transition(UNKNOWN → COMPLETED)
         else 2001 원거래 없음
-            R->>D: transition(UNKNOWN → FAILED, 2001)
+            R->>D: fail(UNKNOWN, 2001) — 환불 포함 (P4-1)
         else 모름 (무응답 · 예외)
             R->>D: inquiry_attempts + 1 (10번째면 경고 → 일마감 대사)
         else 연결 없음 (P3-3b)
@@ -227,7 +233,7 @@ sequenceDiagram
         R->>D: republish — 조건부 UPDATE + 아웃박스 INSERT (한 트랜잭션)
         O->>K: TransferRequested 발행 → transfer.requested 처음부터
     else 3회 모두 사용
-        R->>D: transition(RECEIVED → FAILED, E001) + 경고 로그
+        R->>D: fail(RECEIVED, E001) — 환불 포함 (P4-1) + 경고 로그
     end
 ```
 
@@ -244,6 +250,39 @@ sequenceDiagram
 - 상태: `RECEIVED → SENDING → COMPLETED | FAILED | UNKNOWN`, `UNKNOWN → (결과조회) → COMPLETED | FAILED`, `RECEIVED → FAILED`(E001, 재발행 한도 뒤, P3-3b). **타임아웃은 실패로 확정하지 않는다.**
 - 1원인증 저장소도 메모리 → MySQL(JPA) 로 옮겼다 (P3-1).
 
+### P4-1 원화 잔고 흐름
+```mermaid
+sequenceDiagram
+    participant C as 클라이언트
+    participant S as TransferService
+    participant D as JpaTransferStore
+    participant W as WalletLedger
+    participant F as 컨슈머 · 정리 작업
+    C->>S: POST /transfers (X-User-Id, Idempotency-Key)
+    S->>D: 멱등 조회 (사용자 범위) · 내가 인증한 계좌 확인
+    S->>D: saveWithEvent — 한 트랜잭션
+    D->>D: INSERT transfer (user_id)
+    D->>W: UPDATE wallet SET balance = balance - ? WHERE user_id = ? AND balance >= ?
+    alt 0건 (잔고 부족 · 지갑 없음)
+        D-->>S: 전체 롤백 → InsufficientBalance
+        S-->>C: 422 INSUFFICIENT_BALANCE
+    else 1건
+        D->>W: INSERT wallet_ledger (WITHDRAW)
+        D->>D: INSERT outbox_event
+        S-->>C: 202 RECEIVED
+    end
+    Note over F,D: 실패 확정 4경로 (은행 거절 · 늦은 거절 · 결과조회 2001 · 재발행 소진 E001)
+    F->>D: fail(id, from) — 한 트랜잭션
+    D->>D: UPDATE transfer SET status = FAILED WHERE id = ? AND status = from (0건이면 끝)
+    D->>W: UPDATE wallet SET balance = balance + (원장 WITHDRAW 금액)
+    D->>W: INSERT wallet_ledger (REFUND)
+```
+
+- 잔고는 상태에 따라 움직인다: `RECEIVED` · `SENDING` · `UNKNOWN` = 빠진 채(보류, `GET /wallet` 의 `pending`), `COMPLETED` = 빠진 채(확정), `FAILED` = 복원. `CONFLICT` 는 잔고를 건드리지 않고 경고만 남긴다 (수동 확인, P5 대사).
+- 별도 락 없이 조건부 UPDATE 한 문장의 행 락과 `CHECK (balance >= 0)` 으로 음수를 막는다. 출금 INSERT 를 차감보다 먼저 두어 같은 키 경합의 진 쪽이 지갑을 건드리지 않는다.
+- `WalletLedger` 가 잔고 SQL 의 유일한 곳이라 P4-2 에서 비관적 · 낙관적 · Redis 분산락으로 바꿔 끼우는 이음새다.
+- 근거와 한계: [ADR-0008](docs/adr/0008-wallet-debit-on-intake-refund-on-failure.md)
+
 ## 7. 관련 문서
 - 데이터베이스 모델 · 테이블 정의: [docs/database.md](docs/database.md)
 - 전문 규격: [docs/protocol.md](docs/protocol.md)
@@ -258,3 +297,4 @@ sequenceDiagram
 | [0005](docs/adr/0005-kafka-delivery-and-consumer-idempotency.md) | 아웃박스는 적어도 한 번 발행, 중복은 컨슈머의 상태 조건부 UPDATE 로 차단, 결과 모름은 재전송 금지 |
 | [0006](docs/adr/0006-inquire-instead-of-resend.md) | 결과를 모르는 이체는 다시 보내지 않고 이용기관 거래번호로 은행에 물어서 확정 |
 | [0007](docs/adr/0007-retry-topic-and-bounded-republish.md) | 은행에 못 보낸 출금은 논블로킹 재시도 토픽 + 은행 시도 흔적 기준의 제한 재발행, 포기는 FAILED E001 |
+| [0008](docs/adr/0008-wallet-debit-on-intake-refund-on-failure.md) | 원화 잔고는 접수 트랜잭션에서 조건부 UPDATE 로 차감, 실패 확정 시 같은 트랜잭션에서 환불, 원장은 append-only |

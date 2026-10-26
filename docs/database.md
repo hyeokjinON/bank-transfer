@@ -1,8 +1,8 @@
 # 데이터베이스 — 모델 정의와 구조
 
-> 기준: P3-3a (Flyway `V1__init.sql` 적용, P3-2 · P3-3a 는 스키마 변경 없음). 1원인증 · 이체 · 아웃박스 테이블이 MySQL 에 있다.
+> 기준: P4-1 (Flyway `V1` · `V2` · `V3` 적용). 1원인증 · 이체 · 아웃박스 · 지갑 · 원장 테이블이 MySQL 에 있다.
 > 이 문서가 스키마의 기준이다. 마이그레이션을 추가할 때 이 문서도 같은 PR 에서 고친다.
-> 설계 배경: [P3 설계 문서](superpowers/specs/2026-10-19-p3-transfer-design.md) §2~§6
+> 설계 배경: [P3 설계 문서](superpowers/specs/2026-10-19-p3-transfer-design.md) §2~§6 · [P4-1 설계](superpowers/specs/2026-10-26-p4-1-wallet-balance-design.md)
 
 ## 1. 개요
 
@@ -11,11 +11,11 @@
 | DBMS | MySQL 8.4 (LTS) | 로컬은 `infra/docker-compose.yml`, 테스트는 Testcontainers |
 | 스키마 | `bank_transfer` | |
 | 문자셋 / 정렬 | `utf8mb4` / `utf8mb4_0900_ai_ci` | 한글 · 이모지(4바이트)까지. MySQL `utf8` 은 3바이트라 쓰지 않는다 |
-| 키 컬럼 정렬 | `transfer.idempotency_key` · `reference` 는 `ascii` / `ascii_bin` | 기본 정렬(`_ai_ci`)은 대소문자 · 악센트를 구분하지 않아 `Order-1` 과 `order-1` 이 같은 키로 취급된다. 키는 바이트 그대로 비교해야 한다 |
+| 키 컬럼 정렬 | `transfer.idempotency_key` · `reference` 는 `ascii` / `ascii_bin`. `user_id`(wallet · wallet_ledger · transfer · account_verification) 도 `ascii_bin` | 기본 정렬(`_ai_ci`)은 대소문자 · 악센트를 구분하지 않아 `Order-1` 과 `order-1` 이 같은 키로 취급된다. 키는 바이트 그대로 비교해야 한다. 사용자 id 도 같아서 `User-1` 과 `user-1` 은 다른 사용자다 |
 | 엔진 | InnoDB | 트랜잭션, 행 잠금, 클러스터드 PK |
 | 계정 | 앱 `bank` (스키마 권한만) / 관리 `root` (로컬 전용) | 비밀번호는 `infra/.env` (git 제외) |
 | 스키마 관리 | Flyway (`apps/api/src/main/resources/db/migration`) | JPA `ddl-auto=validate` — 엔티티가 스키마를 바꾸지 않는다 |
-| 접근 방식 | Spring Data JPA (Hibernate) + 필요한 곳은 네이티브 SQL | `FOR UPDATE SKIP LOCKED`, 조건부 UPDATE |
+| 접근 방식 | Spring Data JPA (Hibernate) + 필요한 곳은 네이티브 SQL. 잔고는 `WalletLedger`(JDBC, 조건부 UPDATE) | `FOR UPDATE SKIP LOCKED`, 조건부 UPDATE |
 | 시간대 설정 | JDBC `connectionTimeZone=Asia/Seoul` · Hibernate `jdbc.time_zone=Asia/Seoul` + `type.preferred_instant_jdbc_type=TIMESTAMP` | 마지막 설정이 없으면 Hibernate 7 이 Instant 를 UTC 로 쓴다 |
 
 ## 2. 시간대 정책 — 한국시간(KST)으로 저장
@@ -48,6 +48,7 @@
 erDiagram
     account_verification {
         CHAR36 id PK
+        VARCHAR36 user_id "NULL = P3 시절 행"
         VARCHAR bank_code
         VARCHAR account_no
         VARCHAR status "SENT/VERIFIED/EXPIRED/LOCKED"
@@ -55,7 +56,8 @@ erDiagram
     }
     transfer {
         CHAR36 id PK
-        VARCHAR idempotency_key UK
+        VARCHAR36 user_id "NULL = P3 시절 행"
+        VARCHAR idempotency_key "UK(user_id, idempotency_key)"
         CHAR20 reference UK
         VARCHAR bank_code
         VARCHAR account_no
@@ -69,13 +71,29 @@ erDiagram
         JSON payload
         DATETIME published_at "NULL = 미발행"
     }
-    account_verification ||..o{ transfer : "(bank_code, account_no) 가 VERIFIED 여야 접수"
+    wallet {
+        VARCHAR36 user_id PK
+        BIGINT balance "CHECK >= 0"
+        BIGINT version
+    }
+    wallet_ledger {
+        BIGINT id PK
+        VARCHAR36 user_id
+        VARCHAR type "DEPOSIT/WITHDRAW/REFUND"
+        BIGINT amount "> 0"
+        BIGINT balance_after
+        CHAR36 transfer_id "NULL = 충전"
+    }
+    account_verification ||..o{ transfer : "(user_id, bank_code, account_no) 가 VERIFIED 여야 접수"
     transfer ||..|{ outbox_event : "aggregate_id = transfer.id"
+    wallet ||..o{ wallet_ledger : "user_id"
+    transfer ||..o{ wallet_ledger : "transfer_id (WITHDRAW 1 · REFUND 0..1)"
 ```
 
 점선 관계는 **논리적 관계**이고 **외래키(FK)를 걸지 않는다**.
 - `account_verification` 과 `transfer` 는 다른 모듈(account / transfer)의 데이터다. P8 에서 서비스를 나누면 DB 도 나뉠 수 있으므로 모듈 경계를 넘는 FK 를 만들지 않는다 ([ADR-0001](adr/0001-modular-monolith-ports.md)). 검증은 코드(`VerifiedAccounts` 포트)가 한다.
 - `outbox_event` 는 여러 종류의 집합(aggregate)을 담을 수 있는 범용 테이블이라 특정 테이블에 FK 를 걸지 않는다.
+- `wallet_ledger` 는 append-only 기록이라 이체 행 삭제 · 보존 정책(P5)과 묶지 않는다. `wallet` 도 마찬가지로 FK 없이 `user_id` 로만 잇는다.
 
 ## 4. 테이블 정의
 
@@ -83,6 +101,7 @@ erDiagram
 | 컬럼 | 타입 | NULL | 설명 |
 |---|---|---|---|
 | `id` | `CHAR(36)` | N | PK. UUID 문자열 |
+| `user_id` | `VARCHAR(36)` ascii_bin | Y | 인증을 요청한 사용자 (`X-User-Id`). 확인 · 출금 계좌 확인은 이 사용자만. P3 시절 행은 NULL (누구에게도 인정되지 않는다). V3 (P4-1) |
 | `bank_code` | `VARCHAR(3)` | N | 은행코드 (예 `090`) |
 | `account_no` | `VARCHAR(16)` | N | 계좌번호 (숫자만) |
 | `holder_name` | `VARCHAR(20)` | N | 성명조회로 확인한 예금주명 |
@@ -93,13 +112,16 @@ erDiagram
 | `verified_at` | `DATETIME(6)` | Y | 인증 완료 시각 |
 | `created_at` | `DATETIME(6)` | N | 생성 시각 |
 
-인덱스: `idx_verification_account (bank_code, account_no, status)` — "이 계좌가 VERIFIED 인가?" 조회.
+인덱스:
+- `idx_verification_account (bank_code, account_no, status)` — "이 계좌가 VERIFIED 인가?" 조회 (P3)
+- `idx_verification_user_account (user_id, bank_code, account_no, status)` — 출금 계좌 확인 ("이 사용자가 이 계좌를 인증했는가?", V3)
 
 ### 4-2. `transfer` — 출금이체 (transfer 모듈, P3-1)
 | 컬럼 | 타입 | NULL | 설명 |
 |---|---|---|---|
 | `id` | `CHAR(36)` | N | PK. UUID 문자열. API 응답의 `id` |
-| `idempotency_key` | `VARCHAR(64)` ascii_bin | N | 클라이언트가 보낸 `Idempotency-Key` (보이는 ASCII 1~64자). ascii_bin (대소문자·악센트 구분, 바이트 비교). **UNIQUE** |
+| `user_id` | `VARCHAR(36)` ascii_bin | Y | 출금한 사용자. 이 사용자의 지갑에서 차감 · 환불. P3 시절 행은 NULL (조회 · 멱등 조회 모두 `user_id = ?` 라 보이지 않고, 차감한 적이 없어 환불도 없다). V3 (P4-1) |
+| `idempotency_key` | `VARCHAR(64)` ascii_bin | N | 클라이언트가 보낸 `Idempotency-Key` (보이는 ASCII 1~64자). ascii_bin (대소문자·악센트 구분, 바이트 비교). `(user_id, idempotency_key)` **UNIQUE** |
 | `reference` | `CHAR(20)` ascii_bin | N | 이용기관 거래번호. `T` + KST `yyMMdd` + 무작위 13자. 은행 전문 · 결과조회의 업무 키. ascii_bin (대소문자·악센트 구분, 바이트 비교). **UNIQUE** |
 | `request_hash` | `CHAR(64)` | N | `SHA-256(bankCode\|accountNo\|amount\|memo)`. 같은 키 다른 내용 판별 |
 | `bank_code` | `VARCHAR(3)` | N | 받는 은행 |
@@ -117,9 +139,10 @@ erDiagram
 | `version` | `BIGINT` | N | JPA `@Version` 낙관적 락 |
 
 인덱스:
-- `uk_transfer_idempotency (idempotency_key)` — 중복 접수 차단 (동시 요청의 마지막 방어선)
+- `uk_transfer_user_idempotency (user_id, idempotency_key)` — 사용자 범위 중복 접수 차단 (동시 요청의 마지막 방어선). NULL 은 서로 다른 값이라 P3 행끼리 충돌하지 않는다 (V3 에서 전역 `uk_transfer_idempotency` 를 대체)
 - `uk_transfer_reference (reference)` — 거래번호 충돌 차단, 결과조회 응답 매핑
 - `idx_transfer_status (status, sending_at)` — 정리 작업의 "30초 넘은 SENDING", "30초 유예가 지난 UNKNOWN 목록" 조회. 재발행 대상(`status = 'RECEIVED'`) 조회도 이 인덱스의 앞 컬럼으로 좁힌다
+- `idx_transfer_user (user_id, created_at)` — 지갑의 보류 금액(내 `RECEIVED` · `SENDING` · `UNKNOWN` 합), 사용자별 출금 목록 (V3)
 
 ### 4-3. `outbox_event` — 트랜잭셔널 아웃박스 (P3-1 생성, P3-2 부터 발행)
 | 컬럼 | 타입 | NULL | 설명 |
@@ -135,6 +158,33 @@ erDiagram
 
 발행 메시지 모양 (`transfer.requested`, [ADR-0005](adr/0005-kafka-delivery-and-consumer-idempotency.md)): key = `aggregate_id`(이체 id), value = `{"transferId", "occurredAt", "eventId"}`. 같은 이체의 메시지는 같은 파티션으로 간다.
 
+### 4-4. `wallet` — 사용자 원화 잔고 (P4-1)
+| 컬럼 | 타입 | NULL | 설명 |
+|---|---|---|---|
+| `user_id` | `VARCHAR(36)` ascii_bin | N | PK. `X-User-Id` 값 |
+| `balance` | `BIGINT` | N | 잔고 (원). `CHECK (balance >= 0)` = `ck_wallet_balance_non_negative` — 조건부 차감의 2차 방어선 |
+| `version` | `BIGINT` | N | 바뀔 때마다 +1 (P4-2 낙관적 락 비교용) |
+| `created_at` · `updated_at` | `DATETIME(6)` | N | 생성 · 마지막 변경 시각 |
+
+지갑은 첫 충전 때 만들어진다 (`INSERT … ON DUPLICATE KEY UPDATE`). 지갑이 없으면 잔고 0 이다 (조회는 0, 출금은 잔고 부족).
+
+### 4-5. `wallet_ledger` — 원화 원장, append-only (P4-1)
+| 컬럼 | 타입 | NULL | 설명 |
+|---|---|---|---|
+| `id` | `BIGINT AUTO_INCREMENT` | N | PK. 기록 순서 |
+| `user_id` | `VARCHAR(36)` ascii_bin | N | 사용자 |
+| `type` | `VARCHAR(10)` | N | `DEPOSIT`(충전) · `WITHDRAW`(접수 차감) · `REFUND`(실패 확정 환불) |
+| `amount` | `BIGINT` | N | 항상 양수, 방향은 `type` (`ck_ledger_amount_positive`) |
+| `balance_after` | `BIGINT` | N | 이 기록 직후 잔고 (같은 트랜잭션이 지갑 행 락을 쥔 채 읽은 값) |
+| `transfer_id` | `CHAR(36)` | Y | 출금 id. `DEPOSIT` 은 NULL |
+| `created_at` | `DATETIME(6)` | N | 기록 시각 |
+
+인덱스:
+- `uk_ledger_transfer_type (transfer_id, type)` — 같은 이체에 출금 · 환불이 두 번 기록될 수 없다 (이중 환불 2차 방어, NULL 은 여러 개 허용)
+- `idx_ledger_user (user_id, id)` — 사용자별 원장 · 합계
+
+수정 · 삭제하지 않는다. 불일치를 찾는 쿼리는 §9, 보정 방법은 P5 대사에서 정한다.
+
 ## 5. 상태 값
 상태는 MySQL `ENUM` 이 아니라 `VARCHAR` + Kotlin `enum` 으로 둔다. 값을 추가할 때 `ALTER TABLE ... MODIFY ENUM` (테이블 재작성 위험) 없이 코드만 바꾸면 되고, 허용 전이는 도메인이 검증한다.
 
@@ -142,8 +192,18 @@ erDiagram
 |---|---|---|
 | `account_verification.status` | `SENT` → `VERIFIED` / `EXPIRED` / `LOCKED` | `VERIFIED`, `EXPIRED`, `LOCKED` |
 | `transfer.status` | `RECEIVED` → `SENDING` → `COMPLETED` / `FAILED` / `UNKNOWN`, `UNKNOWN` → `COMPLETED` / `FAILED`, `RECEIVED` → `FAILED` (E001, 재발행 한도 뒤) | `COMPLETED`, `FAILED` |
+| `wallet_ledger.type` | `DEPOSIT` · `WITHDRAW` · `REFUND` (상태가 아니라 기록 종류) | – |
 
 전이 규칙 전체: [설계 문서 §3](superpowers/specs/2026-10-19-p3-transfer-design.md#3-상태-모델).
+
+**출금 상태별 잔고** (P4-1, [ADR-0008](adr/0008-wallet-debit-on-intake-refund-on-failure.md)):
+
+| 출금 상태 | 잔고 |
+|---|---|
+| `RECEIVED` · `SENDING` · `UNKNOWN` | 빠진 채 (보류 — `GET /wallet` 의 `pending`) |
+| `COMPLETED` | 빠진 채 (확정) |
+| `FAILED` | 복원 (같은 트랜잭션에서 `REFUND`) |
+| `CONFLICT` 발생 | 손대지 않음 + 경고 (수동 확인, P5 대사) |
 
 ## 6. 동시성 · 잠금
 | 상황 | 방법 | SQL 모양 |
@@ -153,10 +213,13 @@ erDiagram
 | 아웃박스 발행 (앱 여러 대) | 잠긴 행 건너뛰기 | `SELECT … WHERE published_at IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED`. 발행기는 READ COMMITTED 로 돈다: 기본 REPEATABLE READ 에서는 gap 락 때문에 접수의 INSERT 가 막힌다 ([ADR-0005](adr/0005-kafka-delivery-and-consumer-idempotency.md)) |
 | 이체 상태 변경 (중복 메시지) | 조건부 UPDATE | `UPDATE transfer SET status='SENDING', sending_at=? … WHERE id=? AND status='RECEIVED'` → 0건이면 건너뜀 |
 | 정리 작업과 컨슈머가 같은 이체를 확정 | 조건부 UPDATE (`UNKNOWN` 에서만 확정) | `UPDATE transfer SET status=?, bank_response_code=? … WHERE id=? AND status='UNKNOWN'` → 0건이면 다른 쪽이 먼저 확정한 것이라 건너뜀. 결과조회 횟수 증가도 `AND status='UNKNOWN'` 조건부다 |
-| 재발행 (정리 작업 여러 대 · 컨슈머와 겹침) | 조건부 UPDATE + 같은 트랜잭션 아웃박스 INSERT | `UPDATE transfer SET republish_count = republish_count + 1, republished_at = ? … WHERE id = ? AND status = 'RECEIVED' AND republish_count = ?` → 1건일 때만 `INSERT INTO outbox_event`. 포기는 `transition(RECEIVED → FAILED)` 조건부 |
+| 재발행 (정리 작업 여러 대 · 컨슈머와 겹침) | 조건부 UPDATE + 같은 트랜잭션 아웃박스 INSERT | `UPDATE transfer SET republish_count = republish_count + 1, republished_at = ? … WHERE id = ? AND status = 'RECEIVED' AND republish_count = ?` → 1건일 때만 `INSERT INTO outbox_event`. 포기는 `fail(RECEIVED, E001)` — 조건부 전이와 환불이 한 트랜잭션 |
 | 엔티티 동시 수정 | 낙관적 락 | `@Version` → `… WHERE id=? AND version=?` |
+| 잔고 차감 (같은 사용자 출금 동시) | 조건부 UPDATE 한 문장 + CHECK, 접수 트랜잭션 안 | `INSERT transfer …` → `UPDATE wallet SET balance = balance - ?, version = version + 1 … WHERE user_id = ? AND balance >= ?` → 0건이면 롤백(422) → `INSERT wallet_ledger`(WITHDRAW) → `INSERT outbox_event`. 같은 `(user_id, 키)` 는 `transfer` UNIQUE 에서 먼저 멈춰 지갑을 건드리지 않는다 |
+| 환불 (컨슈머 · 정리 작업 겹침) | 조건부 전이 1건일 때만 + 원장 UNIQUE | `UPDATE transfer SET status = 'FAILED' … WHERE id = ? AND status = ?` → 1건이면 `SELECT amount FROM wallet_ledger WHERE transfer_id = ? AND type = 'WITHDRAW'` → `UPDATE wallet SET balance = balance + ?` → `INSERT wallet_ledger`(REFUND). 한 트랜잭션 |
+| 충전 | `INSERT … ON DUPLICATE KEY UPDATE` | 지갑이 없으면 만들고 있으면 더한다 + `INSERT wallet_ledger`(DEPOSIT) |
 
-잔액 차감의 락 비교(비관적 · 낙관적 · Redis 분산락)는 P4 에서 이 표에 추가한다.
+같은 차감을 비관적 락 · 낙관적 락 · Redis 분산락으로 바꿔 끼운 비교(k6)는 P4-2 에서 이 표에 추가한다.
 
 ## 7. 명명 · 타입 규칙
 - 테이블 · 컬럼: `snake_case`, 테이블은 단수형 (`transfer`).
@@ -167,7 +230,7 @@ erDiagram
 - 개인정보 원문(인증코드)은 저장하지 않는다. 계좌번호 마스킹: `Transfer.toString()` 은 뒤 4자리만 남겨 로그에 원문이 찍히지 않는다. API 응답 마스킹은 인증 도입 때 적용한다.
 
 ## 8. 마이그레이션 규칙 (Flyway)
-- 파일명: `V<번호>__<설명>.sql` (예 `V1__init.sql`, `V2__transfer_republish.sql`).
+- 파일명: `V<번호>__<설명>.sql` (예 `V1__init.sql`, `V2__transfer_republish.sql`, `V3__wallet.sql`).
 - **이미 적용된 파일은 고치지 않는다.** 바꿀 게 있으면 새 버전을 추가한다 (체크섬 불일치로 기동 실패).
 - 앱 기동 시 자동 적용. 테스트(Testcontainers)도 같은 파일로 스키마를 만든다.
 - 큰 테이블 변경(인덱스 추가 등)은 운영 반영 방법(온라인 DDL)을 PR 에 적는다.
@@ -215,12 +278,35 @@ SELECT COUNT(*), SUM(amount) FROM transfer
 
 -- 인덱스를 타는지 확인
 EXPLAIN SELECT id FROM outbox_event WHERE published_at IS NULL ORDER BY id LIMIT 100;
+
+-- 사용자 잔고와 보류 금액 (보류 = 결과를 기다리는 출금 합)
+SELECT w.user_id, w.balance,
+       (SELECT COALESCE(SUM(t.amount), 0) FROM transfer t
+         WHERE t.user_id = w.user_id AND t.status IN ('RECEIVED', 'SENDING', 'UNKNOWN')) AS pending
+  FROM wallet w WHERE w.user_id = 'user-1';
+
+-- 잔고 = 원장 합 검증 (결과가 나오면 불일치 — 정상이면 0행)
+SELECT w.user_id, w.balance, COALESCE(l.total, 0) AS ledger_total
+  FROM wallet w
+  LEFT JOIN (SELECT user_id, SUM(CASE type WHEN 'WITHDRAW' THEN -amount ELSE amount END) AS total
+               FROM wallet_ledger GROUP BY user_id) l ON l.user_id = w.user_id
+ WHERE w.balance <> COALESCE(l.total, 0);
+
+-- 환불 누락 확인: FAILED 인데 차감(WITHDRAW)만 있고 환불(REFUND)이 없는 출금 (정상이면 0행)
+SELECT t.id, t.user_id, t.amount, t.updated_at FROM transfer t
+  JOIN wallet_ledger w ON w.transfer_id = t.id AND w.type = 'WITHDRAW'
+  LEFT JOIN wallet_ledger r ON r.transfer_id = t.id AND r.type = 'REFUND'
+ WHERE t.status = 'FAILED' AND r.id IS NULL;
+
+-- 사용자 원장 최근 20줄
+SELECT id, type, amount, balance_after, transfer_id, created_at FROM wallet_ledger
+ WHERE user_id = 'user-1' ORDER BY id DESC LIMIT 20;
 ```
 
 ## 10. 검토 중 · 다음 단계
 - **PK 타입**: 지금은 읽기 쉬운 `CHAR(36)` 무작위 UUID. InnoDB 는 PK 순서로 데이터를 저장하므로 무작위 값은 삽입 시 페이지 분할이 생기고 보조 인덱스도 커진다. P4 부하테스트에서 `BINARY(16)` · 시간순 UUID(v7) · `BIGINT` 와 삽입 성능을 비교해 결정한다.
 - **데이터 보존**: 발행된 `outbox_event`, 만료된 `account_verification` 정리는 P5 배치.
-- **잔액 테이블**: P4 에서 추가.
+- **잔고 락 전략**: P4-2 에서 비관적 · 낙관적 · Redis 분산락을 k6 로 비교한다. 원장 보존(파티셔닝 · 보관)은 P5.
 - **읽기 성능**: 조회 API 가 늘면 실행계획(`EXPLAIN ANALYZE`) 결과를 이 문서에 남긴다.
 
 ## 변경 이력
@@ -232,3 +318,4 @@ EXPLAIN SELECT id FROM outbox_event WHERE published_at IS NULL ORDER BY id LIMIT
 | 2026-10-20 | 스키마 변경 없음. 아웃박스 발행 메시지 모양 · `published_at` 기록 방식, 동시성 표(SKIP LOCKED · 조건부 UPDATE) 확정, 운영 조회 추가 | PR #5 (P3-2) |
 | 2026-10-21 | 스키마 변경 없음. `inquiry_attempts` 의미(결과조회에도 답이 없던 횟수, 10에서 멈춤), 정리 작업 ↔ 컨슈머 경합의 조건부 UPDATE, 한도에 닿은 `UNKNOWN` 운영 쿼리 | [PR #7](https://github.com/hyeokjinON/bank-transfer/pull/7) (P3-3a) |
 | 2026-10-22 | V2: republish_count · republished_at (제한 재발행), RECEIVED → FAILED(E001), 재발행 동시성 · 운영 쿼리 | [PR #9](https://github.com/hyeokjinON/bank-transfer/pull/9) (P3-3b) |
+| 2026-10-26 | V3: wallet · wallet_ledger, transfer · account_verification 의 user_id, 멱등 UNIQUE 를 (user_id, idempotency_key) 로, 잔고 동시성 · 운영 쿼리(잔고 = 원장 합) | [PR #11](https://github.com/hyeokjinON/bank-transfer/pull/11) (P4-1) |

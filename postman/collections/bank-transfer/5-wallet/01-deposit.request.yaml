@@ -1,0 +1,27 @@
+$kind: http-request
+name: 5-1 충전 10만 원 → 200, 잔고 기록
+method: POST
+url: '{{baseUrl}}/api/v1/wallet/deposits'
+order: 1000
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: X-User-Id
+    value: '{{userId}}'
+body:
+  type: json
+  content: |-
+    {
+      "amount": 100000
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // 관리 · 테스트용 충전. 응답은 충전 뒤 잔고와 보류(결과를 기다리는 출금 합).
+      pm.test("200, 사용자 · 잔고", () => {
+        pm.response.to.have.status(200);
+        pm.expect(pm.response.json().userId).to.eql(pm.collectionVariables.get("userId"));
+        pm.expect(pm.response.json().balance).to.be.at.least(100000);
+      });
+      pm.collectionVariables.set("walletBalance", String(pm.response.json().balance));

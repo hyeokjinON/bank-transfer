@@ -3,6 +3,9 @@ name: 3-4 접수 3~4초 뒤 조회 → UNKNOWN (30초 유예 안에서는 아직
 method: GET
 url: '{{baseUrl}}/api/v1/transfers/{{silentTransferId}}'
 order: 4000
+headers:
+  - key: X-User-Id
+    value: '{{userId}}'
 scripts:
   - type: afterResponse
     language: text/javascript

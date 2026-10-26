@@ -86,6 +86,18 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 - 정리 작업이 먼저 `UNKNOWN` 으로 바꾼 뒤 컨슈머가 은행의 확정 결과를 받으면 컨슈머가 `UNKNOWN → COMPLETED/FAILED` 로 기록한다. 이미 반대 결과로 확정돼 있으면 `conflict: bank result differs …` 경고가 남는다 → 사람이 확인한다.
 - 은행 연결이 없으면 결과조회는 그 주기에서 멈추고 횟수를 세지 않는다 (P3-3b). 긴 은행 점검에도 `UNKNOWN` 이 한도에 닿지 않는다.
 - 순서 0 의 기준은 은행에 보내려 한 흔적이다: `sending_at` 이 없는 `RECEIVED`(발행 · 소비가 안 된 건)는 재발행하지 않는다 — Kafka · 컨슈머가 복구되면 밀린 메시지가 처리된다. 은행 장애가 약 26분((재시도 약 95초 + 대기 5분) × 4 ≈ 26분, 정리 작업 주기 최대 10초 별도)보다 길면 그 사이 접수된 출금은 `FAILED` `E001` 이 된다. 대상 조회: [database.md §9](docs/database.md).
+- `FAILED` 로 확정하는 곳(순서 0 포기 · 순서 2 의 `2001`)은 `TransferStore.fail()` 이라 같은 트랜잭션에서 잔고도 돌려준다 ([ADR-0008](docs/adr/0008-wallet-debit-on-intake-refund-on-failure.md)).
+
+### 지갑 (P4-1)
+- 모든 출금 · 1원인증 · 지갑 API 는 `X-User-Id` 헤더가 필요하다 (영숫자 · 하이픈 1~36자, 대소문자 구분). 인증은 범위 밖이라 **값을 그대로 믿는다**. 없거나 형식이 틀리면 400 `USER_ID_REQUIRED`.
+- `POST /api/v1/wallet/deposits {"amount": n}` — **관리 · 테스트용** 충전 (1 ~ 1억 원, 지갑이 없으면 만든다). 인증 · 멱등키가 없어 같은 요청을 두 번 보내면 두 번 충전된다. 응답 200 `{userId, balance, pending}`.
+- `GET /api/v1/wallet` → `{userId, balance, pending}`. 지갑이 없으면 `balance = 0`. `pending` = 이 사용자의 출금 중 `RECEIVED` · `SENDING` · `UNKNOWN` 금액 합.
+- 출금은 접수할 때 잔고에서 빠진다 (모자라면 422 `INSUFFICIENT_BALANCE`). 결과를 기다리는 동안(`RECEIVED` · `SENDING` · `UNKNOWN`) `pending` 에 보이고, `COMPLETED` 면 빠진 채, `FAILED` 면 같은 트랜잭션에서 돌아온다. `CONFLICT` 는 잔고를 건드리지 않고 경고만 남긴다.
+
+```bash
+curl -X POST localhost:8080/api/v1/wallet/deposits -H 'Content-Type: application/json' -H 'X-User-Id: user-1' -d '{"amount":100000}'
+curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
+```
 
 ## 3. 모의 은행 시나리오
 | 계좌번호 | 예금주 | 동작 |
@@ -117,9 +129,13 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 | 금액이 정수가 아님 (소수 · 문자열) | 400 | `INVALID_REQUEST` |
 | 적요가 EUC-KR 20바이트 초과 | 400 | `INVALID_MEMO` |
 | 은행코드·계좌번호 형식 오류 | 400 | `INVALID_REQUEST` (요청 검증). 도메인 검사는 `INVALID_ACCOUNT` |
-| 1원인증을 마치지 않은 계좌 | 422 | `ACCOUNT_NOT_VERIFIED` |
+| `X-User-Id` 헤더 없음 · 형식 오류 | 400 | `USER_ID_REQUIRED` |
+| 충전 금액이 1 ~ 100,000,000 원 밖 | 400 | `INVALID_REQUEST` |
+| 이 사용자가 1원인증을 마치지 않은 계좌 (남이 인증한 계좌 포함) | 422 | `ACCOUNT_NOT_VERIFIED` |
+| 잔고가 출금액보다 적음 (지갑이 없어도) | 422 | `INSUFFICIENT_BALANCE` |
 | 같은 키에 다른 내용 | 422 | `IDEMPOTENCY_KEY_REUSED` |
-| 없는 이체 id | 404 | `TRANSFER_NOT_FOUND` |
+| 없는 이체 id · 남의 출금 | 404 | `TRANSFER_NOT_FOUND` |
+| 남의 1원인증 건 확인 | 404 | `VERIFICATION_NOT_FOUND` |
 | 허용되지 않는 상태 전이 | 409 | `ILLEGAL_TRANSITION` |
 | 그 밖의 표준 Spring 오류 (405 · 415 …) | 해당 상태 | HTTP 상태 이름 (예 `METHOD_NOT_ALLOWED`) |
 
@@ -147,6 +163,10 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env down -v        
 | DLT 에 메시지가 쌓임 | 로그 `moved to DLT`(WARN / ERROR), 헤더의 예외 | `RetryLaterException` 이면 은행 장애 — 재발행을 기다린다. `InvalidTransferKeyException` 이면 보낸 쪽 버그. **그 밖의 예외(예: DB 장애)는 ERROR 로그** — `sending_at` 이 NULL 이라 정리 작업이 다시 발행하지 않는다 → 수동 확인 · 재처리 ([database.md §9](docs/database.md)) |
 | `FAILED` 인데 `bank_response_code = E001` | `republish_count = 3` | 은행에 보내지 못하고 포기 — 돈은 움직이지 않았다. 사용자가 다시 요청하면 된다. 은행 장애가 26분 넘게 이어졌는지 본다 |
 | `late or unknown response tranNo=…` 경고 | 전문번호 | 타임아웃 후 도착한 응답. 로그만 남긴다 (게이트웨이). 결과는 정리 작업의 결과조회로 확정한다. **남는 위험**: 은행이 30초 유예보다 더 늦게 처리하면 조회가 `2001` 을 답해 `FAILED` 로 확정되고, 이후 도착한 이체 응답은 이 로그만 남는다(돈은 나갔는데 `FAILED`) → 일마감 대사(P5)가 맞춘다. 이 로그에는 거래번호가 없어 어느 건인지 바로 알 수 없다 (범위 밖으로 남김, [HANDOVER](HANDOVER.md)) |
+| 422 `INSUFFICIENT_BALANCE` 가 잦음 | `GET /api/v1/wallet` 의 `balance` · `pending` | 잔고 부족. `pending` 이 크면 결과를 기다리는 출금(`UNKNOWN` 등)이 돈을 묶고 있다 → 정리 작업 · 결과조회 로그를 본다 |
+| 잔고와 원장 합이 다름 | [database.md §9](docs/database.md) "잔고 = 원장 합 검증" | 정상이면 0행. 원장은 수정하지 않는다 — 원인(직접 수정한 SQL 등)을 찾고 보정 기록을 남긴다 (P5 대사) |
+| `FAILED` 인데 잔고가 안 돌아옴 | [database.md §9](docs/database.md) "환불 누락 확인", 해당 출금의 `user_id` | `user_id` 가 NULL 이면 P3 시절 출금이라 차감도 환불도 없다 (정상). 그 밖이면 버그 — `fail()` 을 거치지 않은 상태 변경이 있었는지 본다 |
+| `CONFLICT` 경고 (`wallet balance left as is`) | 출금 상태 · 원장 · 은행 거래내역 | 잔고를 자동으로 고치지 않는다. 예: `FAILED` 확정 · 환불 뒤 은행이 완료 → 환불된 돈이 실제로 나갔다 → 수동 확인 · P5 대사 |
 | 길이 필드 오류로 연결이 끊김 | `CorruptedFrameException` | 스트림 경계를 잃음 → 연결 종료 후 재접속이 정상 동작 |
 | Kafka 접속은 되는데 메시지가 안 감 | `advertised.listeners` | PC 앱은 `localhost:9092`, 컨테이너는 `kafka:29092` |
 | Kafka `Invalid cluster.id` | `.env` 의 `KAFKA_CLUSTER_ID` 변경 여부 | `down -v` 후 다시 `up` |

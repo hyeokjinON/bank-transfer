@@ -30,6 +30,7 @@ import java.util.UUID
 @Table(name = "transfer")
 class TransferEntity(
     @Id @Column(columnDefinition = "char(36)") var id: String = "",
+    var userId: String? = null,
     var idempotencyKey: String = "",
     @Column(columnDefinition = "char(20)") var reference: String = "",
     @Column(columnDefinition = "char(64)") var requestHash: String = "",
@@ -49,7 +50,7 @@ class TransferEntity(
     @Version var version: Long? = null,
 ) {
     fun toDomain() = Transfer(
-        id = UUID.fromString(id), idempotencyKey = idempotencyKey, reference = reference, requestHash = requestHash,
+        id = UUID.fromString(id), userId = userId, idempotencyKey = idempotencyKey, reference = reference, requestHash = requestHash,
         bankCode = bankCode, accountNo = accountNo, amount = amount, memo = memo, status = status,
         bankResponseCode = bankResponseCode, sendingAt = sendingAt, inquiryAttempts = inquiryAttempts,
         republishCount = republishCount, republishedAt = republishedAt, createdAt = createdAt, updatedAt = updatedAt,
@@ -61,7 +62,7 @@ class TransferEntity(
          * P3-2 의 상태 변경은 이 메서드로 만든 엔티티를 다시 save 하지 말고, 읽어 온 엔티티를 고치거나 조건부 UPDATE 를 쓴다.
          */
         fun from(t: Transfer) = TransferEntity(
-            id = t.id.toString(), idempotencyKey = t.idempotencyKey, reference = t.reference, requestHash = t.requestHash,
+            id = t.id.toString(), userId = t.userId, idempotencyKey = t.idempotencyKey, reference = t.reference, requestHash = t.requestHash,
             bankCode = t.bankCode, accountNo = t.accountNo, amount = t.amount, memo = t.memo, status = t.status,
             bankResponseCode = t.bankResponseCode, sendingAt = t.sendingAt?.toDbPrecision(), inquiryAttempts = t.inquiryAttempts,
             republishCount = t.republishCount, republishedAt = t.republishedAt?.toDbPrecision(),
@@ -83,7 +84,8 @@ class OutboxEventEntity(
 )
 
 interface TransferJpaRepository : JpaRepository<TransferEntity, String> {
-    fun findByIdempotencyKey(idempotencyKey: String): TransferEntity?
+    /** 멱등 조회는 사용자 범위 (P4-1). uk_transfer_user_idempotency (user_id, idempotency_key) 를 탄다. */
+    fun findByUserIdAndIdempotencyKey(userId: String, idempotencyKey: String): TransferEntity?
 
     fun findByStatusAndSendingAtBeforeOrderBySendingAt(status: TransferStatus, cutoff: Instant, limit: Limit): List<TransferEntity>
 
@@ -169,9 +171,9 @@ internal fun outboxPayload(event: TransferEvent): String = when (event) {
 }
 
 /**
- * 이체 저장소 (MySQL). saveWithEvent 는 transfer 와 outbox_event 를 한 트랜잭션에 쓴다:
- * 둘 다 커밋되거나 둘 다 롤백되므로 "이체는 있는데 처리 신호가 없는" 상태가 생기지 않는다.
- * UNIQUE 위반은 제약 이름을 보고 도메인 예외([StoreConflict])로 바꿔 던진다.
+ * 이체 저장소 (MySQL). saveWithEvent 는 transfer · 잔고 차감(wallet · wallet_ledger) · outbox_event 를 한 트랜잭션에 쓴다:
+ * 모두 커밋되거나 모두 롤백되므로 "돈은 빠졌는데 출금이 없는" 상태나 "이체는 있는데 처리 신호가 없는" 상태가 생기지 않는다 (P4-1).
+ * 실패 확정(fail)은 상태 전이와 환불을 한 트랜잭션에 쓴다. UNIQUE 위반은 제약 이름을 보고 도메인 예외([StoreConflict])로 바꿔 던진다.
  *
  * 바깥 트랜잭션 안에서 [saveWithEvent] 를 부르면 안 된다. 이 클래스가 자기 트랜잭션을 열고 닫는 것에 기대기 때문이다:
  * UNIQUE 위반이면 이 트랜잭션이 롤백된 뒤에야 호출자(TransferService)가 이긴 쪽 건을 다시 읽을 수 있다.
@@ -182,37 +184,55 @@ class JpaTransferStore(
     private val transfers: TransferJpaRepository,
     private val outbox: OutboxEventJpaRepository,
     private val tx: TransactionTemplate,
+    private val wallets: WalletLedger,
     private val payloadOf: (TransferEvent) -> String = ::outboxPayload,
 ) : TransferStore {
 
-    override fun saveWithEvent(transfer: Transfer, event: TransferEvent): Transfer =
-        try {
+    /**
+     * 순서: 출금 INSERT(flush) → 잔고 차감 + 원장 WITHDRAW → 아웃박스 INSERT. 하나라도 실패하면 전부 롤백된다.
+     * 출금 INSERT 를 먼저 하는 이유: 같은 (사용자, 키)가 동시에 오면 진 쪽이 UNIQUE 에서 멈춰(이긴 쪽 커밋까지 대기) 지갑을 건드리지 않고
+     * 기존 건을 돌려받는다. 차감을 먼저 하면 잔고가 한 건 몫뿐일 때 진 쪽이 멱등 응답(200) 대신 잔고 부족(422)을 받는다.
+     * 아웃박스를 차감 뒤에 두는 이유: 마지막 INSERT 가 실패해도 차감까지 되돌아간다는 것을 테스트로 보일 수 있다.
+     */
+    override fun saveWithEvent(transfer: Transfer, event: TransferEvent): Transfer {
+        // 새 출금은 반드시 지갑에서 뺀다. 사용자 없는 출금을 받으면 차감 없이 돈이 나가는 길이 생긴다
+        val userId = requireNotNull(transfer.userId) { "a new transfer must have userId (it is debited from the user's wallet)" }
+        return try {
             tx.execute {
                 // flush 로 UNIQUE 위반을 여기서 터뜨려야 아래 catch 에서 StoreConflict 로 바꿀 수 있다 (커밋 시점까지 미루지 않는다)
                 val saved = transfers.saveAndFlush(TransferEntity.from(transfer))
+                if (!wallets.withdraw(userId, transfer.id, transfer.amount, transfer.createdAt)) {
+                    // 0건 = 잔고 부족 또는 지갑 없음. 예외로 트랜잭션 전체(방금 INSERT 한 출금 포함)를 롤백한다
+                    throw StoreConflict.InsufficientBalance(userId, transfer.amount)
+                }
                 outbox.saveAndFlush(outboxRow(event))
                 saved.toDomain()
             }!!
         } catch (e: DataIntegrityViolationException) {
-            // MySQL 메시지 예: Duplicate entry 'k1' for key 'transfer.uk_transfer_idempotency'
+            // MySQL 메시지 예: Duplicate entry 'user-1-k1' for key 'transfer.uk_transfer_user_idempotency'
+            // V3 에서 이름이 바뀌었다. 옛 이름(uk_transfer_idempotency)은 새 이름의 부분 문자열이 아니라 함께 고쳐야 했다
             val message = e.mostSpecificCause.message.orEmpty()
             when {
-                "uk_transfer_idempotency" in message -> throw StoreConflict.DuplicateIdempotencyKey(transfer.idempotencyKey)
+                "uk_transfer_user_idempotency" in message -> throw StoreConflict.DuplicateIdempotencyKey(transfer.idempotencyKey)
                 "uk_transfer_reference" in message -> throw StoreConflict.DuplicateReference(transfer.reference)
                 else -> throw e
             }
         }
+    }
 
     override fun findById(id: UUID): Transfer? = transfers.findById(id.toString()).orElse(null)?.toDomain()
 
-    override fun findByIdempotencyKey(key: String): Transfer? = transfers.findByIdempotencyKey(key)?.toDomain()
+    override fun findByIdempotencyKey(userId: String, key: String): Transfer? =
+        transfers.findByUserIdAndIdempotencyKey(userId, key)?.toDomain()
 
     /**
      * 조건부 UPDATE 로만 상태를 바꾼다. TransferEntity.from() 으로 만든 엔티티를 save 하면 INSERT 가 되므로 쓰지 않는다.
      * 한 문장의 UPDATE 라 두 소비자가 동시에 와도 DB 가 한쪽만 1 건으로 통과시킨다.
      * 허용하는 전이는 도메인의 상태 표([TransferStatus.canMoveTo])를 따른다. 표에 없는 전이는 DB 에 가기 전에 거른다 (호출 쪽 버그).
+     * FAILED 는 거부한다 — 환불과 한 트랜잭션인 [fail] 로만 간다 (P4-1).
      */
     override fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?): Boolean {
+        require(to != TransferStatus.FAILED) { "use fail() for FAILED so the refund is never skipped" }
         require(from.canMoveTo(to)) { "illegal transition $from -> $to" }
         return tx.execute {
             val dbAt = at.toDbPrecision()
@@ -255,6 +275,23 @@ class JpaTransferStore(
             outbox.saveAndFlush(outboxRow(TransferEvent.TransferRequested(id, dbAt)))
             true
         }!!
+
+    /**
+     * 실패 확정과 환불을 한 트랜잭션에 쓴다 (P4-1). 조건부 전이가 1건일 때만 환불한다 → 컨슈머와 정리 작업이 겹쳐 두 번 불러도 환불은 한 번.
+     * 환불 금액은 원장의 WITHDRAW 에서 읽는다 (없으면 = 차감한 적 없는 P3 시절 출금 → 상태만 바꾼다).
+     * 환불이 실패하면(원장 UNIQUE 위반 등) 전이도 롤백된다 — "FAILED 인데 돈은 안 돌아온" 상태가 생기지 않는다.
+     */
+    override fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String): Boolean {
+        require(from.canMoveTo(TransferStatus.FAILED)) { "illegal transition $from -> FAILED" }
+        return tx.execute {
+            val dbAt = at.toDbPrecision()
+            if (transfers.transition(id.toString(), from, TransferStatus.FAILED, dbAt, bankResponseCode) != 1) {
+                return@execute false
+            }
+            wallets.refund(id, dbAt)
+            true
+        }!!
+    }
 
     /** 아웃박스 한 줄. 접수(saveWithEvent)와 재발행(republish)이 같은 모양을 쓰도록 한곳에서 만든다. */
     private fun outboxRow(event: TransferEvent) = OutboxEventEntity(

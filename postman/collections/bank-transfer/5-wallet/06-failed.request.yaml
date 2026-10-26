@@ -1,0 +1,17 @@
+$kind: http-request
+name: 5-6 몇 초 뒤 조회 → FAILED 1001 (은행 거절)
+method: GET
+url: '{{baseUrl}}/api/v1/transfers/{{refundTransferId}}'
+order: 6000
+headers:
+  - key: X-User-Id
+    value: '{{userId}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("FAILED, 은행 응답코드 1001", () => {
+        pm.response.to.have.status(200);
+        pm.expect(pm.response.json().status).to.eql("FAILED");
+        pm.expect(pm.response.json().bankResponseCode).to.eql("1001");
+      });

@@ -43,7 +43,7 @@ class TransferReconcilerScheduler(private val reconciler: TransferReconciler) {
     }
 
     private companion object {
-        val NOTHING = ReconcileResult(0, 0, 0, 0, 0, 0, 0)
+        val NOTHING = ReconcileResult(0, 0, 0, 0, 0, 0, 0, 0)
     }
 }
 
@@ -67,6 +67,8 @@ class ReconcileConfiguration {
             onAbandon = {
                 log.warn("transfer abandoned after {} republishes, the bank was never reached (FAILED E001): {}", it.republishCount, it)
             },
+            // 한 건이 깨져도 나머지는 계속 돈다. 건너뛴 건은 매 주기 다시 여기로 온다 — 손으로 고칠 때까지 ERROR 가 반복된다
+            onItemError = { transfer, e -> log.error("reconcile skipped transfer {}: {}", transfer, e.toString(), e) },
         )
 
     @Bean

@@ -39,10 +39,15 @@ class AccountVerificationService(
             }
         }
 
-    fun confirm(id: UUID, code: String): AccountVerification {
+    /**
+     * 코드 확인. 저장된 사용자와 [userId] 가 다르면 없는 건과 같다(VerificationNotFound) — 남의 인증을 확인하거나
+     * 남의 실패 횟수를 써 버려 잠기게 하지 못하게 (P4-1). 판단은 저장소의 원자적 update 안에서 한다.
+     */
+    fun confirm(userId: String, id: UUID, code: String): AccountVerification {
         val now = clock.instant()
         val updated = repository.update(id) { v ->
             when {
+                v.userId != userId -> v   // 남의 건: 아무것도 바꾸지 않는다
                 v.status != VerificationStatus.SENT -> v
                 !now.isBefore(v.expiresAt) -> v.copy(status = VerificationStatus.EXPIRED)
                 hash(v.id, code) == v.codeHash -> v.copy(status = VerificationStatus.VERIFIED, verifiedAt = now)
@@ -55,6 +60,7 @@ class AccountVerificationService(
                 }
             }
         } ?: throw AccountVerificationException.VerificationNotFound(id)
+        if (updated.userId != userId) throw AccountVerificationException.VerificationNotFound(id)
 
         return when (updated.status) {
             VerificationStatus.VERIFIED -> updated
@@ -71,6 +77,7 @@ class AccountVerificationService(
             repository.save(
                 AccountVerification(
                     id = id,
+                    userId = command.userId,
                     bankCode = command.bankCode,
                     accountNo = command.accountNo,
                     holderName = holderName,
@@ -106,6 +113,8 @@ class InMemoryVerificationRepository : VerificationRepository {
     override fun update(id: UUID, change: (AccountVerification) -> AccountVerification): AccountVerification? =
         store.computeIfPresent(id) { _, current -> change(current) }
 
-    override fun existsVerified(bankCode: String, accountNo: String): Boolean =
-        store.values.any { it.bankCode == bankCode && it.accountNo == accountNo && it.status == VerificationStatus.VERIFIED }
+    override fun existsVerified(userId: String, bankCode: String, accountNo: String): Boolean =
+        store.values.any {
+            it.userId == userId && it.bankCode == bankCode && it.accountNo == accountNo && it.status == VerificationStatus.VERIFIED
+        }
 }

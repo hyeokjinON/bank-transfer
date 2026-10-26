@@ -3,6 +3,9 @@ name: 4-2 DLT 뒤(15초쯤) 조회 → RECEIVED
 method: GET
 url: '{{baseUrl}}/api/v1/transfers/{{retryTransferId}}'
 order: 2000
+headers:
+  - key: X-User-Id
+    value: '{{userId}}'
 scripts:
   - type: afterResponse
     language: text/javascript

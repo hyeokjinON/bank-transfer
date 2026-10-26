@@ -6,6 +6,8 @@ order: 2000
 headers:
   - key: Content-Type
     value: application/json
+  - key: X-User-Id
+    value: '{{userId}}'
 body:
   type: json
   content: |-
