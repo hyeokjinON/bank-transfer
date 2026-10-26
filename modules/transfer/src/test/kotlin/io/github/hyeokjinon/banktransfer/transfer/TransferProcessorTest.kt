@@ -12,15 +12,20 @@ import kotlin.test.assertTrue
 
 class TransferProcessorTest {
 
-    /** 조건부 UPDATE 를 흉내 내는 가짜 저장소: 현재 상태가 from 일 때만 바꾼다. */
+    /** 조건부 UPDATE 를 흉내 내는 가짜 저장소: 현재 상태가 from 일 때만 바꾼다. FAILED 는 실제 저장소처럼 fail() 로만 간다. */
     private class FakeStore : TransferStore {
         val transfers = linkedMapOf<UUID, Transfer>()
 
+        /** 실제로 FAILED 로 바꾼 fail() 호출 (id, from, 은행 코드). 실제 저장소는 바로 이때 같은 트랜잭션에서 환불한다. */
+        val failCalls = mutableListOf<Triple<UUID, TransferStatus, String>>()
+
         override fun saveWithEvent(transfer: Transfer, event: TransferEvent): Transfer = transfer.also { transfers[it.id] = it }
         override fun findById(id: UUID) = transfers[id]
-        override fun findByIdempotencyKey(key: String) = transfers.values.firstOrNull { it.idempotencyKey == key }
+        override fun findByIdempotencyKey(userId: String, key: String) =
+            transfers.values.firstOrNull { it.userId == userId && it.idempotencyKey == key }
 
         override fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?): Boolean {
+            require(to != TransferStatus.FAILED) { "FAILED 는 fail() 로만 간다 (환불을 빠뜨리지 않게)" }
             val current = transfers[id] ?: return false
             if (current.status != from) return false
             transfers[id] = current.copy(
@@ -29,6 +34,14 @@ class TransferProcessorTest {
                 bankResponseCode = bankResponseCode,
                 sendingAt = if (to == TransferStatus.SENDING) at else current.sendingAt,
             )
+            return true
+        }
+
+        override fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String): Boolean {
+            val current = transfers[id] ?: return false
+            if (current.status != from) return false
+            transfers[id] = current.copy(status = TransferStatus.FAILED, updatedAt = at, bankResponseCode = bankResponseCode)
+            failCalls += Triple(id, from, bankResponseCode)
             return true
         }
 
@@ -86,6 +99,7 @@ class TransferProcessorTest {
         assertEquals(ProcessResult.FAILED, processor.process(t.id))
         assertEquals(TransferStatus.FAILED, store.transfers.getValue(t.id).status)
         assertEquals("1001", store.transfers.getValue(t.id).bankResponseCode)
+        assertEquals(listOf(Triple(t.id, TransferStatus.SENDING, "1001")), store.failCalls)   // 환불 경로 (저장소가 같은 트랜잭션에서 돌려준다)
     }
 
     @Test
@@ -198,11 +212,26 @@ class TransferProcessorTest {
         val t = received()
         val racing = BankTransferPort { _, _, _, _, _ ->
             store.transition(t.id, TransferStatus.SENDING, TransferStatus.UNKNOWN, now)
-            store.transition(t.id, TransferStatus.UNKNOWN, TransferStatus.FAILED, now, "2001")   // 결과조회가 먼저 FAILED 로 확정
+            store.fail(t.id, TransferStatus.UNKNOWN, now, "2001")   // 결과조회가 먼저 FAILED 로 확정 (환불까지)
             BankTransferOutcome.Completed                                                          // 은행의 늦은 응답은 완료
         }
 
         assertEquals(ProcessResult.CONFLICT, TransferProcessor(store, racing, Clock.fixed(now, ZoneOffset.UTC)).process(t.id))
         assertEquals(TransferStatus.FAILED, store.transfers.getValue(t.id).status)
+        assertEquals(1, store.failCalls.size)   // CONFLICT 는 잔고를 더 건드리지 않는다 — 환불은 결과조회의 한 번뿐
+    }
+
+    @Test
+    fun `정리 작업이 먼저 UNKNOWN 으로 바꾼 뒤 늦게 온 거절도 fail() 로 확정한다 (환불 경로)`() {
+        val t = received()
+        val racing = BankTransferPort { _, _, _, _, _ ->
+            store.transition(t.id, TransferStatus.SENDING, TransferStatus.UNKNOWN, now)   // 30초 넘게 늦은 응답 사이에 정리 작업이 끼어듦
+            BankTransferOutcome.Rejected("1001")
+        }
+
+        assertEquals(ProcessResult.FAILED, TransferProcessor(store, racing, Clock.fixed(now, ZoneOffset.UTC)).process(t.id))
+        assertEquals(TransferStatus.FAILED, store.transfers.getValue(t.id).status)
+        // SENDING 에서 먼저 시도(0건) → UNKNOWN 에서 확정. 환불은 실제로 바뀐 한 번뿐이다
+        assertEquals(listOf(Triple(t.id, TransferStatus.UNKNOWN, "1001")), store.failCalls)
     }
 }

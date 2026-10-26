@@ -13,12 +13,12 @@ import java.util.UUID
  * 출금이체 접수.
  *
  * 1. 형식 검증 (키 · 금액 · 적요)
- * 2. 같은 키가 이미 있으면 내용이 같을 때만 그 건을 돌려준다 (멱등)
- * 3. 받는 계좌가 1원인증을 마쳤는지 확인
- * 4. 이체(RECEIVED)와 TransferRequested 이벤트를 함께 저장 → 은행 처리는 P3-2 컨슈머가 한다
+ * 2. 이 사용자의 같은 키가 이미 있으면 내용이 같을 때만 그 건을 돌려준다 (멱등, 사용자 범위 — P4-1). 차감은 없다
+ * 3. 받는 계좌가 **이 사용자의** 1원인증을 마쳤는지 확인
+ * 4. 이체(RECEIVED) · 잔고 차감 · TransferRequested 이벤트를 함께 저장 → 잔고가 모자라면 422 (출금 자체를 받지 않는다). 은행 처리는 컨슈머가 한다
  *
  * 2번의 "먼저 조회"는 빠른 길일 뿐이다. 동시에 들어온 같은 키는 DB UNIQUE 가 막고,
- * 진 쪽은 [StoreConflict.DuplicateIdempotencyKey] 를 받아 이긴 쪽 건을 돌려준다.
+ * 진 쪽은 [StoreConflict.DuplicateIdempotencyKey] 를 받아 이긴 쪽 건을 돌려준다 (진 쪽의 차감도 함께 롤백된다).
  */
 class TransferService(
     private val store: TransferStore,
@@ -31,13 +31,16 @@ class TransferService(
     fun request(command: RequestTransfer): TransferResult {
         validate(command)
         val hash = requestHash(command)
-        store.findByIdempotencyKey(command.idempotencyKey)?.let { return replay(it, hash) }
-        if (!verifiedAccounts.isVerified(command.bankCode, command.accountNo)) throw TransferException.AccountNotVerified()
+        store.findByIdempotencyKey(command.userId, command.idempotencyKey)?.let { return replay(it, hash) }
+        if (!verifiedAccounts.isVerified(command.userId, command.bankCode, command.accountNo)) {
+            throw TransferException.AccountNotVerified()
+        }
 
         repeat(maxReferenceAttempts) {
             val now = clock.instant()
             val transfer = Transfer(
                 id = UUID.randomUUID(),
+                userId = command.userId,
                 idempotencyKey = command.idempotencyKey,
                 reference = referenceGenerator.next(),
                 requestHash = hash,
@@ -53,8 +56,11 @@ class TransferService(
                 val saved = store.saveWithEvent(transfer, TransferEvent.TransferRequested(transfer.id, now))
                 return TransferResult(saved, created = true)
             } catch (e: StoreConflict.DuplicateIdempotencyKey) {
-                val existing = store.findByIdempotencyKey(command.idempotencyKey) ?: throw e
+                val existing = store.findByIdempotencyKey(command.userId, command.idempotencyKey) ?: throw e
                 return replay(existing, hash)
+            } catch (e: StoreConflict.InsufficientBalance) {
+                // 잔고가 모자라면 출금 자체를 받지 않는다 (출금 기록 · 이벤트도 함께 롤백됐다). 다시 시도해도 같다
+                throw TransferException.InsufficientBalance()
             } catch (conflict: StoreConflict.DuplicateReference) {
                 // 무작위 거래번호가 우연히 겹쳤다. 새 번호로 다시 시도한다.
             }
@@ -62,7 +68,9 @@ class TransferService(
         error("could not issue a unique reference in $maxReferenceAttempts attempts")
     }
 
-    fun get(id: UUID): Transfer = store.findById(id) ?: throw TransferException.TransferNotFound(id)
+    /** 요청자의 출금만 보인다 (P4-1). 남의 출금 · 사용자 없는 P3 시절 출금은 없는 것과 같다 — 존재 여부도 숨긴다. */
+    fun get(userId: String, id: UUID): Transfer =
+        store.findById(id)?.takeIf { it.userId == userId } ?: throw TransferException.TransferNotFound(id)
 
     private fun replay(existing: Transfer, hash: String): TransferResult =
         if (existing.requestHash == hash) TransferResult(existing, created = false)

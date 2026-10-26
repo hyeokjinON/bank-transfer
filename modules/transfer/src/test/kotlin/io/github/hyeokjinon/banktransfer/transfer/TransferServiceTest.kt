@@ -8,11 +8,12 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class TransferServiceTest {
 
-    /** DB 대신 쓰는 가짜 저장소. UNIQUE 위반 상황(동시 요청 · 거래번호 충돌)을 흉내 낼 수 있다. */
+    /** DB 대신 쓰는 가짜 저장소. UNIQUE 위반 상황(동시 요청 · 거래번호 충돌)과 잔고 부족을 흉내 낼 수 있다. */
     private class FakeStore : TransferStore {
         val transfers = linkedMapOf<UUID, Transfer>()
         val events = mutableListOf<TransferEvent>()
@@ -22,6 +23,9 @@ class TransferServiceTest {
 
         /** 남은 횟수만큼 거래번호 충돌을 낸다. */
         var referenceConflicts = 0
+
+        /** 지갑 잔고 (사용자 하나만 본다). 실제 저장소처럼 저장과 함께 빼고, 모자라면 아무것도 남기지 않고 InsufficientBalance. */
+        var balance: Long = Long.MAX_VALUE
 
         override fun saveWithEvent(transfer: Transfer, event: TransferEvent): Transfer {
             raceWinner?.let { winner ->
@@ -33,6 +37,8 @@ class TransferServiceTest {
                 referenceConflicts--
                 throw StoreConflict.DuplicateReference(transfer.reference)
             }
+            if (transfer.amount > balance) throw StoreConflict.InsufficientBalance(transfer.userId!!, transfer.amount)
+            balance -= transfer.amount
             transfers[transfer.id] = transfer
             events += event
             return transfer
@@ -40,11 +46,13 @@ class TransferServiceTest {
 
         override fun findById(id: UUID) = transfers[id]
 
-        override fun findByIdempotencyKey(key: String) = transfers.values.firstOrNull { it.idempotencyKey == key }
+        override fun findByIdempotencyKey(userId: String, key: String) =
+            transfers.values.firstOrNull { it.userId == userId && it.idempotencyKey == key }
 
         override fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?) =
             throw UnsupportedOperationException("접수 테스트에서는 쓰지 않는다")
 
+        override fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String): Boolean = throw UnsupportedOperationException()
         override fun findSendingBefore(cutoff: Instant, limit: Int): List<Transfer> = throw UnsupportedOperationException()
         override fun findUnknownForInquiry(maxAttempts: Int, sendingBefore: Instant, limit: Int): List<Transfer> = throw UnsupportedOperationException()
         override fun recordInquiryAttempt(id: UUID, at: Instant): Boolean = throw UnsupportedOperationException()
@@ -53,18 +61,18 @@ class TransferServiceTest {
     }
 
     private val store = FakeStore()
-    private val verified = mutableSetOf("090" to "1002123456789")
+    private val verified = mutableSetOf(Triple(USER, "090", "1002123456789"))
     private var referenceSeq = 0
     private val clock = Clock.fixed(Instant.parse("2026-10-19T01:00:00Z"), ZoneOffset.UTC)
     private val service = TransferService(
         store = store,
-        verifiedAccounts = { bankCode, accountNo -> (bankCode to accountNo) in verified },
+        verifiedAccounts = { userId, bankCode, accountNo -> Triple(userId, bankCode, accountNo) in verified },
         referenceGenerator = { "T261019" + "%013d".format(++referenceSeq) },
         clock = clock,
     )
 
-    private fun command(key: String = "key-1", amount: Long = 50_000, memo: String = "출금") =
-        RequestTransfer(key, "090", "1002123456789", amount, memo)
+    private fun command(key: String = "key-1", amount: Long = 50_000, memo: String = "출금", userId: String = USER) =
+        RequestTransfer(userId, key, "090", "1002123456789", amount, memo)
 
     @Test
     fun `처음 요청은 RECEIVED 로 접수하고 이벤트를 함께 남긴다`() {
@@ -74,6 +82,7 @@ class TransferServiceTest {
         assertEquals(TransferStatus.RECEIVED, result.transfer.status)
         assertEquals("T2610190000000000001", result.transfer.reference)
         assertEquals(listOf<TransferEvent>(TransferEvent.TransferRequested(result.transfer.id, clock.instant())), store.events)
+        assertEquals(USER, result.transfer.userId)
     }
 
     @Test
@@ -139,11 +148,11 @@ class TransferServiceTest {
     @Test
     fun `은행코드는 숫자 3자리, 계좌번호는 숫자 10~16자리`() {
         val invalid = listOf(
-            RequestTransfer("b1", "09", "1002123456789", 50_000, "출금"),          // 은행코드 2자리
-            RequestTransfer("b2", "0a0", "1002123456789", 50_000, "출금"),        // 은행코드에 문자
-            RequestTransfer("a1", "090", "123456789", 50_000, "출금"),             // 계좌 9자리
-            RequestTransfer("a2", "090", "1|23456789012", 50_000, "출금"),        // 계좌에 구분자
-            RequestTransfer("a3", "090", "12345678901234567", 50_000, "출금"),    // 계좌 17자리
+            RequestTransfer(USER, "b1", "09", "1002123456789", 50_000, "출금"),          // 은행코드 2자리
+            RequestTransfer(USER, "b2", "0a0", "1002123456789", 50_000, "출금"),        // 은행코드에 문자
+            RequestTransfer(USER, "a1", "090", "123456789", 50_000, "출금"),             // 계좌 9자리
+            RequestTransfer(USER, "a2", "090", "1|23456789012", 50_000, "출금"),        // 계좌에 구분자
+            RequestTransfer(USER, "a3", "090", "12345678901234567", 50_000, "출금"),    // 계좌 17자리
         )
         for (command in invalid) {
             assertFailsWith<TransferException.InvalidAccount> { service.request(command) }
@@ -155,7 +164,7 @@ class TransferServiceTest {
     fun `같은 키가 동시에 들어와 저장에서 지면 이긴 쪽 건을 돌려준다`() {
         val now = clock.instant()
         val winner = Transfer(
-            id = UUID.randomUUID(), idempotencyKey = "key-1", reference = "T2610199999999999999",
+            id = UUID.randomUUID(), userId = USER, idempotencyKey = "key-1", reference = "T2610199999999999999",
             requestHash = TransferService.requestHash(command()), bankCode = "090", accountNo = "1002123456789",
             amount = 50_000, memo = "출금", status = TransferStatus.RECEIVED, createdAt = now, updatedAt = now,
         )
@@ -172,7 +181,7 @@ class TransferServiceTest {
     fun `동시 요청에서 졌는데 이긴 쪽의 내용이 다르면 IdempotencyKeyReused`() {
         val now = clock.instant()
         store.raceWinner = Transfer(
-            id = UUID.randomUUID(), idempotencyKey = "key-1", reference = "T2610199999999999999",
+            id = UUID.randomUUID(), userId = USER, idempotencyKey = "key-1", reference = "T2610199999999999999",
             requestHash = TransferService.requestHash(command(amount = 70_000)), bankCode = "090", accountNo = "1002123456789",
             amount = 70_000, memo = "출금", status = TransferStatus.RECEIVED, createdAt = now, updatedAt = now,
         )
@@ -193,6 +202,51 @@ class TransferServiceTest {
 
     @Test
     fun `없는 id 는 TransferNotFound`() {
-        assertFailsWith<TransferException.TransferNotFound> { service.get(UUID.randomUUID()) }
+        assertFailsWith<TransferException.TransferNotFound> { service.get(USER, UUID.randomUUID()) }
+    }
+
+    @Test
+    fun `잔고가 모자라면 InsufficientBalance 이고 출금 기록 · 이벤트를 남기지 않는다`() {
+        store.balance = 49_999
+
+        assertFailsWith<TransferException.InsufficientBalance> { service.request(command(amount = 50_000)) }
+
+        assertTrue(store.transfers.isEmpty())
+        assertTrue(store.events.isEmpty())
+        assertEquals(49_999L, store.balance)
+    }
+
+    @Test
+    fun `멱등키는 사용자 범위 - 다른 사용자의 같은 키 · 같은 내용은 새 출금이다`() {
+        verified += Triple(OTHER, "090", "1002123456789")
+        val mine = service.request(command(userId = USER))
+
+        val theirs = service.request(command(userId = OTHER))
+
+        assertTrue(theirs.created)                              // 남의 출금 정보를 200 으로 돌려받지 않는다
+        assertNotEquals(mine.transfer.id, theirs.transfer.id)
+        assertEquals(OTHER, theirs.transfer.userId)
+    }
+
+    @Test
+    fun `남이 인증한 계좌로는 출금할 수 없다`() {
+        assertFailsWith<TransferException.AccountNotVerified> { service.request(command(userId = OTHER)) }
+        assertTrue(store.transfers.isEmpty())
+    }
+
+    @Test
+    fun `내 출금만 조회된다 - 남의 출금 · 사용자 없는 옛 출금은 TransferNotFound`() {
+        val mine = service.request(command()).transfer
+        val legacy = mine.copy(id = UUID.randomUUID(), userId = null, idempotencyKey = "legacy")   // P3 시절 행
+        store.transfers[legacy.id] = legacy
+
+        assertEquals(mine.id, service.get(USER, mine.id).id)
+        assertFailsWith<TransferException.TransferNotFound> { service.get(OTHER, mine.id) }   // 존재 여부도 숨긴다
+        assertFailsWith<TransferException.TransferNotFound> { service.get(USER, legacy.id) }
+    }
+
+    private companion object {
+        const val USER = "user-1"
+        const val OTHER = "user-2"
     }
 }

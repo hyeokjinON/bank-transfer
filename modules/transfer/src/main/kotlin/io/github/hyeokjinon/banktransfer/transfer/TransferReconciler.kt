@@ -34,6 +34,7 @@ data class ReconcileResult(
  *    결과조회: 처리됨 → COMPLETED(0000), 처리 안 됨 → FAILED(은행 코드), 모름 → 시도 횟수 +1,
  *    연결 없음(Unavailable) → 이번 주기의 남은 조회를 멈추고 횟수를 세지 않는다 (긴 은행 점검에도 한도에 닿지 않게).
  *    [maxInquiries] 번 모르면 더 묻지 않고 [onGiveUp] 으로 알린다 → 일마감 대사(P5)에서 맞춘다.
+ * 실패 확정(② 처리 안 됨, ⓪ 포기)은 [TransferStore.fail] 로 한다 — 상태 전이와 환불이 한 트랜잭션이다 (P4-1).
  * 상태 변경은 모두 조건부라, 그 사이 컨슈머가 먼저 바꿨다면 아무것도 바꾸지 않는다.
  */
 class TransferReconciler(
@@ -71,7 +72,7 @@ class TransferReconciler(
                 InquiryOutcome.Processed ->
                     if (store.transition(transfer.id, UNKNOWN, COMPLETED, now, BANK_OK)) completed++
                 is InquiryOutcome.NotProcessed ->
-                    if (store.transition(transfer.id, UNKNOWN, FAILED, now, outcome.responseCode)) failed++
+                    if (store.fail(transfer.id, UNKNOWN, now, outcome.responseCode)) failed++
                 InquiryOutcome.Unknown ->
                     if (store.recordInquiryAttempt(transfer.id, now)) {
                         val attempts = transfer.inquiryAttempts + 1
@@ -96,7 +97,7 @@ class TransferReconciler(
         for (transfer in store.findRepublishable(now.minus(republishAfter), batchSize)) {
             if (transfer.republishCount < maxRepublish) {
                 if (store.republish(transfer.id, transfer.republishCount, now)) republished++
-            } else if (store.transition(transfer.id, RECEIVED, FAILED, now, NOT_SENT)) {
+            } else if (store.fail(transfer.id, RECEIVED, now, NOT_SENT)) {
                 abandoned++
                 onAbandon(transfer.copy(status = FAILED, bankResponseCode = NOT_SENT, updatedAt = now))
             }

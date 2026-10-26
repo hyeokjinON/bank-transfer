@@ -6,6 +6,7 @@ import io.github.hyeokjinon.banktransfer.transfer.TransferStatus.RECEIVED
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus.SENDING
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus.UNKNOWN
 import java.time.Clock
+import java.time.Instant
 import java.util.UUID
 
 /** 처리 결과. 컨슈머는 [RETRY_LATER] 일 때만 메시지를 다시 처리하게 한다. */
@@ -27,6 +28,7 @@ enum class ProcessResult {
  * 2. 은행 호출은 DB 트랜잭션 밖에서 한다 (응답을 기다리는 동안 커넥션을 붙잡지 않는다).
  * 3. 결과를 기록한다. 결과를 모르면 UNKNOWN — 다시 보내지 않는다 (P3-3 결과조회로 확정).
  *    보내지도 못했으면 RECEIVED 로 되돌려 재시도하게 한다.
+ *    은행이 거절하면 FAILED 와 함께 차감한 금액을 돌려준다 — [TransferStore.fail] 이 한 트랜잭션에서 한다 (P4-1).
  * 은행 응답 뒤 DB 기록이 실패하면 SENDING 으로 남는다 — 정리 작업(TransferReconciler)이 30초 넘게 SENDING 인 건을 UNKNOWN 으로 바꾸고 결과조회로 확정한다.
  */
 class TransferProcessor(
@@ -63,14 +65,25 @@ class TransferProcessor(
      */
     private fun record(id: UUID, to: TransferStatus, bankResponseCode: String?, result: ProcessResult): ProcessResult {
         val now = clock.instant()
-        if (store.transition(id, SENDING, to, now, bankResponseCode)) return result
-        if ((to == COMPLETED || to == FAILED) && store.transition(id, UNKNOWN, to, now, bankResponseCode)) return result
+        if (move(id, SENDING, to, now, bankResponseCode)) return result
+        if ((to == COMPLETED || to == FAILED) && move(id, UNKNOWN, to, now, bankResponseCode)) return result
         if (to == COMPLETED || to == FAILED) {
             val current = store.findById(id)?.status
             if ((current == COMPLETED || current == FAILED) && current != to) return ProcessResult.CONFLICT
         }
         return ProcessResult.ALREADY_HANDLED
     }
+
+    /**
+     * FAILED 는 환불과 한 트랜잭션이어야 하므로 [TransferStore.fail] 로만 간다 (P4-1, transition 은 FAILED 를 거부한다).
+     * 거절(Rejected)은 늘 은행 응답코드가 있다.
+     */
+    private fun move(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?): Boolean =
+        if (to == FAILED) {
+            store.fail(id, from, at, checkNotNull(bankResponseCode) { "FAILED needs a bank response code" })
+        } else {
+            store.transition(id, from, to, at, bankResponseCode)
+        }
 
     private companion object {
         const val BANK_OK = "0000"

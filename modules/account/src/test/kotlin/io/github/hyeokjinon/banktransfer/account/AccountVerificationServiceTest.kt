@@ -42,8 +42,8 @@ class AccountVerificationServiceTest {
         maxAttempts = 3,
     )
 
-    private fun request(name: String = "홍길동", accountNo: String = "1002123456789") =
-        service.request(RequestVerification("090", accountNo, name))
+    private fun request(name: String = "홍길동", accountNo: String = "1002123456789", userId: String = "user-1") =
+        service.request(RequestVerification(userId, "090", accountNo, name))
 
     private fun <T> CompletableFuture<T>.failure(): Throwable =
         assertFailsWith<ExecutionException> { get() }.cause!!
@@ -77,17 +77,17 @@ class AccountVerificationServiceTest {
     fun `맞는 코드를 넣으면 VERIFIED`() {
         val v = request().get()
 
-        assertEquals(VerificationStatus.VERIFIED, service.confirm(v.id, "1234").status)
+        assertEquals(VerificationStatus.VERIFIED, service.confirm("user-1", v.id, "1234").status)
     }
 
     @Test
     fun `틀리면 남은 횟수를 알려 주고, 다 쓰면 잠긴다`() {
         val v = request().get()
 
-        assertEquals(2, assertFailsWith<AccountVerificationException.WrongCode> { service.confirm(v.id, "0000") }.remainingAttempts)
-        assertEquals(1, assertFailsWith<AccountVerificationException.WrongCode> { service.confirm(v.id, "0000") }.remainingAttempts)
-        assertFailsWith<AccountVerificationException.Locked> { service.confirm(v.id, "0000") }
-        assertFailsWith<AccountVerificationException.Locked> { service.confirm(v.id, "1234") }
+        assertEquals(2, assertFailsWith<AccountVerificationException.WrongCode> { service.confirm("user-1", v.id, "0000") }.remainingAttempts)
+        assertEquals(1, assertFailsWith<AccountVerificationException.WrongCode> { service.confirm("user-1", v.id, "0000") }.remainingAttempts)
+        assertFailsWith<AccountVerificationException.Locked> { service.confirm("user-1", v.id, "0000") }
+        assertFailsWith<AccountVerificationException.Locked> { service.confirm("user-1", v.id, "1234") }
     }
 
     @Test
@@ -95,23 +95,42 @@ class AccountVerificationServiceTest {
         val v = request().get()
         clock.now = clock.now.plus(Duration.ofMinutes(5))
 
-        assertFailsWith<AccountVerificationException.Expired> { service.confirm(v.id, "1234") }
+        assertFailsWith<AccountVerificationException.Expired> { service.confirm("user-1", v.id, "1234") }
     }
 
     @Test
     fun `없는 인증 건은 VerificationNotFound`() {
-        assertFailsWith<AccountVerificationException.VerificationNotFound> { service.confirm(UUID.randomUUID(), "1234") }
+        assertFailsWith<AccountVerificationException.VerificationNotFound> { service.confirm("user-1", UUID.randomUUID(), "1234") }
     }
 
     @Test
     fun `인증을 마친 계좌만 existsVerified 가 true`() {
         val v = request().get()
-        assertEquals(false, repository.existsVerified("090", "1002123456789"))
+        assertEquals(false, repository.existsVerified("user-1", "090", "1002123456789"))
 
-        service.confirm(v.id, "1234")
+        service.confirm("user-1", v.id, "1234")
 
-        assertEquals(true, repository.existsVerified("090", "1002123456789"))
-        assertEquals(false, repository.existsVerified("090", "3333012345678"))
-        assertEquals(false, repository.existsVerified("004", "1002123456789"))
+        assertEquals(true, repository.existsVerified("user-1", "090", "1002123456789"))
+        assertEquals(false, repository.existsVerified("user-1", "090", "3333012345678"))
+        assertEquals(false, repository.existsVerified("user-1", "004", "1002123456789"))
+        assertEquals(false, repository.existsVerified("user-2", "090", "1002123456789"))   // 남이 인증한 계좌
+    }
+
+    @Test
+    fun `인증 요청에 요청한 사용자를 남긴다`() {
+        assertEquals("user-1", request().get().userId)
+    }
+
+    @Test
+    fun `남의 인증 건은 확인할 수 없다 - VerificationNotFound 이고 실패 횟수도 늘지 않는다`() {
+        val v = request(userId = "user-1").get()
+
+        assertFailsWith<AccountVerificationException.VerificationNotFound> { service.confirm("user-2", v.id, "1234") }
+        assertFailsWith<AccountVerificationException.VerificationNotFound> { service.confirm("user-2", v.id, "0000") }
+
+        val after = repository.findById(v.id)!!
+        assertEquals(VerificationStatus.SENT, after.status)
+        assertEquals(0, after.failedAttempts)                                     // 남이 시도 횟수를 써 버려 잠기게 할 수 없다
+        assertEquals(VerificationStatus.VERIFIED, service.confirm("user-1", v.id, "1234").status)
     }
 }

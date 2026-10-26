@@ -22,15 +22,28 @@ class TransferReconcilerTest {
 
         override fun saveWithEvent(transfer: Transfer, event: TransferEvent): Transfer = transfer.also { transfers[it.id] = it }
         override fun findById(id: UUID) = transfers[id]
-        override fun findByIdempotencyKey(key: String) = transfers.values.firstOrNull { it.idempotencyKey == key }
+        override fun findByIdempotencyKey(userId: String, key: String) =
+            transfers.values.firstOrNull { it.userId == userId && it.idempotencyKey == key }
 
         override fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?): Boolean {
+            require(to != FAILED) { "FAILED 는 fail() 로만 간다 (환불을 빠뜨리지 않게)" }
             val current = transfers[id] ?: return false
             if (current.status != from) return false
             transfers[id] = current.copy(
                 status = to, updatedAt = at, bankResponseCode = bankResponseCode,
                 sendingAt = if (to == SENDING) at else current.sendingAt,
             )
+            return true
+        }
+
+        /** 실제로 FAILED 로 바꾼 fail() 호출 (id, from, 은행 코드). 실제 저장소는 바로 이때 같은 트랜잭션에서 환불한다. */
+        val failCalls = mutableListOf<Triple<UUID, TransferStatus, String>>()
+
+        override fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String): Boolean {
+            val current = transfers[id] ?: return false
+            if (current.status != from) return false
+            transfers[id] = current.copy(status = FAILED, updatedAt = at, bankResponseCode = bankResponseCode)
+            failCalls += Triple(id, from, bankResponseCode)
             return true
         }
 
@@ -143,6 +156,7 @@ class TransferReconcilerTest {
         assertEquals(1, result.failed)
         assertEquals(FAILED, store.transfers.getValue(t.id).status)
         assertEquals("2001", store.transfers.getValue(t.id).bankResponseCode)
+        assertEquals(listOf(Triple(t.id, UNKNOWN, "2001")), store.failCalls)   // 환불 경로
     }
 
     @Test
@@ -243,6 +257,7 @@ class TransferReconcilerTest {
         assertEquals(0, result.republished)
         assertEquals(FAILED, store.transfers.getValue(t.id).status)
         assertEquals("E001", store.transfers.getValue(t.id).bankResponseCode)   // 은행에 간 적 없음 — 사용자가 다시 요청하면 된다
+        assertEquals(listOf(Triple(t.id, RECEIVED, "E001")), store.failCalls)   // 은행에 간 적 없음 → 차감액을 돌려준다
         assertEquals(listOf(t.id), abandonedTransfers.map { it.id })
         assertTrue(store.events.isEmpty())
     }

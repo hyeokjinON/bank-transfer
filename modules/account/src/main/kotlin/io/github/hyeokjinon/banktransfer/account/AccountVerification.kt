@@ -12,6 +12,8 @@ enum class VerificationStatus { SENT, VERIFIED, EXPIRED, LOCKED }
  */
 data class AccountVerification(
     val id: UUID,
+    /** 인증을 요청한 사용자 (P4-1). 출금은 내가 인증한 계좌로만, 확인도 본인만 한다. P3 시절 행은 null. */
+    val userId: String? = null,
     val bankCode: String,
     val accountNo: String,
     val holderName: String,
@@ -22,7 +24,7 @@ data class AccountVerification(
     val verifiedAt: Instant? = null,
 )
 
-data class RequestVerification(val bankCode: String, val accountNo: String, val holderName: String)
+data class RequestVerification(val userId: String, val bankCode: String, val accountNo: String, val holderName: String)
 
 /**
  * 은행 연동 포트. account 모듈은 Netty·전문을 모른다.
@@ -43,8 +45,8 @@ interface VerificationRepository {
     /** 원자적으로 바꾼다. 같은 건에 확인 요청이 동시에 와도 시도 횟수가 꼬이지 않게 하려는 것이다. */
     fun update(id: UUID, change: (AccountVerification) -> AccountVerification): AccountVerification?
 
-    /** 이 계좌로 끝난 인증(VERIFIED)이 있는가. 출금 받는 계좌 검증에 쓴다. */
-    fun existsVerified(bankCode: String, accountNo: String): Boolean
+    /** 이 사용자가 이 계좌로 끝낸 인증(VERIFIED)이 있는가. 출금 받는 계좌 검증에 쓴다 (P4-1: 사용자 범위). */
+    fun existsVerified(userId: String, bankCode: String, accountNo: String): Boolean
 }
 
 fun interface CodeGenerator {
