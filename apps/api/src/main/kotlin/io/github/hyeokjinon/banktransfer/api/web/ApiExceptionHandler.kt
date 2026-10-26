@@ -62,6 +62,7 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
         BankUnavailableException::class,
         BankRejectedException::class,
         TransferException::class,
+        UserIdRequiredException::class,
     )
     fun handle(e: Exception): ProblemDetail {
         val cause = if (e is CompletionException && e.cause != null) e.cause!! else e
@@ -75,12 +76,14 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
             is BankTimeoutException -> HttpStatus.GATEWAY_TIMEOUT to "BANK_TIMEOUT"
             is BankUnavailableException -> HttpStatus.SERVICE_UNAVAILABLE to "BANK_UNAVAILABLE"
             is BankRejectedException -> HttpStatus.BAD_GATEWAY to "BANK_REJECTED"
+            is UserIdRequiredException -> HttpStatus.BAD_REQUEST to "USER_ID_REQUIRED"
             is TransferException.IdempotencyKeyRequired -> HttpStatus.BAD_REQUEST to "IDEMPOTENCY_KEY_REQUIRED"
             is TransferException.InvalidAmount -> HttpStatus.BAD_REQUEST to "INVALID_AMOUNT"
             is TransferException.InvalidMemo -> HttpStatus.BAD_REQUEST to "INVALID_MEMO"
             // 컨트롤러의 @Pattern 이 먼저 거르지만, 도메인을 직접 거치는 경로를 위해 같은 400 으로 매핑한다.
             is TransferException.InvalidAccount -> HttpStatus.BAD_REQUEST to "INVALID_ACCOUNT"
             is TransferException.AccountNotVerified -> HttpStatus.UNPROCESSABLE_CONTENT to "ACCOUNT_NOT_VERIFIED"
+            is TransferException.InsufficientBalance -> HttpStatus.UNPROCESSABLE_CONTENT to "INSUFFICIENT_BALANCE"
             is TransferException.IdempotencyKeyReused -> HttpStatus.UNPROCESSABLE_CONTENT to "IDEMPOTENCY_KEY_REUSED"
             is TransferException.TransferNotFound -> HttpStatus.NOT_FOUND to "TRANSFER_NOT_FOUND"
             is TransferException.IllegalTransition -> HttpStatus.CONFLICT to "ILLEGAL_TRANSITION"

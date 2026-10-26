@@ -27,6 +27,7 @@ internal fun Instant.toDbPrecision(): Instant = truncatedTo(ChronoUnit.MICROS)
 @Table(name = "account_verification")
 class AccountVerificationEntity(
     @Id @Column(columnDefinition = "char(36)") var id: String = "",
+    var userId: String? = null,
     var bankCode: String = "",
     var accountNo: String = "",
     var holderName: String = "",
@@ -38,7 +39,7 @@ class AccountVerificationEntity(
     var createdAt: Instant = Instant.EPOCH,
 ) {
     fun toDomain() = AccountVerification(
-        id = UUID.fromString(id), bankCode = bankCode, accountNo = accountNo, holderName = holderName,
+        id = UUID.fromString(id), userId = userId, bankCode = bankCode, accountNo = accountNo, holderName = holderName,
         codeHash = codeHash, status = status, failedAttempts = failedAttempts, expiresAt = expiresAt, verifiedAt = verifiedAt,
     )
 
@@ -52,7 +53,7 @@ class AccountVerificationEntity(
 
     companion object {
         fun from(v: AccountVerification, createdAt: Instant) = AccountVerificationEntity(
-            id = v.id.toString(), bankCode = v.bankCode, accountNo = v.accountNo, holderName = v.holderName,
+            id = v.id.toString(), userId = v.userId, bankCode = v.bankCode, accountNo = v.accountNo, holderName = v.holderName,
             codeHash = v.codeHash, status = v.status, failedAttempts = v.failedAttempts,
             expiresAt = v.expiresAt.toDbPrecision(), verifiedAt = v.verifiedAt?.toDbPrecision(),
             createdAt = createdAt.toDbPrecision(),
@@ -67,7 +68,10 @@ interface AccountVerificationJpaRepository : JpaRepository<AccountVerificationEn
     @Query("select v from AccountVerificationEntity v where v.id = :id")
     fun findForUpdate(@Param("id") id: String): AccountVerificationEntity?
 
-    fun existsByBankCodeAndAccountNoAndStatus(bankCode: String, accountNo: String, status: VerificationStatus): Boolean
+    /** 사용자 범위 (P4-1). idx_verification_user_account (user_id, bank_code, account_no, status) 를 탄다. */
+    fun existsByUserIdAndBankCodeAndAccountNoAndStatus(
+        userId: String, bankCode: String, accountNo: String, status: VerificationStatus,
+    ): Boolean
 }
 
 /**
@@ -92,6 +96,6 @@ class JpaVerificationRepository(
             entity.toDomain()   // 커밋 때 변경 감지(dirty checking)로 UPDATE 된다
         }
 
-    override fun existsVerified(bankCode: String, accountNo: String): Boolean =
-        jpa.existsByBankCodeAndAccountNoAndStatus(bankCode, accountNo, VerificationStatus.VERIFIED)
+    override fun existsVerified(userId: String, bankCode: String, accountNo: String): Boolean =
+        jpa.existsByUserIdAndBankCodeAndAccountNoAndStatus(userId, bankCode, accountNo, VerificationStatus.VERIFIED)
 }

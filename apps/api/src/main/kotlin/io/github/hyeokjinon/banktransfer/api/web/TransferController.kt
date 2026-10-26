@@ -55,14 +55,16 @@ class TransferController(private val service: TransferService) {
      * 접수만 하고 바로 돌려준다(202 Accepted). 은행 처리는 P3-2 의 Kafka 컨슈머가 한다.
      * 같은 Idempotency-Key 로 같은 내용을 다시 보내면 새로 만들지 않고 기존 건을 200 으로 돌려준다.
      * 헤더가 없으면 빈 문자열로 넘겨 도메인이 IDEMPOTENCY_KEY_REQUIRED 로 거절하게 한다 (규칙은 한 곳에).
+     * 출금은 요청자(X-User-Id)의 지갑에서 빠진다. 잔고가 모자라면 422 INSUFFICIENT_BALANCE (P4-1).
      */
     @PostMapping
     fun request(
+        user: RequestUser,
         @RequestHeader("Idempotency-Key", required = false) idempotencyKey: String?,
         @Valid @RequestBody body: TransferRequestBody,
     ): ResponseEntity<TransferResponse> {
         val result = service.request(
-            RequestTransfer(idempotencyKey.orEmpty(), body.bankCode, body.accountNo, body.amount, body.memo),
+            RequestTransfer(user.id, idempotencyKey.orEmpty(), body.bankCode, body.accountNo, body.amount, body.memo),
         )
         val response = TransferResponse.from(result.transfer)
         return if (result.created) {
@@ -72,6 +74,7 @@ class TransferController(private val service: TransferService) {
         }
     }
 
+    /** 요청자의 출금이 아니면 404 TRANSFER_NOT_FOUND — 존재 여부도 숨긴다 (P4-1). */
     @GetMapping("/{id}")
-    fun get(@PathVariable id: UUID): TransferResponse = TransferResponse.from(service.get(id))
+    fun get(user: RequestUser, @PathVariable id: UUID): TransferResponse = TransferResponse.from(service.get(user.id, id))
 }

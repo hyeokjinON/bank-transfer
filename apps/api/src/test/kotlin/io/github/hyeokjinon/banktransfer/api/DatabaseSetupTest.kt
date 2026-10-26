@@ -50,4 +50,36 @@ class DatabaseSetupTest : ApiIntegrationTest() {
         assertEquals("0", columns[0]["column_default"].toString())
         assertEquals("YES", columns[1]["is_nullable"])
     }
+
+    @Test
+    fun `V3 가 지갑 · 원장 테이블과 사용자 범위 멱등 UNIQUE 를 만들었다 (user_id 는 모두 ascii_bin)`() {
+        val tables = jdbc.queryForList(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() " +
+                "AND table_name IN ('wallet', 'wallet_ledger') ORDER BY table_name",
+            String::class.java,
+        )
+        assertEquals(listOf("wallet", "wallet_ledger"), tables)
+
+        val uniqueColumns = jdbc.queryForList(
+            "SELECT column_name FROM information_schema.statistics WHERE table_schema = DATABASE() " +
+                "AND table_name = 'transfer' AND index_name = 'uk_transfer_user_idempotency' ORDER BY seq_in_index",
+            String::class.java,
+        )
+        assertEquals(listOf("user_id", "idempotency_key"), uniqueColumns)
+        val oldUnique = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() " +
+                "AND table_name = 'transfer' AND index_name = 'uk_transfer_idempotency'",
+            Int::class.java,
+        )
+        assertEquals(0, oldUnique)   // 전역 UNIQUE 는 없어졌다 — 남의 키와 겹쳐도 된다
+
+        for (table in listOf("wallet", "wallet_ledger", "transfer", "account_verification")) {
+            val collation = jdbc.queryForObject(
+                "SELECT collation_name FROM information_schema.columns " +
+                    "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = 'user_id'",
+                String::class.java, table,
+            )
+            assertEquals("ascii_bin", collation, "$table.user_id")
+        }
+    }
 }

@@ -41,6 +41,7 @@ class RetryTopicFlowTest : ApiIntegrationTest() {
     @Autowired private lateinit var consumerFactory: ConsumerFactory<String, String>
 
     private val references = RandomReferenceGenerator()
+    private val user by lazy { fundedUser() }
 
     /**
      * 접수 API 를 거치지 않고 RECEIVED 이체 + 아웃박스 행을 만든다 (Kafka 경로만 본다).
@@ -50,7 +51,7 @@ class RetryTopicFlowTest : ApiIntegrationTest() {
     private fun receivedTransfer(): Transfer {
         val now = Instant.now()
         val t = Transfer(
-            id = UUID.randomUUID(), idempotencyKey = UUID.randomUUID().toString(), reference = references.next(),
+            id = UUID.randomUUID(), userId = user, idempotencyKey = UUID.randomUUID().toString(), reference = references.next(),
             requestHash = "h".repeat(64), bankCode = "090", accountNo = UNREGISTERED_ACCOUNT, amount = 1_000, memo = "retry",
             status = TransferStatus.RECEIVED, createdAt = now, updatedAt = now,
         )

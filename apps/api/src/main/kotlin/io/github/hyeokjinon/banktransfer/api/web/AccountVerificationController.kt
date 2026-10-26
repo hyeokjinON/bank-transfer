@@ -51,14 +51,15 @@ class AccountVerificationController(private val service: AccountVerificationServ
 
     /**
      * CompletableFuture 를 돌려주면 Spring MVC 가 서블릿 비동기 모드로 처리한다.
-     * 은행 응답을 기다리는 동안 Tomcat 요청 스레드는 풀로 돌아간다.
+     * 은행 응답을 기다리는 동안 Tomcat 요청 스레드는 풀로 돌아간다. 인증 건에는 요청자(X-User-Id)를 남긴다 (P4-1).
      */
     @PostMapping
-    fun request(@Valid @RequestBody body: VerificationRequest): CompletableFuture<ResponseEntity<VerificationResponse>> =
-        service.request(RequestVerification(body.bankCode, body.accountNo, body.holderName))
+    fun request(user: RequestUser, @Valid @RequestBody body: VerificationRequest): CompletableFuture<ResponseEntity<VerificationResponse>> =
+        service.request(RequestVerification(user.id, body.bankCode, body.accountNo, body.holderName))
             .thenApply { ResponseEntity.status(HttpStatus.CREATED).body(VerificationResponse.from(it)) }
 
+    /** 남의 인증 건이면 404 VERIFICATION_NOT_FOUND (실패 횟수도 늘지 않는다, P4-1). */
     @PostMapping("/{id}/confirm")
-    fun confirm(@PathVariable id: UUID, @Valid @RequestBody body: ConfirmRequest): VerificationResponse =
-        VerificationResponse.from(service.confirm(id, body.code))
+    fun confirm(user: RequestUser, @PathVariable id: UUID, @Valid @RequestBody body: ConfirmRequest): VerificationResponse =
+        VerificationResponse.from(service.confirm(user.id, id, body.code))
 }
