@@ -1,6 +1,6 @@
 # ADR-0008 원화 잔고는 접수 트랜잭션에서 조건부 UPDATE 로 차감하고, 실패 확정 시 같은 트랜잭션에서 환불한다 (원장은 append-only)
 
-- 상태: 제안 (2026-10-26)
+- 상태: 채택 (2026-10-26, PR #11 머지)
 - 단계: P4-1 · 설계: [P4-1 설계](../superpowers/specs/2026-10-26-p4-1-wallet-balance-design.md) · [ADR-0004](0004-idempotency-key-and-transactional-outbox.md) (멱등키 범위를 바꾼다) · [ADR-0007](0007-retry-topic-and-bounded-republish.md) (E001 포기도 환불) · [database.md](../database.md) §4-4 · §4-5 · §6
 
 ## 맥락

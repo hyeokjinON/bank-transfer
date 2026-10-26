@@ -12,7 +12,7 @@
 | P3-2 처리 | ✅ 완료 (2026-10-21, [#5](https://github.com/hyeokjinON/bank-transfer/pull/5)) | ADR-0005 채택, 테스트 107개. CI `build` · `infra-smoke` 통과. 손 확인 절차: Postman 2-1 → 2-9 `COMPLETED`, kafka-ui 로 메시지 · 컨슈머 Lag (OPERATION.md Kafka 절) |
 | P3-3a 결과조회 · 정리 작업 | ✅ 완료 (2026-10-21, [#7](https://github.com/hyeokjinON/bank-transfer/pull/7)) | ADR-0006 채택, 테스트 135개. CI `build` · `infra-smoke` 통과. 손 확인: Postman 3-1 → 3-5 로 무응답 계좌 출금 5건 모두 `COMPLETED 0000`, `sending_at` 뒤 32~38초에 확정(30초 유예 + 주기), `inquiry_attempts` 0 |
 | P3-3b 재시도 | ✅ 완료 (2026-10-26, [#9](https://github.com/hyeokjinON/bank-transfer/pull/9)) | ADR-0007 채택, 테스트 161개. CI `build` · `infra-smoke` 통과. 재시도 토픽 · DLT · 제한 재발행 · `FAILED E001`. 손 확인: 은행을 내린 채 접수한 2건이 재시도 토픽 경로로 은행 복구 뒤 `COMPLETED 0000` (재발행 0회, `sending_at` 은 접수 약 95초 뒤 = 5s·30s·60s 마지막 재시도). 재발행 경로(DLT → 재발행 → `COMPLETED` / 3회 뒤 `E001`)는 자동 흐름 테스트로만 증명 — 손으로 보려면 실행 구성 `4. API (재발행 손 확인)` 으로 은행을 15초 넘게 내려 둔다 |
-| P4-1 원화 잔고 | 🟡 PR [#11](https://github.com/hyeokjinON/bank-transfer/pull/11) 리뷰 중 (손 확인 대기) | ADR-0008 제안, 테스트 206개. 접수 차감 · 실패 환불 · 사용자 범위. 손 확인(Postman 5 폴더, `http/transfer.http` 9절)은 머지 전에 사람이 한다 |
+| P4-1 원화 잔고 | ✅ 완료 (2026-10-26, [#11](https://github.com/hyeokjinON/bank-transfer/pull/11)) | ADR-0008 채택, 테스트 206개. CI `build` · `infra-smoke` 통과. 손 확인: Postman 5 폴더로 `user-p41` 출금 19건(COMPLETED 6 · 은행 거절 FAILED 1001 13) — 환불 13건이 거절 건수와 정확히 같고, 잔고 1,500,000 = 원장 합 |
 | P4-2 ~ P9 | ⬜ 예정 | README 로드맵 |
 
 ## 2. P3 설계 (합의된 것)
@@ -49,9 +49,8 @@ P3-1 (PR #3) · P3-2 (PR #5) · P3-3a (PR #7) · P3-3b (PR #9) 모두 머지됐�
 | 근거 | [ADR-0008](docs/adr/0008-wallet-debit-on-intake-refund-on-failure.md) (제안 — 머지 때 채택으로) |
 
 ## 3. 다음 할 일 (순서대로)
-1. **P4-1 손 확인** (머지 전): Postman `5. 원화 잔고` 폴더 또는 `http/transfer.http` 9절 — 충전 → 출금 → 잔고 · 보류 → 잔고보다 큰 출금 422 → 모르는 계좌 출금 → `FAILED` 뒤 잔고 복원. 모르는 계좌는 1원인증 API 로 `VERIFIED` 를 만들 수 없어 MySQL 에 인증 행을 넣어 둔다 (SQL 은 `http/transfer.http` 9절 머리말). 끝나면 ADR-0008 을 채택으로 바꾸고 이 표를 ✅ 로.
-2. velog `#6` (P3-3b: 재시도 토픽 · 은행 시도 흔적 기준 재발행 · 오프셋 커밋 확인), `#7` (P4-1: 조건부 UPDATE 한 문장으로 잔고 음수 막기 · 실패 확정 경로 단일화). `#2` ~ `#5` 는 비공개로 올라가 있다.
-3. P4-2 설계 → 계획: 같은 차감을 비관적 락 · 낙관적 락 · Redis 분산락으로 바꿔 끼우고 k6 로 비교한다. 이 계획의 `WalletConcurrencyTest` · `concurrently` 를 그대로 쓴다. **Hikari 풀 크기를 명시적으로 정한다** — 지금은 기본값 10 이라 100스레드 테스트가 실제로는 10-way DB 경합이다 (ADR-0008). 아래 "범위 밖으로 남긴 것" 중 P4 와 겹치는 것(컨슈머 블로킹 대기, 정리 작업 한 주기 시간)을 같이 본다.
+1. velog `#7` (P4-1: 조건부 UPDATE 한 문장으로 잔고 음수 막기 · 실패 확정 경로 단일화 · 뮤테이션 확인). `#2` ~ `#6` 은 비공개로 올라가 있다.
+2. P4-2 설계 → 계획: 같은 차감을 비관적 락 · 낙관적 락 · Redis 분산락으로 바꿔 끼우고 k6 로 비교한다. 이 계획의 `WalletConcurrencyTest` · `concurrently` 를 그대로 쓴다. **Hikari 풀 크기를 명시적으로 정한다** — 지금은 기본값 10 이라 100스레드 테스트가 실제로는 10-way DB 경합이다 (ADR-0008). 아래 "범위 밖으로 남긴 것" 중 P4 와 겹치는 것(컨슈머 블로킹 대기, 정리 작업 한 주기 시간)을 같이 본다.
 
 ### P4-1 범위 밖으로 남긴 것
 - 인증: `X-User-Id` 는 값을 그대로 믿는다 ("원래는 인증 토큰에서 꺼내는 값").
