@@ -1,35 +1,34 @@
 package io.github.hyeokjinon.banktransfer.api
 
-import io.github.hyeokjinon.banktransfer.account.AccountVerification
-import io.github.hyeokjinon.banktransfer.account.VerificationRepository
-import io.github.hyeokjinon.banktransfer.account.VerificationStatus
 import io.github.hyeokjinon.banktransfer.api.support.ApiIntegrationTest
+import io.github.hyeokjinon.banktransfer.api.web.USER_ID_HEADER
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
-import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 
 class TransferApiTest : ApiIntegrationTest() {
 
-    @Autowired private lateinit var verifications: VerificationRepository
     @Autowired private lateinit var jdbc: JdbcTemplate
 
     private val mapType = object : ParameterizedTypeReference<Map<String, Any?>>() {}
 
     private data class Response(val status: Int, val body: Map<String, Any?>, val location: String?)
 
-    private fun post(key: String?, body: Map<String, Any>): Response =
+    /** 이 테스트의 사용자 (테스트마다 새로, 1천만 원 충전 — 출금은 이 지갑에서 빠진다, P4-1). */
+    private val user by lazy { fundedUser() }
+
+    private fun post(key: String?, body: Map<String, Any>, userId: String = user): Response =
         client.post().uri("/api/v1/transfers")
             .contentType(MediaType.APPLICATION_JSON)
+            .header(USER_ID_HEADER, userId)
             .apply { if (key != null) header("Idempotency-Key", key) }
             .body(body)
             .exchange { _, r -> Response(r.statusCode.value(), r.bodyTo(mapType) ?: emptyMap(), r.headers.location?.toString()) }
@@ -38,26 +37,21 @@ class TransferApiTest : ApiIntegrationTest() {
     private fun postRaw(key: String, json: String): Response =
         client.post().uri("/api/v1/transfers")
             .contentType(MediaType.APPLICATION_JSON)
+            .header(USER_ID_HEADER, user)
             .header("Idempotency-Key", key)
             .body(json)
             .exchange { _, r -> Response(r.statusCode.value(), r.bodyTo(mapType) ?: emptyMap(), r.headers.location?.toString()) }
 
-    private fun get(id: Any?): Response =
+    private fun get(id: Any?, userId: String = user): Response =
         client.get().uri("/api/v1/transfers/$id")
+            .header(USER_ID_HEADER, userId)
             .exchange { _, r -> Response(r.statusCode.value(), r.bodyTo(mapType) ?: emptyMap(), null) }
 
-    /** 1원인증을 마친 계좌를 DB 에 만든다. 테스트끼리 DB 를 공유하므로 계좌번호는 매번 새로. */
-    private fun verifiedAccount(): String {
-        val accountNo = "55" + Random.nextLong(10_000_000_000, 99_999_999_999)
-        verifications.save(
-            AccountVerification(
-                id = UUID.randomUUID(), bankCode = "090", accountNo = accountNo, holderName = "홍길동",
-                codeHash = "0".repeat(64), status = VerificationStatus.VERIFIED, failedAttempts = 0,
-                expiresAt = Instant.now(), verifiedAt = Instant.now(),
-            ),
-        )
-        return accountNo
-    }
+    /**
+     * [userId] 가 1원인증을 마친 계좌. 모의 은행에 없는 번호라, 여기서 남긴 RECEIVED 를 다른 테스트의 발행 · 정리 작업이 처리해도
+     * 1001 거절 → FAILED → 환불로 끝난다 (공용 계좌에 입금이 생기지 않는다).
+     */
+    private fun verifiedAccount(userId: String = user): String = verifiedBy(userId, unregisteredAccount())
 
     private fun body(accountNo: String, amount: Long = 50_000) =
         mapOf("bankCode" to "090", "accountNo" to accountNo, "amount" to amount, "memo" to "출금")
@@ -192,5 +186,54 @@ class TransferApiTest : ApiIntegrationTest() {
                 Int::class.java, key,
             ),
         )
+    }
+
+    @Test
+    fun `잔고보다 큰 출금은 422 INSUFFICIENT_BALANCE 이고 출금도 차감도 남지 않는다`() {
+        val poor = fundedUser(49_999)
+        val key = UUID.randomUUID().toString()
+
+        val response = post(key, body(verifiedAccount(poor)), userId = poor)
+
+        assertEquals(422, response.status)
+        assertEquals("INSUFFICIENT_BALANCE", response.body["code"])
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM transfer WHERE user_id = ? AND idempotency_key = ?", Int::class.java, poor, key))
+        assertEquals(49_999L, wallets.balanceOf(poor))
+    }
+
+    @Test
+    fun `남이 인증한 계좌로는 출금할 수 없다 - 422 ACCOUNT_NOT_VERIFIED`() {
+        val othersAccount = verifiedAccount(newUserId())
+
+        val response = post(UUID.randomUUID().toString(), body(othersAccount))
+
+        assertEquals(422, response.status)
+        assertEquals("ACCOUNT_NOT_VERIFIED", response.body["code"])
+    }
+
+    @Test
+    fun `남의 출금을 조회하면 404 TRANSFER_NOT_FOUND - 존재 여부도 숨긴다`() {
+        val created = post(UUID.randomUUID().toString(), body(verifiedAccount()))
+
+        val response = get(created.body["id"], userId = newUserId())
+
+        assertEquals(404, response.status)
+        assertEquals("TRANSFER_NOT_FOUND", response.body["code"])
+    }
+
+    @Test
+    fun `같은 키 · 같은 내용이라도 다른 사용자면 각자 새 출금이다 (202 두 번)`() {
+        val key = UUID.randomUUID().toString()
+        val other = fundedUser()
+        val account = unregisteredAccount()
+        verifiedBy(user, account)
+        verifiedBy(other, account)
+
+        val mine = post(key, body(account))
+        val theirs = post(key, body(account), userId = other)
+
+        assertEquals(202, mine.status)
+        assertEquals(202, theirs.status)          // 전역 UNIQUE 였다면 남의 출금을 200 으로 돌려받았다
+        assertNotEquals(mine.body["id"], theirs.body["id"])
     }
 }

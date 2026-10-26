@@ -3,6 +3,9 @@ name: 2-8 없는 id 조회 → 404 TRANSFER_NOT_FOUND
 method: GET
 url: '{{baseUrl}}/api/v1/transfers/00000000-0000-0000-0000-000000000000'
 order: 8000
+headers:
+  - key: X-User-Id
+    value: '{{userId}}'
 scripts:
   - type: afterResponse
     language: text/javascript

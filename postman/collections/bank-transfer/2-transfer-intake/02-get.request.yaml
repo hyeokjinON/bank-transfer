@@ -3,6 +3,9 @@ name: 2-2 조회 → 200 같은 건 (API 재시작 후에도)
 method: GET
 url: '{{baseUrl}}/api/v1/transfers/{{transferId}}'
 order: 2000
+headers:
+  - key: X-User-Id
+    value: '{{userId}}'
 scripts:
   - type: afterResponse
     language: text/javascript

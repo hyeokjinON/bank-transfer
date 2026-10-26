@@ -1,5 +1,6 @@
 ### IntelliJ HTTP Client 로 1원 계좌인증 흐름 확인하기
 ### 먼저 실행 구성 "0. Mock Bank + API" 를 실행해 두 서버를 띄운다.
+### 모든 요청에 X-User-Id 를 붙인다 (P4-1 — 원래는 인증 토큰에서 꺼내는 값). 인증한 계좌는 이 사용자의 출금에만 쓸 수 있고, 확인도 같은 사용자만 된다.
 
 ### 0) 서버 상태
 GET http://localhost:8080/actuator/health
@@ -7,6 +8,7 @@ GET http://localhost:8080/actuator/health
 ### 1) 1원 인증 요청 → 응답의 id 를 자동 저장
 POST http://localhost:8080/api/v1/account-verifications
 Content-Type: application/json
+X-User-Id: user-1
 
 {
   "bankCode": "090",
@@ -23,6 +25,7 @@ Content-Type: application/json
 ### "1. Mock Bank" 콘솔의  [통장] 1002123456789 입금 1원 적요='BT6542'  에서 숫자 4자리를 아래 code 에 넣는다.
 POST http://localhost:8080/api/v1/account-verifications/{{verificationId}}/confirm
 Content-Type: application/json
+X-User-Id: user-1
 
 {
   "code": "0000"
@@ -31,6 +34,7 @@ Content-Type: application/json
 ### 3) 예금주명 불일치 → 422 HOLDER_NAME_MISMATCH
 POST http://localhost:8080/api/v1/account-verifications
 Content-Type: application/json
+X-User-Id: user-1
 
 {
   "bankCode": "090",
@@ -41,6 +45,7 @@ Content-Type: application/json
 ### 4) 없는 계좌 → 404 ACCOUNT_NOT_FOUND
 POST http://localhost:8080/api/v1/account-verifications
 Content-Type: application/json
+X-User-Id: user-1
 
 {
   "bankCode": "090",
@@ -51,6 +56,7 @@ Content-Type: application/json
 ### 5) 형식 오류 → 400
 POST http://localhost:8080/api/v1/account-verifications
 Content-Type: application/json
+X-User-Id: user-1
 
 {
   "bankCode": "9",

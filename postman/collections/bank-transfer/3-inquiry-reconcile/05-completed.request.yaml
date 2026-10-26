@@ -3,6 +3,9 @@ name: 3-5 접수 40초쯤 뒤 조회 → COMPLETED 0000 (30초 유예 뒤 결과
 method: GET
 url: '{{baseUrl}}/api/v1/transfers/{{silentTransferId}}'
 order: 5000
+headers:
+  - key: X-User-Id
+    value: '{{userId}}'
 scripts:
   - type: afterResponse
     language: text/javascript

@@ -38,11 +38,12 @@ class JpaTransferStoreTest : ApiIntegrationTest() {
         key: String = UUID.randomUUID().toString(),
         reference: String = references.next(),
         userId: String = user,
+        accountNo: String = "1002123456789",
     ): Transfer {
         val now = Instant.parse("2026-10-19T01:00:00.123456Z")
         return Transfer(
             id = UUID.randomUUID(), userId = userId, idempotencyKey = key, reference = reference, requestHash = "h".repeat(64),
-            bankCode = "090", accountNo = "1002123456789", amount = 50_000, memo = "출금",
+            bankCode = "090", accountNo = accountNo, amount = 50_000, memo = "출금",
             status = TransferStatus.RECEIVED, createdAt = now, updatedAt = now,
         )
     }
@@ -391,16 +392,24 @@ class JpaTransferStoreTest : ApiIntegrationTest() {
 
     @Test
     fun `fail - 환불이 실패하면 상태 전이도 롤백된다 (한 트랜잭션)`() {
-        val t = newTransfer().also { store.saveWithEvent(it, requested(it)) }
+        // 모의 은행에 없는 계좌: 이 RECEIVED 를 다른 테스트의 발행 · 정리 작업이 집어 가도 공용 계좌에 입금이 생기지 않는다
+        val t = newTransfer(accountNo = unregisteredAccount()).also { store.saveWithEvent(it, requested(it)) }
+        val balanceBefore = wallets.balanceOf(user)
         // 이미 REFUND 가 있는 것처럼 만든다 → 환불의 원장 INSERT 가 uk_ledger_transfer_type 에 걸린다
         jdbc.update(
             "INSERT INTO wallet_ledger (user_id, type, amount, balance_after, transfer_id, created_at) VALUES (?, 'REFUND', 1, 0, ?, NOW(6))",
             user, t.id.toString(),
         )
 
-        assertFails { store.fail(t.id, TransferStatus.RECEIVED, Instant.now(), "E001") }
+        try {
+            assertFails { store.fail(t.id, TransferStatus.RECEIVED, Instant.now(), "E001") }
 
-        assertEquals(TransferStatus.RECEIVED, store.findById(t.id)!!.status)   // "FAILED 인데 돈은 안 돌아온" 상태가 생기지 않는다
+            assertEquals(TransferStatus.RECEIVED, store.findById(t.id)!!.status)   // "FAILED 인데 돈은 안 돌아온" 상태가 생기지 않는다
+            assertEquals(balanceBefore, wallets.balanceOf(user))                   // 잔고 += 도 같이 롤백됐다
+        } finally {
+            // 이 RECEIVED 는 일부러 깨진 상태(가짜 REFUND)라 다시 처리되면 안 된다: 발행된 것으로 표시해 발행기 · 정리 작업이 건드리지 않게
+            jdbc.update("UPDATE outbox_event SET published_at = NOW(6) WHERE aggregate_id = ?", t.id.toString())
+        }
     }
 
     @Test

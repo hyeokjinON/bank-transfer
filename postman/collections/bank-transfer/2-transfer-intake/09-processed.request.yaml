@@ -3,6 +3,9 @@ name: 2-9 처리 결과 → COMPLETED (2-1 후 몇 초 뒤)
 method: GET
 url: '{{baseUrl}}/api/v1/transfers/{{transferId}}'
 order: 9000
+headers:
+  - key: X-User-Id
+    value: '{{userId}}'
 scripts:
   - type: afterResponse
     language: text/javascript

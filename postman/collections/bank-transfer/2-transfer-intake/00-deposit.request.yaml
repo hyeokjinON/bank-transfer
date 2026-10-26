@@ -1,0 +1,26 @@
+$kind: http-request
+name: 2-0 충전 100만 원 → 200 (출금 전에 한 번, 폴더 3 · 4 출금 몫까지)
+method: POST
+url: '{{baseUrl}}/api/v1/wallet/deposits'
+order: 500
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: X-User-Id
+    value: '{{userId}}'
+body:
+  type: json
+  content: |-
+    {
+      "amount": 1000000
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // 관리 · 테스트용 충전 (실제로는 은행 입금 통지가 채운다). 출금은 잔고에서 빠지므로 먼저 채운다 (P4-1).
+      pm.test("200, 잔고 100만 원 이상", () => {
+        pm.response.to.have.status(200);
+        pm.expect(pm.response.json().userId).to.eql(pm.collectionVariables.get("userId"));
+        pm.expect(pm.response.json().balance).to.be.at.least(1000000);
+      });

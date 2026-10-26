@@ -1,11 +1,9 @@
 package io.github.hyeokjinon.banktransfer.api.reconcile
 
-import io.github.hyeokjinon.banktransfer.account.AccountVerification
-import io.github.hyeokjinon.banktransfer.account.VerificationRepository
-import io.github.hyeokjinon.banktransfer.account.VerificationStatus
 import io.github.hyeokjinon.banktransfer.api.config.BankInquiryAdapter
 import io.github.hyeokjinon.banktransfer.api.messaging.OutboxRelay
 import io.github.hyeokjinon.banktransfer.api.support.ApiIntegrationTest
+import io.github.hyeokjinon.banktransfer.api.web.USER_ID_HEADER
 import io.github.hyeokjinon.banktransfer.transfer.RandomReferenceGenerator
 import io.github.hyeokjinon.banktransfer.transfer.Transfer
 import io.github.hyeokjinon.banktransfer.transfer.TransferEvent
@@ -31,7 +29,6 @@ import kotlin.test.assertEquals
  */
 class ReconcileFlowTest : ApiIntegrationTest() {
 
-    @Autowired private lateinit var verifications: VerificationRepository
     @Autowired private lateinit var relay: OutboxRelay
     @Autowired private lateinit var store: TransferStore
     @Autowired private lateinit var reconciler: TransferReconciler
@@ -47,19 +44,13 @@ class ReconcileFlowTest : ApiIntegrationTest() {
 
     private val mapType = object : ParameterizedTypeReference<Map<String, Any?>>() {}
 
-    private fun verify(accountNo: String) {
-        verifications.save(
-            AccountVerification(
-                id = UUID.randomUUID(), bankCode = "090", accountNo = accountNo, holderName = "홍길동",
-                codeHash = "0".repeat(64), status = VerificationStatus.VERIFIED, failedAttempts = 0,
-                expiresAt = Instant.now(), verifiedAt = Instant.now(),
-            ),
-        )
-    }
+    /** 이 테스트의 사용자 (테스트마다 새로 [FUNDED] 원 충전 — 출금은 이 지갑에서 빠진다, P4-1). */
+    private val user by lazy { fundedUser(FUNDED) }
 
     private fun request(accountNo: String): UUID {
         val body = client.post().uri("/api/v1/transfers")
             .contentType(MediaType.APPLICATION_JSON)
+            .header(USER_ID_HEADER, user)
             .header("Idempotency-Key", UUID.randomUUID().toString())
             .body(mapOf("bankCode" to "090", "accountNo" to accountNo, "amount" to 30_000, "memo" to "R" + Random.nextInt(100_000, 999_999)))
             .retrieve().body(mapType)!!
@@ -76,7 +67,7 @@ class ReconcileFlowTest : ApiIntegrationTest() {
     @Test
     fun `처리하고 응답만 안 한 은행 - UNKNOWN 뒤 결과조회로 COMPLETED, 은행 입금은 1건`() {
         val account = "9990000000002"
-        verify(account)
+        verifiedBy(user, account)
         val id = request(account)
         awaitStatus(id, TransferStatus.UNKNOWN)
 
@@ -91,7 +82,7 @@ class ReconcileFlowTest : ApiIntegrationTest() {
     @Test
     fun `처리도 응답도 안 한 은행 - UNKNOWN 뒤 결과조회로 FAILED 2001`() {
         val account = "9990000000001"
-        verify(account)
+        verifiedBy(user, account)
         val id = request(account)
         awaitStatus(id, TransferStatus.UNKNOWN)
 
@@ -106,7 +97,7 @@ class ReconcileFlowTest : ApiIntegrationTest() {
         // 회귀 방지: 유예가 없으면 컨슈머가 타임아웃으로 적은 UNKNOWN 을 다음 주기에 바로 물어,
         // 아직 처리 중인 은행이 2001 을 답하면 돈이 나가는 중인 건이 FAILED 로 확정된다
         val account = "9990000000002"
-        verify(account)
+        verifiedBy(user, account)
         val id = request(account)
         awaitStatus(id, TransferStatus.UNKNOWN)
 
@@ -126,7 +117,7 @@ class ReconcileFlowTest : ApiIntegrationTest() {
         // 컨슈머가 SENDING 커밋 뒤 은행에 보내기 전에 죽은 상황: 은행은 이 거래번호를 모른다
         val now = Instant.now()
         val transfer = Transfer(
-            id = UUID.randomUUID(), idempotencyKey = UUID.randomUUID().toString(), reference = RandomReferenceGenerator().next(),
+            id = UUID.randomUUID(), userId = user, idempotencyKey = UUID.randomUUID().toString(), reference = RandomReferenceGenerator().next(),
             requestHash = "h".repeat(64), bankCode = "090", accountNo = "9990000000001", amount = 1_000, memo = "stuck",
             status = TransferStatus.RECEIVED, createdAt = now, updatedAt = now,
         )
@@ -138,5 +129,9 @@ class ReconcileFlowTest : ApiIntegrationTest() {
         assertEquals(true, result.markedUnknown >= 1)
         assertEquals(TransferStatus.FAILED, store.findById(transfer.id)!!.status)
         assertEquals("2001", store.findById(transfer.id)!!.bankResponseCode)
+    }
+
+    private companion object {
+        const val FUNDED = 1_000_000L
     }
 }
