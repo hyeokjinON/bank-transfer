@@ -69,6 +69,9 @@ class TransferProcessingFlowTest : ApiIntegrationTest() {
 
         assertEquals("0000", store.findById(id)!!.bankResponseCode)
         assertEquals(1, bank.depositsOf(account).count { it.memo == memo })
+        assertEquals(FUNDED - 30_000, wallets.balanceOf(user))   // COMPLETED = 확정, 잔고는 빠진 채
+        assertEquals(0L, wallets.pendingOf(user))
+        assertEquals(listOf("WITHDRAW"), ledgerTypes(id))
     }
 
     @Test
@@ -80,6 +83,9 @@ class TransferProcessingFlowTest : ApiIntegrationTest() {
         awaitStatus(id, TransferStatus.FAILED)
 
         assertEquals("1001", store.findById(id)!!.bankResponseCode)
+        assertEquals(FUNDED, wallets.balanceOf(user))                 // 은행 거절 → fail() 이 같은 트랜잭션에서 환불
+        assertEquals(listOf("WITHDRAW", "REFUND"), ledgerTypes(id))
+        assertEquals(wallets.balanceOf(user), ledgerSum(user))
     }
 
     @Test
@@ -91,6 +97,8 @@ class TransferProcessingFlowTest : ApiIntegrationTest() {
         awaitStatus(id, TransferStatus.UNKNOWN)
 
         assertNull(store.findById(id)!!.bankResponseCode)
+        assertEquals(FUNDED - 30_000, wallets.balanceOf(user))   // 결과를 모르는 돈은 다른 출금에 쓰지 못하게 묶어 둔다 (보류)
+        assertEquals(30_000L, wallets.pendingOf(user))
     }
 
     @Test

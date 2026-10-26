@@ -77,6 +77,8 @@ class ReconcileFlowTest : ApiIntegrationTest() {
         assertEquals(TransferStatus.COMPLETED, after.status)
         assertEquals("0000", after.bankResponseCode)
         assertEquals(1, bank.depositsOf(account).count { it.reference == after.reference })   // 다시 보내지 않았다
+        assertEquals(FUNDED - 30_000, wallets.balanceOf(user))   // 결과조회로 확정돼도 잔고는 빠진 채, 보류만 풀린다
+        assertEquals(0L, wallets.pendingOf(user))
     }
 
     @Test
@@ -90,6 +92,8 @@ class ReconcileFlowTest : ApiIntegrationTest() {
 
         assertEquals(TransferStatus.FAILED, store.findById(id)!!.status)
         assertEquals("2001", store.findById(id)!!.bankResponseCode)
+        assertEquals(FUNDED, wallets.balanceOf(user))                 // 정리 작업 ② 의 실패 확정도 환불한다
+        assertEquals(listOf("WITHDRAW", "REFUND"), ledgerTypes(id))
     }
 
     @Test
@@ -129,6 +133,8 @@ class ReconcileFlowTest : ApiIntegrationTest() {
         assertEquals(true, result.markedUnknown >= 1)
         assertEquals(TransferStatus.FAILED, store.findById(transfer.id)!!.status)
         assertEquals("2001", store.findById(transfer.id)!!.bankResponseCode)
+        assertEquals(FUNDED, wallets.balanceOf(user))
+        assertEquals(listOf("WITHDRAW", "REFUND"), ledgerTypes(transfer.id))
     }
 
     private companion object {

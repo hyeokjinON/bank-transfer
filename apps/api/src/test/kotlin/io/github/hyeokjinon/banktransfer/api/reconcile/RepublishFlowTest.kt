@@ -100,6 +100,8 @@ class RepublishFlowTest : ApiIntegrationTest() {
         val after = store.findById(id)!!
         assertEquals("0000", after.bankResponseCode)
         assertEquals(1, bank.depositsOf(account).count { it.reference == after.reference })   // 은행 호출은 한 번
+        assertEquals(FUNDED - 30_000, wallets.balanceOf(user))   // 재발행으로 끝내 완료 — 차감은 한 번
+        assertEquals(listOf("WITHDRAW"), ledgerTypes(id))
     }
 
     @Test
@@ -128,6 +130,8 @@ class RepublishFlowTest : ApiIntegrationTest() {
             assertEquals(props.maxRepublish, after.republishCount)
             assertTrue(abandoned.any { it.id == id })
             assertEquals(0, bank.depositsOf(account).count { it.reference == after.reference })   // 돈이 움직이지 않았다
+            assertEquals(FUNDED, wallets.balanceOf(user))             // 정리 작업 ⓪ 의 포기(E001)도 환불한다 — 돈은 은행에 간 적이 없다
+            assertEquals(listOf("WITHDRAW", "REFUND"), ledgerTypes(id))
         }
     }
 
