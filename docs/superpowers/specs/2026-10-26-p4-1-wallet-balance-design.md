@@ -71,10 +71,12 @@ ALTER TABLE account_verification
 1. 형식 검증 (기존 + `userId`).
 2. `(userId, idempotencyKey)` 로 기존 출금 찾기 → 있으면 지금처럼 같은 내용 200 / 다른 내용 422 (**차감 없음**).
 3. `VerifiedAccounts.isVerified(userId, bankCode, accountNo)` → 아니면 422 `ACCOUNT_NOT_VERIFIED`.
-4. `TransferStore.saveWithEvent(transfer, event)` 한 트랜잭션:
-   - 지갑 조건부 UPDATE → 0건이면 롤백, `StoreConflict.InsufficientBalance` → 422 `INSUFFICIENT_BALANCE` (지갑이 없어도 0건 = 잔고 0).
+4. `TransferStore.saveWithEvent(transfer, event)` 한 트랜잭션 (순서가 중요하다 — 2026-10-26 계획 작성 때 조정):
+   - `transfer` INSERT (RECEIVED, user_id) — 먼저 넣어 같은 `(userId, key)` 경합을 UNIQUE 로 먼저 가른다. 차감을 먼저 하면, 잔고가 한 건 몫뿐일 때 진 쪽이 멱등 200 대신 422 를 받는다.
+   - 지갑 조건부 UPDATE → 0건이면 롤백(출금 INSERT 도 취소), `StoreConflict.InsufficientBalance` → 422 `INSUFFICIENT_BALANCE` (지갑이 없어도 0건 = 잔고 0).
    - 원장 `WITHDRAW` (amount, balance_after, transfer_id).
-   - `transfer` INSERT (RECEIVED, user_id) · `outbox_event` INSERT.
+   - `outbox_event` INSERT — 마지막이라, 여기서 실패하면 차감까지 되돌아가는 것을 테스트로 증명할 수 있다.
+   - `userId` 가 없는 출금은 저장하지 않는다 (차감 없이 돈이 나가는 길을 막는다).
 5. 같은 `(userId, key)` 가 동시에 들어와 UNIQUE 충돌 → 트랜잭션 전체 롤백(차감도 취소) → 2번처럼 기존 건 응답 (기존 `DuplicateIdempotencyKey` 경로 그대로).
 
 ### 4-2. 실패 확정 (환불)
@@ -137,7 +139,7 @@ ALTER TABLE account_verification
 
 기존 테스트 · Postman · `http/*.http` 는 `X-User-Id` 헤더와 충전 단계를 더해 고친다.
 
-**손 확인 (머지 전)**: Postman 에서 `X-User-Id: user-1` 로 충전 → 1원인증 → 출금 → `GET /wallet` 잔고 · `pending` → 잔고보다 큰 출금 422 → 모르는 계좌 출금 → `FAILED` 뒤 잔고 복원.
+**손 확인 (머지 전)**: Postman 에서 `X-User-Id: user-1` 로 충전 → 1원인증 → 출금 → `GET /wallet` 잔고 · `pending` → 잔고보다 큰 출금 422 → 모르는 계좌 출금 → `FAILED` 뒤 잔고 복원. (모의 은행이 모르는 계좌는 1원인증을 통과할 수 없으므로, 마지막 단계는 VERIFIED 행을 SQL 로 넣어 준비한다 — http 파일 · Postman 에 쿼리를 둔다.)
 
 ## 7. 위험과 한계
 
