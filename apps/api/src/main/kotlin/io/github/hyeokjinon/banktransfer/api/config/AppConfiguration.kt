@@ -5,7 +5,6 @@ import io.github.hyeokjinon.banktransfer.account.BankPort
 import io.github.hyeokjinon.banktransfer.account.RandomCodeGenerator
 import io.github.hyeokjinon.banktransfer.account.VerificationRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.AccountVerificationJpaRepository
-import io.github.hyeokjinon.banktransfer.api.persistence.ConditionalWalletDebit
 import io.github.hyeokjinon.banktransfer.api.persistence.JpaTransferStore
 import io.github.hyeokjinon.banktransfer.api.persistence.JpaVerificationRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.OutboxEventJpaRepository
@@ -101,10 +100,6 @@ class AppConfiguration {
     /** 잔고 SQL 한 곳 (P4-1). 실패 확정 트랜잭션 안에서 JpaTransferStore 가 환불을 부르고, 충전 · 조회는 WalletController 가 부른다. */
     @Bean
     fun walletLedger(jdbc: NamedParameterJdbcTemplate, tx: TransactionTemplate) = WalletLedger(jdbc, tx, Clock.systemUTC())
-
-    /** 잔고 차감 전략 (P4-2). 기준선 = P4-1 과 같은 조건부 UPDATE 한 문장. */
-    @Bean
-    fun walletDebit(jdbc: NamedParameterJdbcTemplate, wallets: WalletLedger): WalletDebit = ConditionalWalletDebit(jdbc, wallets)
 
     @Bean
     fun transferStore(
