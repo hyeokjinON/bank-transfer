@@ -15,14 +15,14 @@ for scenario in hotspot spread; do
   echo
   echo "### $scenario"
   echo
-  echo "| 전략 | 회차 | 처리량 (req/s) | p50 (ms) | p95 (ms) | p99 (ms) | 202 | 409 | 503 | 그 외 | 편차 |"
-  echo "|---|---|---|---|---|---|---|---|---|---|---|"
+  echo "| 전략 | 회차 | 처리량 (req/s) | p50 (ms) | p95 (ms) | p99 (ms) | p95 성공만 (ms) | 202 | 409 | 503 | 그 외 | 편차 |"
+  echo "|---|---|---|---|---|---|---|---|---|---|---|---|"
   for strategy in conditional pessimistic optimistic redis; do
     files=$(ls "$RAW/$strategy-$scenario-"*.json 2>/dev/null | grep -v '\.full\.json$' || true)
     [ -n "$files" ] || continue
     n=$(wc -l <<<"$files" | tr -d ' ')
     row="| $strategy | $n"
-    for key in rps p50 p95 p99; do
+    for key in rps p50 p95 p99 p95_202; do
       row="$row | $(printf '%.1f' "$(for f in $files; do val "$f" "$key"; done | median)")"
     done
     for key in status_202 status_409 status_503 other; do

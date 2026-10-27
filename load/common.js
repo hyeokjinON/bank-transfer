@@ -17,6 +17,8 @@ function thresholds() {
   const t = {
     'http_req_duration{scenario:measure}': ['max>=0'],
     'http_reqs{scenario:measure}': ['count>=0'],
+    // 성공(202)만의 지연 — 409 · 503 은 일찍 실패해 빠르므로 섞이면 백분위가 좋아 보인다 (p50_202 · p95_202 · p99_202)
+    'http_req_duration{scenario:measure,status:202}': ['max>=0'],
     // 워밍업 포함 202 수 = DB 의 출금 행 수 (run.sh 가 맞춰 본다)
     'http_reqs{status:202}': ['count>=0'],
   };
@@ -28,8 +30,11 @@ export const options = {
   discardResponseBodies: true, // 상태 코드만 본다 — 본문을 읽는 비용을 k6 쪽에서 뺀다
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(95)', 'p(99)'],
   scenarios: {
-    // JIT · 커넥션 풀 데우기. 집계하지 않는다. 진행 중인 요청은 끝까지 기다린다(5초) — 202 수와 DB 출금 행 수를 맞춰 보기 때문
-    warmup: { executor: 'constant-vus', vus: VUS, duration: WARMUP, gracefulStop: '5s' },
+    // JIT · 커넥션 풀 데우기. 집계하지 않는다. 진행 중인 요청은 끝까지 기다린다 — 202 수와 DB 출금 행 수를 맞춰 보기 때문.
+    // 30초인 이유: 비관적 락 대기 5초 · Redis 락 대기 3초 · Hikari 큐 대기가 겹치면 5초로는 모자라, 끊긴 요청이 DB 에는 남고 k6 는 202 를 못 세어 회차가 헛되이 무효가 된다.
+    // 측정 시작(startTime)은 WARMUP 으로 고정이라 늘려도 시간이 늘지 않는다. 단, 워밍업의 마지막 요청이 측정 첫 순간과 잠깐 겹칠 수 있다 —
+    // 그 요청은 scenario:warmup 태그라 측정 집계에 안 들어가고, 202 는 태그 무관 합계(accepted_all)에 들어가므로 DB 출금 행 수와의 대조는 깨지지 않는다.
+    warmup: { executor: 'constant-vus', vus: VUS, duration: WARMUP, gracefulStop: '30s' },
     measure: { executor: 'constant-vus', vus: VUS, duration: MEASURE, startTime: WARMUP },
   },
   thresholds: thresholds(),
@@ -67,6 +72,7 @@ export function handleSummary(data) {
   const seconds = parseInt(MEASURE, 10);
   const total = count(data, ['scenario:measure']);
   const d = values(data, 'http_req_duration', ['scenario:measure']) || {};
+  const ok = values(data, 'http_req_duration', ['scenario:measure', 'status:202']) || {};
   const by = {};
   for (const s of STATUSES) by[s] = count(data, ['scenario:measure', `status:${s}`]);
   const result = {
@@ -82,6 +88,9 @@ export function handleSummary(data) {
     p99: d['p(99)'],
     avg: d.avg,
     max: d.max,
+    p50_202: ok.med,
+    p95_202: ok['p(95)'],
+    p99_202: ok['p(99)'],
     total,
     status_202: by['202'],
     status_409: by['409'],
