@@ -39,6 +39,7 @@ class WalletDebitConcurrencyTest : ApiIntegrationTest() {
     private fun debitFor(strategy: String): WalletDebit = when (strategy) {
         "conditional" -> ConditionalWalletDebit(namedJdbc, wallets)
         "pessimistic" -> PessimisticWalletDebit(namedJdbc, wallets)
+        "optimistic" -> OptimisticWalletDebit(namedJdbc, wallets)
         else -> error("unknown strategy $strategy")
     }
 
@@ -54,7 +55,7 @@ class WalletDebitConcurrencyTest : ApiIntegrationTest() {
     private fun count(sql: String, userId: String): Int = jdbc.queryForObject(sql, Int::class.java, userId)!!
 
     @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = ["conditional", "pessimistic"])
+    @ValueSource(strings = ["conditional", "pessimistic", "optimistic"])
     fun `잔고 10만 원에 1만 원 출금 100건 동시 - 음수 없음, 잔고 = 원장 합, 출금 = WITHDRAW = 성공 수`(strategy: String) {
         val store = JpaTransferStore(transfers, outbox, tx, wallets, debitFor(strategy))
         val user = fundedUser(100_000)
