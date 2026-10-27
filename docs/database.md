@@ -1,8 +1,8 @@
 # 데이터베이스 — 모델 정의와 구조
 
-> 기준: P4-1 (Flyway `V1` · `V2` · `V3` 적용). 1원인증 · 이체 · 아웃박스 · 지갑 · 원장 테이블이 MySQL 에 있다.
+> 기준: P4-2 (Flyway `V1` · `V2` · `V3` 적용, 스키마 변경 없음). 1원인증 · 이체 · 아웃박스 · 지갑 · 원장 테이블이 MySQL 에 있다.
 > 이 문서가 스키마의 기준이다. 마이그레이션을 추가할 때 이 문서도 같은 PR 에서 고친다.
-> 설계 배경: [P3 설계 문서](superpowers/specs/2026-10-19-p3-transfer-design.md) §2~§6 · [P4-1 설계](superpowers/specs/2026-10-26-p4-1-wallet-balance-design.md)
+> 설계 배경: [P3 설계 문서](superpowers/specs/2026-10-19-p3-transfer-design.md) §2~§6 · [P4-1 설계](superpowers/specs/2026-10-26-p4-1-wallet-balance-design.md) · [P4-2 설계](superpowers/specs/2026-10-27-p4-2-lock-comparison-design.md)
 
 ## 1. 개요
 
@@ -15,7 +15,7 @@
 | 엔진 | InnoDB | 트랜잭션, 행 잠금, 클러스터드 PK |
 | 계정 | 앱 `bank` (스키마 권한만) / 관리 `root` (로컬 전용) | 비밀번호는 `infra/.env` (git 제외) |
 | 스키마 관리 | Flyway (`apps/api/src/main/resources/db/migration`) | JPA `ddl-auto=validate` — 엔티티가 스키마를 바꾸지 않는다 |
-| 접근 방식 | Spring Data JPA (Hibernate) + 필요한 곳은 네이티브 SQL. 잔고는 `WalletLedger`(JDBC, 조건부 UPDATE) | `FOR UPDATE SKIP LOCKED`, 조건부 UPDATE |
+| 접근 방식 | Spring Data JPA (Hibernate) + 필요한 곳은 네이티브 SQL. 잔고는 `WalletLedger`(JDBC — 충전 · 환불 · 원장) + 차감 전략 `WalletDebit`(조건부 · 비관적 · 낙관적 · Redis, 설정 `wallet.debit-strategy`) | `FOR UPDATE SKIP LOCKED`, 조건부 UPDATE |
 | 시간대 설정 | JDBC `connectionTimeZone=Asia/Seoul` · Hibernate `jdbc.time_zone=Asia/Seoul` + `type.preferred_instant_jdbc_type=TIMESTAMP` | 마지막 설정이 없으면 Hibernate 7 이 Instant 를 UTC 로 쓴다 |
 
 ## 2. 시간대 정책 — 한국시간(KST)으로 저장
@@ -163,7 +163,7 @@ erDiagram
 |---|---|---|---|
 | `user_id` | `VARCHAR(36)` ascii_bin | N | PK. `X-User-Id` 값 |
 | `balance` | `BIGINT` | N | 잔고 (원). `CHECK (balance >= 0)` = `ck_wallet_balance_non_negative` — 조건부 차감의 2차 방어선 |
-| `version` | `BIGINT` | N | 바뀔 때마다 +1 (P4-2 낙관적 락 비교용) |
+| `version` | `BIGINT` | N | 바뀔 때마다 +1. 낙관적 락 전략(P4-2)이 `WHERE version = ?` 로 쓴다 — 충전 · 환불도 올리므로 그 사이 바뀌면 충돌로 잡힌다 |
 | `created_at` · `updated_at` | `DATETIME(6)` | N | 생성 · 마지막 변경 시각 |
 
 지갑은 첫 충전 때 만들어진다 (`INSERT … ON DUPLICATE KEY UPDATE`). 지갑이 없으면 잔고 0 이다 (조회는 0, 출금은 잔고 부족).
@@ -215,11 +215,15 @@ erDiagram
 | 정리 작업과 컨슈머가 같은 이체를 확정 | 조건부 UPDATE (`UNKNOWN` 에서만 확정) | `UPDATE transfer SET status=?, bank_response_code=? … WHERE id=? AND status='UNKNOWN'` → 0건이면 다른 쪽이 먼저 확정한 것이라 건너뜀. 결과조회 횟수 증가도 `AND status='UNKNOWN'` 조건부다 |
 | 재발행 (정리 작업 여러 대 · 컨슈머와 겹침) | 조건부 UPDATE + 같은 트랜잭션 아웃박스 INSERT | `UPDATE transfer SET republish_count = republish_count + 1, republished_at = ? … WHERE id = ? AND status = 'RECEIVED' AND republish_count = ?` → 1건일 때만 `INSERT INTO outbox_event`. 포기는 `fail(RECEIVED, E001)` — 조건부 전이와 환불이 한 트랜잭션 |
 | 엔티티 동시 수정 | 낙관적 락 | `@Version` → `… WHERE id=? AND version=?` |
-| 잔고 차감 (같은 사용자 출금 동시) | 조건부 UPDATE 한 문장 + CHECK, 접수 트랜잭션 안 | `INSERT transfer …` → `UPDATE wallet SET balance = balance - ?, version = version + 1 … WHERE user_id = ? AND balance >= ?` → 0건이면 롤백(422) → `INSERT wallet_ledger`(WITHDRAW) → `INSERT outbox_event`. 같은 `(user_id, 키)` 는 `transfer` UNIQUE 에서 먼저 멈춰 지갑을 건드리지 않는다 |
+| 잔고 차감 — `conditional` (기본, P4-1) | 조건부 UPDATE 한 문장 + CHECK, 접수 트랜잭션 안 | `INSERT transfer …` → `UPDATE wallet SET balance = balance - ?, version = version + 1 … WHERE user_id = ? AND balance >= ?` → 0건이면 롤백(422) → `INSERT wallet_ledger`(WITHDRAW) → `INSERT outbox_event`. 같은 `(user_id, 키)` 는 `transfer` UNIQUE 에서 먼저 멈춰 지갑을 건드리지 않는다 |
+| 잔고 차감 — `pessimistic` (P4-2) | 행 X 락 먼저 | `SELECT balance FROM wallet WHERE user_id = ? FOR UPDATE` → 없거나 모자라면 롤백(422) → `UPDATE wallet SET balance = ?(계산값), version = version + 1 …`. 락을 쥔 동안 환불 · 충전도 기다린다 |
+| 잔고 차감 — `optimistic` (P4-2) | `version` 비교, 충돌이면 트랜잭션 전체 재시도 | `SELECT balance, version`(락 없음) → 모자라면 422 → `UPDATE wallet SET balance = ?, version = ? + 1 … WHERE user_id = ? AND version = ?` → 0건이면 출금 INSERT 까지 롤백하고 처음부터 (최대 5회, 10~50ms) → 다 쓰면 409 |
+| 잔고 차감 — `redis` (P4-2) | Redisson 사용자 락(트랜잭션 바깥) + 조건부 UPDATE | `lock:wallet:{userId}` `tryLock`(3초) → 트랜잭션(`conditional` 과 같은 SQL) → 커밋 뒤 `unlock`. 못 잡거나 Redis 에 닿지 않으면 503. 정확성은 DB 가 지킨다 |
+| 락 대기 한도 (모든 트랜잭션) | `innodb_lock_wait_timeout = 5` (Hikari `connection-init-sql`) | 넘으면 1205, 데드락은 1213 → 둘 다 503 `WALLET_BUSY` (`JpaTransferStore` 한 곳). 기본 50초는 커넥션 · 톰캣 스레드를 오래 붙잡는다 |
 | 환불 (컨슈머 · 정리 작업 겹침) | 조건부 전이 1건일 때만 + 원장 UNIQUE | `UPDATE transfer SET status = 'FAILED' … WHERE id = ? AND status = ?` → 1건이면 `SELECT amount FROM wallet_ledger WHERE transfer_id = ? AND type = 'WITHDRAW'` → `UPDATE wallet SET balance = balance + ?` → `INSERT wallet_ledger`(REFUND). 한 트랜잭션 |
 | 충전 | `INSERT … ON DUPLICATE KEY UPDATE` | 지갑이 없으면 만들고 있으면 더한다 + `INSERT wallet_ledger`(DEPOSIT) |
 
-같은 차감을 비관적 락 · 낙관적 락 · Redis 분산락으로 바꿔 끼운 비교(k6)는 P4-2 에서 이 표에 추가한다.
+네 전략의 처리량 · 지연 비교(k6)는 [docs/perf/p4-2-lock-comparison.md](perf/p4-2-lock-comparison.md), 결정은 [ADR-0009](adr/0009-wallet-debit-strategies-and-lock-comparison.md).
 
 ## 7. 명명 · 타입 규칙
 - 테이블 · 컬럼: `snake_case`, 테이블은 단수형 (`transfer`).
@@ -304,9 +308,9 @@ SELECT id, type, amount, balance_after, transfer_id, created_at FROM wallet_ledg
 ```
 
 ## 10. 검토 중 · 다음 단계
-- **PK 타입**: 지금은 읽기 쉬운 `CHAR(36)` 무작위 UUID. InnoDB 는 PK 순서로 데이터를 저장하므로 무작위 값은 삽입 시 페이지 분할이 생기고 보조 인덱스도 커진다. P4 부하테스트에서 `BINARY(16)` · 시간순 UUID(v7) · `BIGINT` 와 삽입 성능을 비교해 결정한다.
+- **PK 타입**: 지금은 읽기 쉬운 `CHAR(36)` 무작위 UUID. InnoDB 는 PK 순서로 데이터를 저장하므로 무작위 값은 삽입 시 페이지 분할이 생기고 보조 인덱스도 커진다. 부하 측정 도구(`load/`, P4-2)로 `BINARY(16)` · 시간순 UUID(v7) · `BIGINT` 와 삽입 성능을 비교해 결정한다.
 - **데이터 보존**: 발행된 `outbox_event`, 만료된 `account_verification` 정리는 P5 배치.
-- **잔고 락 전략**: P4-2 에서 비관적 · 낙관적 · Redis 분산락을 k6 로 비교한다. 원장 보존(파티셔닝 · 보관)은 P5.
+- **잔고 락 전략**: P4-2 에서 네 전략을 바꿔 끼울 수 있게 하고 k6 로 비교했다 (ADR-0009). 원장 보존(파티셔닝 · 보관)은 P5.
 - **읽기 성능**: 조회 API 가 늘면 실행계획(`EXPLAIN ANALYZE`) 결과를 이 문서에 남긴다.
 
 ## 변경 이력
@@ -319,3 +323,4 @@ SELECT id, type, amount, balance_after, transfer_id, created_at FROM wallet_ledg
 | 2026-10-21 | 스키마 변경 없음. `inquiry_attempts` 의미(결과조회에도 답이 없던 횟수, 10에서 멈춤), 정리 작업 ↔ 컨슈머 경합의 조건부 UPDATE, 한도에 닿은 `UNKNOWN` 운영 쿼리 | [PR #7](https://github.com/hyeokjinON/bank-transfer/pull/7) (P3-3a) |
 | 2026-10-22 | V2: republish_count · republished_at (제한 재발행), RECEIVED → FAILED(E001), 재발행 동시성 · 운영 쿼리 | [PR #9](https://github.com/hyeokjinON/bank-transfer/pull/9) (P3-3b) |
 | 2026-10-26 | V3: wallet · wallet_ledger, transfer · account_verification 의 user_id, 멱등 UNIQUE 를 (user_id, idempotency_key) 로, 잔고 동시성 · 운영 쿼리(잔고 = 원장 합) | [PR #11](https://github.com/hyeokjinON/bank-transfer/pull/11) (P4-1) |
+| 2026-10-27 | 스키마 변경 없음. 동시성 표에 차감 전략 4종 · 락 대기 5초, `wallet.version` 의 낙관적 락 사용 | P4-2 (ADR-0009) |

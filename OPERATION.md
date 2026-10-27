@@ -39,6 +39,12 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 | `transfer.reconcile.republish-after` | `5m` | 마지막 변경 후 이만큼 지난 `RECEIVED` 를 재발행한다 (재시도 토픽 체인 약 95초가 끝난 뒤) |
 | `transfer.reconcile.max-republish` | `3` | 재발행 한도. 다 쓰고도 은행에 못 보내면 `FAILED` `E001` |
 | `spring.task.scheduling.pool.size` | `2` | 스케줄러 스레드. 발행기(0.5초)와 정리 작업(10초)이 서로 막지 않게 한다 |
+| `spring.datasource.hikari.maximum-pool-size` | `20` | 커넥션 풀 (P4-2 에서 명시, `minimum-idle` = 최대) |
+| `spring.datasource.hikari.connection-init-sql` | `SET SESSION innodb_lock_wait_timeout = 5` | 행 락 대기 한도 5초 (MySQL 기본 50초). 넘으면 503 `WALLET_BUSY`. 풀의 모든 커넥션에 적용 — 발행기 · 정리 작업 트랜잭션도 (지금은 짧다) |
+| `wallet.debit-strategy` | `conditional` | 잔고 차감 전략: `conditional` · `pessimistic` · `optimistic` · `redis` ([ADR-0009](docs/adr/0009-wallet-debit-strategies-and-lock-comparison.md)). 기동 때 하나, 모르는 이름이면 기동 실패. 지금 값은 `GET /actuator/info` |
+| `wallet.optimistic.max-attempts` / `backoff-min` / `backoff-max` | `5` / `10ms` / `50ms` | `optimistic`: 충돌 재시도 횟수 · 사이 대기. 다 쓰면 409 |
+| `wallet.lock.wait-time` | `3s` | `redis`: 사용자 락 대기. 넘으면 503 |
+| `wallet.lock.redis-address` | `redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}` | `redis` 전략일 때만 연결 (첫 요청 때) |
 | `bank.gateway.host` / `port` | `localhost` / `9090` | 은행 FEP 주소 |
 | `bank.gateway.response-timeout` | `3s` | 응답 대기. 넘으면 504 `BANK_TIMEOUT` |
 | `bank.gateway.poll-interval` | `30s` | 쓰기 유휴 시 폴링 주기. ×3 동안 수신이 없으면 연결 종료 |
@@ -99,6 +105,15 @@ curl -X POST localhost:8080/api/v1/wallet/deposits -H 'Content-Type: application
 curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
 ```
 
+### 잔고 차감 전략 (P4-2)
+접수 때 잔고를 빼는 방식을 기동 설정으로 하나 고른다 ([ADR-0009](docs/adr/0009-wallet-debit-strategies-and-lock-comparison.md), 비용 비교는 [docs/perf/p4-2-lock-comparison.md](docs/perf/p4-2-lock-comparison.md)).
+- `conditional` (기본): 조건부 UPDATE 한 문장. 같은 사용자의 동시 출금은 행 락에서 줄을 서고, 진 쪽은 바뀐 잔고로 조건을 다시 봐 422.
+- `pessimistic`: `SELECT … FOR UPDATE` 로 행 락을 먼저 잡고 계산해 쓴다. 왕복이 하나 더 있고, 락을 쥔 동안 환불 · 충전도 기다린다. 5초 넘게 기다리면 503.
+- `optimistic`: 락 없이 읽고 `version` 이 그대로일 때만 쓴다. 부딪히면 트랜잭션 전체를 처음부터 다시 (최대 5회, 10~50ms 쉬고). 다 부딪히면 409. 같은 사용자 요청이 몰리면 재시도가 늘어난다.
+- `redis`: Redisson 사용자 락(`lock:wallet:{userId}`)을 트랜잭션 바깥에서 잡고 안쪽은 `conditional` 과 같다. 락은 DB 앞의 줄 세우기일 뿐 정확성은 DB 가 지킨다. 3초 안에 못 잡으면 503.
+- 바꾸는 법: `--wallet.debit-strategy=redis` 인자 또는 환경변수 `WALLET_DEBIT_STRATEGY=redis` 로 다시 띄운다. 확인: `curl localhost:8080/actuator/info` → `{"wallet":{"debit-strategy":"…"}}`.
+- `redis` 전략은 Redis 가 없어도 기동된다. 차감 요청만 503 (fail-closed — 락 없이 진행하지 않는다, 로그 `redis unavailable for wallet lock` ERROR). 환불 · 충전은 전략과 무관하게 항상 같다 (원자적 UPDATE).
+
 ## 3. 모의 은행 시나리오
 | 계좌번호 | 예금주 | 동작 |
 |---|---|---|
@@ -133,11 +148,15 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
 | 충전 금액이 1 ~ 100,000,000 원 밖 | 400 | `INVALID_REQUEST` |
 | 이 사용자가 1원인증을 마치지 않은 계좌 (남이 인증한 계좌 포함) | 422 | `ACCOUNT_NOT_VERIFIED` |
 | 잔고가 출금액보다 적음 (지갑이 없어도) | 422 | `INSUFFICIENT_BALANCE` |
+| 잔고를 지금 잡지 못함 — 락 대기 5초 초과 · 데드락 · Redis 락 3초 초과 · Redis 장애 | 503 | `WALLET_BUSY` (+ `Retry-After: 1`) |
+| 동시 변경이 이어져 포기 (`optimistic` 5회) | 409 | `CONCURRENT_UPDATE` (+ `Retry-After: 1`) |
 | 같은 키에 다른 내용 | 422 | `IDEMPOTENCY_KEY_REUSED` |
 | 없는 이체 id · 남의 출금 | 404 | `TRANSFER_NOT_FOUND` |
 | 남의 1원인증 건 확인 | 404 | `VERIFICATION_NOT_FOUND` |
 | 허용되지 않는 상태 전이 | 409 | `ILLEGAL_TRANSITION` |
 | 그 밖의 표준 Spring 오류 (405 · 415 …) | 해당 상태 | HTTP 상태 이름 (예 `METHOD_NOT_ALLOWED`) |
+
+409 · 503 은 아무것도 남기지 않는다 — 같은 요청(같은 `Idempotency-Key`)을 잠시 뒤 다시 보내면 된다.
 
 조회 응답의 `bankResponseCode = "E001"` 은 은행 코드가 아니라 "은행에 보내지 못하고 포기" 를 뜻한다 (돈은 움직이지 않았다).
 
@@ -163,6 +182,9 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env down -v        
 | DLT 에 메시지가 쌓임 | 로그 `moved to DLT`(WARN / ERROR), 헤더의 예외 | `RetryLaterException` 이면 은행 장애 — 재발행을 기다린다. `InvalidTransferKeyException` 이면 보낸 쪽 버그. **그 밖의 예외(예: DB 장애)는 ERROR 로그** — `sending_at` 이 NULL 이라 정리 작업이 다시 발행하지 않는다 → 수동 확인 · 재처리 ([database.md §9](docs/database.md)) |
 | `FAILED` 인데 `bank_response_code = E001` | `republish_count = 3` | 은행에 보내지 못하고 포기 — 돈은 움직이지 않았다. 사용자가 다시 요청하면 된다. 은행 장애가 26분 넘게 이어졌는지 본다 |
 | `late or unknown response tranNo=…` 경고 | 전문번호 | 타임아웃 후 도착한 응답. 로그만 남긴다 (게이트웨이). 결과는 정리 작업의 결과조회로 확정한다. **남는 위험**: 은행이 30초 유예보다 더 늦게 처리하면 조회가 `2001` 을 답해 `FAILED` 로 확정되고, 이후 도착한 이체 응답은 이 로그만 남는다(돈은 나갔는데 `FAILED`) → 일마감 대사(P5)가 맞춘다. 이 로그에는 거래번호가 없어 어느 건인지 바로 알 수 없다 (범위 밖으로 남김, [HANDOVER](HANDOVER.md)) |
+| 503 `WALLET_BUSY` 가 잦음 | 로그 `is busy (lock wait timeout or deadlock)`(WARN) · `not acquired within`(INFO) · `redis unavailable`(ERROR), `/actuator/info` 의 전략 | 같은 사용자 출금이 몰려 락 대기가 한도를 넘는다(핫스팟) 또는 `redis` 전략에서 Redis 장애. Redis 장애면 Redis 를 살리거나 `conditional` 로 재기동. `redis` 전략에서 락 요청의 응답이 시간 초과로 끝났는데 Redis 는 락을 줬다면 그 사용자만 임대가 만료될 때까지(최대 약 30초) 503 일 수 있다 (잔고는 맞다) |
+| 409 `CONCURRENT_UPDATE` 가 잦음 | 전략이 `optimistic` 인지 | 같은 사용자에 동시 요청이 많으면 낙관적 락은 재시도가 폭주한다 → `conditional` 이나 `pessimistic` 으로 (측정 결과 [docs/perf](docs/perf/p4-2-lock-comparison.md)) |
+| 부하 측정 뒤 `RECEIVED` 출금 수만 건 · 미발행 아웃박스 | `user_id` 가 `load-` 로 시작하는지 | 측정 데이터다. `bash load/run.sh cleanup` 으로 지운다 — 지우지 않고 평소 설정으로 앱을 띄우면 모두 은행으로 나간다 |
 | 422 `INSUFFICIENT_BALANCE` 가 잦음 | `GET /api/v1/wallet` 의 `balance` · `pending` | 잔고 부족. `pending` 이 크면 결과를 기다리는 출금(`UNKNOWN` 등)이 돈을 묶고 있다 → 정리 작업 · 결과조회 로그를 본다 |
 | 잔고와 원장 합이 다름 | [database.md §9](docs/database.md) "잔고 = 원장 합 검증" | 정상이면 0행. 원장은 수정하지 않는다 — 원인(직접 수정한 SQL 등)을 찾고 보정 기록을 남긴다 (P5 대사) |
 | `FAILED` 인데 잔고가 안 돌아옴 | [database.md §9](docs/database.md) "환불 누락 확인", 해당 출금의 `user_id` | `user_id` 가 NULL 이면 P3 시절 출금이라 차감도 환불도 없다 (정상). 그 밖이면 버그 — `fail()` 을 거치지 않은 상태 변경이 있었는지 본다 |
@@ -185,3 +207,30 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env down -v        
 | `infra-smoke` | Compose 로 인프라 기동(`--wait`, 240초) → `verify.sh` → 항상 `down -v` | 컨테이너 로그 출력 |
 
 `main` push 와 모든 PR 에서 실행된다. PR 은 두 잡이 모두 초록이어야 머지한다.
+
+## 8. 부하 측정 (P4-2, k6)
+네 차감 전략의 처리량 · 지연 · 실패율을 같은 조건에서 잰다 (핫스팟 `load-hot` 1명 / 분산 `load-u001` ~ `load-u500`, 50 VU, 워밍업 10초 + 측정 60초). 결과는 [docs/perf/p4-2-lock-comparison.md](docs/perf/p4-2-lock-comparison.md).
+
+**준비** (이 PC 에서 앱 · MySQL · Redis · k6 가 CPU 를 나눠 쓰므로 측정 중에는 다른 무거운 작업을 하지 않는다. 다른 API 인스턴스(예: IntelliJ 로 띄운 것)는 모두 끈다 — 같은 DB 를 쓰는 발행기와 컨슈머가 측정용 출금을 은행으로 보내 버린다):
+```bash
+docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait
+./gradlew :apps:mock-bank:run --args="9090"        # 별도 터미널
+./gradlew :apps:api:bootJar
+```
+
+**앱 실행** (전략이 바뀔 때마다 다시 띄운다. 백그라운드 작업을 끄고 로그를 줄인다 — 또는 IntelliJ 실행 구성 `5. API (부하 측정)`):
+```bash
+java -Xms1g -Xmx1g -jar apps/api/build/libs/api-0.1.0-SNAPSHOT.jar   --wallet.debit-strategy=conditional   --transfer.outbox.relay.enabled=false --transfer.reconcile.enabled=false   --spring.kafka.listener.auto-startup=false   --server.tomcat.threads.max=200   --logging.level.io.github.hyeokjinon.banktransfer=WARN
+```
+
+**회차 실행** (Git Bash): `bash load/run.sh <전략> <hotspot|spread> <회차>` — 정리 → 시드 → InnoDB 정리 대기 → k6 → 정확성 확인(음수 잔고 · 잔고 ≠ 원장 합 · k6 202 수 ≠ 출금 행 수)을 한 번에 한다. 떠 있는 앱의 전략(`/actuator/info`)이 인자와 다르면 거부한다. 확인을 통과하지 못했거나 중단된 회차의 요약은 `.json.invalid` 로 바뀌어 표에서 빠진다. 같은 회차 번호를 다시 돌리면 그 회차의 이전 결과를 지우고 새로 만든다. 결과 원본은 `docs/perf/raw/`.
+```bash
+bash load/run.sh conditional hotspot 1
+WARMUP=2s MEASURE=5s VUS=5 bash load/run.sh conditional hotspot 1    # 짧은 시험 (이 숫자는 쓰지 않는다)
+bash load/summarize.sh                                               # 시나리오 · 전략별 중앙값 표
+```
+
+> **끝나면 반드시** `bash load/run.sh cleanup`. 측정용 출금 수만 건이 `RECEIVED` + 미발행 아웃박스로 남아 있어, 지우지 않고 평소 설정(발행기 켬)으로 앱을 띄우면 모두 은행으로 나간다. 이 명령은 부하용 사용자 정확히 501명(`load-hot`, `load-u001` ~ `load-u500`)의 데이터만 지운다.
+
+- k6 는 Docker 이미지(`grafana/k6:2.3.0`)로 돌고, CI 에서는 돌리지 않는다 (CI 는 전략별 정확성 테스트만).
+- DB 계정 정보는 `infra/.env` 에서 mysql 컨테이너 안으로만 전달된다 (호스트 명령행에 남지 않는다).

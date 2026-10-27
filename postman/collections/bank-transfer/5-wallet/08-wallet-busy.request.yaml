@@ -1,0 +1,36 @@
+$kind: http-request
+name: 5-8 (P4-2) redis 전략 + Redis 정지 → 503 WALLET_BUSY + Retry-After
+method: POST
+url: '{{baseUrl}}/api/v1/transfers'
+order: 8000
+description: |-
+  준비: API 를 redis 전략으로 띄우고(./gradlew :apps:api:bootRun --args="--wallet.debit-strategy=redis"),
+  docker compose -f infra/docker-compose.yml --env-file infra/.env stop redis 로 Redis 를 멈춘 뒤 Send.
+  끝나면 start redis. Redis 가 살아 있으면 202 다 (http/transfer.http 10-1 · 10-2).
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: X-User-Id
+    value: '{{userId}}'
+  - key: Idempotency-Key
+    value: '{{$guid}}'
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "{{accountNo}}",
+      "amount": 1000,
+      "memo": "락확인"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("503 WALLET_BUSY (Redis 에 닿지 않으면 락 없이 진행하지 않는다)", () => {
+        pm.response.to.have.status(503);
+        pm.expect(pm.response.json().code).to.eql("WALLET_BUSY");
+      });
+      pm.test("Retry-After: 1 (잠시 뒤 같은 요청을 다시)", () => {
+        pm.expect(pm.response.headers.get("Retry-After")).to.eql("1");
+      });
