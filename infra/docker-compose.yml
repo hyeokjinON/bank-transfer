@@ -1,4 +1,4 @@
-# 로컬 개발 인프라 (P3-0) — MySQL 8.4 · Kafka 4.1 (KRaft, 단일 노드) · Redis 7.4
+# 로컬 개발 인프라 (P3-0) — MySQL 8.4 · Kafka 4.1 (KRaft, 단일 노드) · Redis 7.4 · (선택) k6 2.3 부하 측정
 # 실행:  docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait
 # 확인:  bash infra/verify.sh
 # 종료:  docker compose -f infra/docker-compose.yml down        (데이터까지 지우려면 down -v)
@@ -90,6 +90,18 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+
+  # 부하 측정 (P4-2). 기본 실행에는 포함 안 됨 — load/run.sh 가 부른다:
+  #   docker compose -f infra/docker-compose.yml --env-file infra/.env --profile load run --rm k6 run /scripts/hotspot.js
+  # 스크립트는 load/, 요약 JSON 은 docs/perf/raw/ 로 나온다. 대상은 PC 에서 띄운 앱(host.docker.internal:8080)
+  k6:
+    image: grafana/k6:2.3.0
+    profiles: ["load"]
+    volumes:
+      - ../load:/scripts:ro
+      - ../docs/perf/raw:/out
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # 리눅스에서도 PC(호스트)에 닿게. Docker Desktop 은 원래 된다
 
 volumes:
   mysql-data:
