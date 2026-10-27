@@ -66,6 +66,9 @@ class RedisWalletDebit(
         } catch (e: IllegalMonitorStateException) {
             // 연장이 끊겨(긴 GC 멈춤 등) 이미 만료됐다. 안쪽이 조건부 UPDATE 라 잔고는 틀리지 않았다 (ADR-0009)
             log.error("wallet lock of {} expired before unlock", userId, e)
+        } catch (e: RuntimeException) {
+            // 알려진 두 경우 말고도 finally 에서 던지면 커밋된 접수가 500 이 되거나 트랜잭션의 진짜 예외를 가린다 → 로그만 남기고 삼킨다
+            log.error("unexpected failure while unlocking wallet lock of {}; it expires by lease", userId, e)
         }
     }
 

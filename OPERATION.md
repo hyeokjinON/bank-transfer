@@ -111,7 +111,7 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
 - `pessimistic`: `SELECT … FOR UPDATE` 로 행 락을 먼저 잡고 계산해 쓴다. 왕복이 하나 더 있고, 락을 쥔 동안 환불 · 충전도 기다린다. 5초 넘게 기다리면 503.
 - `optimistic`: 락 없이 읽고 `version` 이 그대로일 때만 쓴다. 부딪히면 트랜잭션 전체를 처음부터 다시 (최대 5회, 10~50ms 쉬고). 다 부딪히면 409. 같은 사용자 요청이 몰리면 재시도가 늘어난다.
 - `redis`: Redisson 사용자 락(`lock:wallet:{userId}`)을 트랜잭션 바깥에서 잡고 안쪽은 `conditional` 과 같다. 락은 DB 앞의 줄 세우기일 뿐 정확성은 DB 가 지킨다. 3초 안에 못 잡으면 503.
-- 바꾸는 법: `--wallet.debit-strategy=redis` 인자 또는 환경변수 `WALLET_DEBIT_STRATEGY=redis` 로 다시 띄운다. 확인: `curl localhost:8080/actuator/info` → `{"wallet":{"debit-strategy":"…"}}`.
+- 바꾸는 법: `--wallet.debit-strategy=redis` 인자로 다시 띄운다 (환경변수로 주려면 Boot 의 정식 이름 `WALLET_DEBITSTRATEGY=redis` — `WALLET_DEBIT_STRATEGY` 가 아니다). 확인: `curl localhost:8080/actuator/info` → `{"wallet":{"debit-strategy":"…"}}`.
 - `redis` 전략은 Redis 가 없어도 기동된다. 차감 요청만 503 (fail-closed — 락 없이 진행하지 않는다, 로그 `redis unavailable for wallet lock` ERROR). 환불 · 충전은 전략과 무관하게 항상 같다 (원자적 UPDATE).
 
 ## 3. 모의 은행 시나리오
@@ -223,7 +223,7 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait
 java -Xms1g -Xmx1g -jar apps/api/build/libs/api-0.1.0-SNAPSHOT.jar   --wallet.debit-strategy=conditional   --transfer.outbox.relay.enabled=false --transfer.reconcile.enabled=false   --spring.kafka.listener.auto-startup=false   --server.tomcat.threads.max=200   --logging.level.io.github.hyeokjinon.banktransfer=WARN
 ```
 
-**회차 실행** (Git Bash): `bash load/run.sh <전략> <hotspot|spread> <회차>` — 정리 → 시드 → InnoDB 정리 대기 → k6 → 정확성 확인(음수 잔고 · 잔고 ≠ 원장 합 · k6 202 수 ≠ 출금 행 수)을 한 번에 한다. 떠 있는 앱의 전략(`/actuator/info`)이 인자와 다르면 거부한다. 확인을 통과하지 못했거나 중단된 회차의 요약은 `.json.invalid` 로 바뀌어 표에서 빠진다. 같은 회차 번호를 다시 돌리면 그 회차의 이전 결과를 지우고 새로 만든다. 결과 원본은 `docs/perf/raw/`.
+**회차 실행** (Git Bash): `bash load/run.sh <전략> <hotspot|spread> <회차>` — 정리 → 시드 → InnoDB 정리 대기 → k6 → 정확성 확인(음수 잔고 · 잔고 ≠ 원장 합 · k6 202 수 ≠ 출금 행 수 · RECEIVED 가 아닌 출금 · 발행된 아웃박스 — 뒤 둘은 다른 인스턴스나 끄지 않은 발행기 · 컨슈머가 부하 출금을 건드렸는지 잡는다)을 한 번에 한다. 떠 있는 앱의 전략(`/actuator/info`)이 인자와 다르면 거부한다. 확인을 통과하지 못했거나 중단된 회차의 요약은 `.json.invalid` 로 바뀌어 표에서 빠진다. 같은 회차 번호를 다시 돌리면 그 회차의 이전 결과를 지우고 새로 만든다. 결과 원본은 `docs/perf/raw/`.
 ```bash
 bash load/run.sh conditional hotspot 1
 WARMUP=2s MEASURE=5s VUS=5 bash load/run.sh conditional hotspot 1    # 짧은 시험 (이 숫자는 쓰지 않는다)

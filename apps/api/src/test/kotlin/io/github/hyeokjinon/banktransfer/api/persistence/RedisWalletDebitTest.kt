@@ -148,6 +148,25 @@ class RedisWalletDebitTest : ApiIntegrationTest() {
     }
 
     @Test
+    fun `unlock 이 Redis 예외가 아닌 예외로 실패해도 이미 커밋된 접수는 그대로 반환된다`() {
+        val user = fundedUser(30_000)
+        val t = newTransfer(user)
+        // onUnlock 이 던지면 진짜 unlock 은 불리지 않는다 → 락이 남으므로 끝에서 직접 푼다
+        val spying = unlockSpy(redisson) { throw IllegalStateException("unlock 이 예상 밖으로 실패") }
+
+        try {
+            val saved = storeWith(spying).saveWithEvent(t, requested(t))   // 해제 실패가 커밋된 결과를 500 으로 바꾸면 여기서 던진다
+
+            assertEquals(t.id, saved.id)
+        } finally {
+            redisson.getLock(RedisWalletDebit.lockKey(user)).forceUnlock()
+        }
+        assertEquals(1, transfers.findById(t.id.toString()).map { 1 }.orElse(0))
+        assertEquals(20_000L, wallets.balanceOf(user))
+        assertEquals(listOf("WITHDRAW"), ledgerTypes(t.id))
+    }
+
+    @Test
     fun `Redis 에 닿지 않으면 WalletBusy (fail-closed) 이고 아무것도 남지 않는다`() {
         // 아무것도 듣지 않는 포트. lazyInitialization 이라 만들 때는 붙지 않고 첫 명령(tryLock)에서 실패한다
         val unreachable = Redisson.create(redissonConfig("redis://127.0.0.1:1"))
