@@ -310,7 +310,7 @@ SELECT id, type, amount, balance_after, transfer_id, created_at FROM wallet_ledg
 ## 10. 검토 중 · 다음 단계
 - **PK 타입**: 지금은 읽기 쉬운 `CHAR(36)` 무작위 UUID. InnoDB 는 PK 순서로 데이터를 저장하므로 무작위 값은 삽입 시 페이지 분할이 생기고 보조 인덱스도 커진다. 부하 측정 도구(`load/`, P4-2)로 `BINARY(16)` · 시간순 UUID(v7) · `BIGINT` 와 삽입 성능을 비교해 결정한다.
 - **데이터 보존**: 발행된 `outbox_event`, 만료된 `account_verification` 정리는 P5 배치.
-- **잔고 락 전략**: P4-2 에서 네 전략을 바꿔 끼울 수 있게 하고 k6 로 비교했다 (ADR-0009). 원장 보존(파티셔닝 · 보관)은 P5.
+- **잔고 락 전략**: P4-2 에서 네 전략을 바꿔 끼울 수 있게 했고 k6 로 비교한다 (ADR-0009, 결과는 측정 뒤 docs/perf 에 채움). 원장 보존(파티셔닝 · 보관)은 P5.
 - **읽기 성능**: 조회 API 가 늘면 실행계획(`EXPLAIN ANALYZE`) 결과를 이 문서에 남긴다.
 
 ## 변경 이력
