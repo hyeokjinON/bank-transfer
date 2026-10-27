@@ -9,10 +9,12 @@ import io.github.hyeokjinon.banktransfer.transfer.TransferEvent
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
+import org.redisson.api.RedissonClient
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import kotlin.test.assertEquals
@@ -33,6 +35,7 @@ class WalletDebitConcurrencyTest : ApiIntegrationTest() {
     @Autowired private lateinit var tx: TransactionTemplate
     @Autowired private lateinit var namedJdbc: NamedParameterJdbcTemplate
     @Autowired private lateinit var jdbc: JdbcTemplate
+    @Autowired private lateinit var redisson: RedissonClient
 
     private val references = RandomReferenceGenerator()
 
@@ -40,6 +43,7 @@ class WalletDebitConcurrencyTest : ApiIntegrationTest() {
         "conditional" -> ConditionalWalletDebit(namedJdbc, wallets)
         "pessimistic" -> PessimisticWalletDebit(namedJdbc, wallets)
         "optimistic" -> OptimisticWalletDebit(namedJdbc, wallets)
+        "redis" -> RedisWalletDebit(redisson, ConditionalWalletDebit(namedJdbc, wallets), Duration.ofSeconds(3))
         else -> error("unknown strategy $strategy")
     }
 
@@ -55,7 +59,7 @@ class WalletDebitConcurrencyTest : ApiIntegrationTest() {
     private fun count(sql: String, userId: String): Int = jdbc.queryForObject(sql, Int::class.java, userId)!!
 
     @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = ["conditional", "pessimistic", "optimistic"])
+    @ValueSource(strings = ["conditional", "pessimistic", "optimistic", "redis"])
     fun `잔고 10만 원에 1만 원 출금 100건 동시 - 음수 없음, 잔고 = 원장 합, 출금 = WITHDRAW = 성공 수`(strategy: String) {
         val store = JpaTransferStore(transfers, outbox, tx, wallets, debitFor(strategy))
         val user = fundedUser(100_000)
