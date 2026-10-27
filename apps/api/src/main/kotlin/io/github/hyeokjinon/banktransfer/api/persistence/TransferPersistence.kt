@@ -16,12 +16,15 @@ import jakarta.persistence.Table
 import jakarta.persistence.Version
 import org.hibernate.annotations.JdbcTypeCode
 import org.hibernate.type.SqlTypes
+import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.dao.PessimisticLockingFailureException
 import org.springframework.data.domain.Limit
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.util.UUID
@@ -173,41 +176,52 @@ internal fun outboxPayload(event: TransferEvent): String = when (event) {
 /**
  * 이체 저장소 (MySQL). saveWithEvent 는 transfer · 잔고 차감(wallet · wallet_ledger) · outbox_event 를 한 트랜잭션에 쓴다:
  * 모두 커밋되거나 모두 롤백되므로 "돈은 빠졌는데 출금이 없는" 상태나 "이체는 있는데 처리 신호가 없는" 상태가 생기지 않는다 (P4-1).
- * 실패 확정(fail)은 상태 전이와 환불을 한 트랜잭션에 쓴다. UNIQUE 위반은 제약 이름을 보고 도메인 예외([StoreConflict])로 바꿔 던진다.
+ * 차감 방식은 [debit] 전략이 정한다 (P4-2, ADR-0009): 트랜잭션 바깥([WalletDebit.around] — 낙관적 재시도 · Redis 락)과 안([WalletDebit.withdraw]).
+ * 실패 확정(fail)은 상태 전이와 환불을 한 트랜잭션에 쓴다 — 환불은 전략과 무관하게 [wallets] 의 원자적 UPDATE 다.
+ * UNIQUE 위반은 제약 이름을 보고, 락 실패(1205 · 1213)는 예외 계열을 보고 도메인 예외([StoreConflict])로 바꿔 던진다.
  *
- * 바깥 트랜잭션 안에서 [saveWithEvent] 를 부르면 안 된다. 이 클래스가 자기 트랜잭션을 열고 닫는 것에 기대기 때문이다:
- * UNIQUE 위반이면 이 트랜잭션이 롤백된 뒤에야 호출자(TransferService)가 이긴 쪽 건을 다시 읽을 수 있다.
- * 바깥 트랜잭션에 합류(REQUIRED)하면 롤백이 호출자 쪽으로 미뤄져 그 재조회가 깨진다.
- * 전파는 지금은 REQUIRED(기본값)로 두고, 호출자가 트랜잭션 밖에서 부른다는 전제를 이 문서로 지킨다.
+ * 바깥 트랜잭션 안에서 [saveWithEvent] 를 부르면 거부한다 (IllegalStateException, P4-2 에서 문서상 전제를 check 로 바꿨다).
+ * 이 클래스가 자기 트랜잭션을 열고 닫는 것에 기대는 것이 셋이다: UNIQUE 위반이면 이 트랜잭션이 롤백된 뒤에야 호출자(TransferService)가
+ * 이긴 쪽 건을 다시 읽을 수 있고, 낙관적 재시도는 매번 새 트랜잭션이어야 하며, Redis 락은 커밋이 끝난 뒤 풀어야 한다.
+ * 바깥 트랜잭션에 합류(REQUIRED)하면 셋 다 깨진다.
  */
 class JpaTransferStore(
     private val transfers: TransferJpaRepository,
     private val outbox: OutboxEventJpaRepository,
     private val tx: TransactionTemplate,
     private val wallets: WalletLedger,
+    private val debit: WalletDebit,
     private val payloadOf: (TransferEvent) -> String = ::outboxPayload,
 ) : TransferStore {
+    private val log = LoggerFactory.getLogger(javaClass)
 
     /**
      * 순서: 출금 INSERT(flush) → 잔고 차감 + 원장 WITHDRAW → 아웃박스 INSERT. 하나라도 실패하면 전부 롤백된다.
      * 출금 INSERT 를 먼저 하는 이유: 같은 (사용자, 키)가 동시에 오면 진 쪽이 UNIQUE 에서 멈춰(이긴 쪽 커밋까지 대기) 지갑을 건드리지 않고
      * 기존 건을 돌려받는다. 차감을 먼저 하면 잔고가 한 건 몫뿐일 때 진 쪽이 멱등 응답(200) 대신 잔고 부족(422)을 받는다.
      * 아웃박스를 차감 뒤에 두는 이유: 마지막 INSERT 가 실패해도 차감까지 되돌아간다는 것을 테스트로 보일 수 있다.
+     * 락을 못 잡으면(MySQL 1205 락 대기 초과 · 1213 데드락 — Spring 의 PessimisticLockingFailureException 계열) 전략과 무관하게
+     * [StoreConflict.WalletBusy] 다: 아무것도 남지 않았고, 다시 보내면 된다(같은 키면 멱등 응답). P4-1 의 "같은 키 3건 이상 동시 + 잔고 부족 → 1213 → 500" 도 이 길로 503 이 된다.
      */
     override fun saveWithEvent(transfer: Transfer, event: TransferEvent): Transfer {
         // 새 출금은 반드시 지갑에서 뺀다. 사용자 없는 출금을 받으면 차감 없이 돈이 나가는 길이 생긴다
         val userId = requireNotNull(transfer.userId) { "a new transfer must have userId (it is debited from the user's wallet)" }
+        check(!TransactionSynchronizationManager.isActualTransactionActive()) {
+            "saveWithEvent must not join an outer transaction: retries and locks wrap its own transaction"
+        }
         return try {
-            tx.execute {
-                // flush 로 UNIQUE 위반을 여기서 터뜨려야 아래 catch 에서 StoreConflict 로 바꿀 수 있다 (커밋 시점까지 미루지 않는다)
-                val saved = transfers.saveAndFlush(TransferEntity.from(transfer))
-                if (!wallets.withdraw(userId, transfer.id, transfer.amount, transfer.createdAt)) {
-                    // 0건 = 잔고 부족 또는 지갑 없음. 예외로 트랜잭션 전체(방금 INSERT 한 출금 포함)를 롤백한다
-                    throw StoreConflict.InsufficientBalance(userId, transfer.amount)
-                }
-                outbox.saveAndFlush(outboxRow(event))
-                saved.toDomain()
-            }!!
+            debit.around(userId) {
+                tx.execute {
+                    // flush 로 UNIQUE 위반을 여기서 터뜨려야 아래 catch 에서 StoreConflict 로 바꿀 수 있다 (커밋 시점까지 미루지 않는다)
+                    val saved = transfers.saveAndFlush(TransferEntity.from(transfer))
+                    if (!debit.withdraw(userId, transfer.id, transfer.amount, transfer.createdAt)) {
+                        // false = 잔고 부족 또는 지갑 없음. 예외로 트랜잭션 전체(방금 INSERT 한 출금 포함)를 롤백한다
+                        throw StoreConflict.InsufficientBalance(userId, transfer.amount)
+                    }
+                    outbox.saveAndFlush(outboxRow(event))
+                    saved.toDomain()
+                }!!
+            }
         } catch (e: DataIntegrityViolationException) {
             // MySQL 메시지 예: Duplicate entry 'user-1-k1' for key 'transfer.uk_transfer_user_idempotency'
             // V3 에서 이름이 바뀌었다. 옛 이름(uk_transfer_idempotency)은 새 이름의 부분 문자열이 아니라 함께 고쳐야 했다
@@ -217,6 +231,10 @@ class JpaTransferStore(
                 "uk_transfer_reference" in message -> throw StoreConflict.DuplicateReference(transfer.reference)
                 else -> throw e
             }
+        } catch (e: PessimisticLockingFailureException) {
+            // 드물고 운영자가 알아야 하는 일이라 WARN (부하 측정은 WARN 으로 돌리므로 요청마다 찍히는 로그는 두지 않는다)
+            log.warn("wallet of {} is busy (lock wait timeout or deadlock), answering WALLET_BUSY: {}", userId, e.mostSpecificCause.message)
+            throw StoreConflict.WalletBusy(userId)
         }
     }
 

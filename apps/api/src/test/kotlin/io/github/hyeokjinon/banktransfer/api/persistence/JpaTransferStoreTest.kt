@@ -8,11 +8,17 @@ import io.github.hyeokjinon.banktransfer.transfer.TransferEvent
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus
 import io.github.hyeokjinon.banktransfer.transfer.TransferStore
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.dao.CannotAcquireLockException
+import org.springframework.dao.PessimisticLockingFailureException
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
@@ -28,6 +34,10 @@ class JpaTransferStoreTest : ApiIntegrationTest() {
     @Autowired private lateinit var outbox: OutboxEventJpaRepository
     @Autowired private lateinit var tx: TransactionTemplate
     @Autowired private lateinit var jdbc: JdbcTemplate
+    @Autowired private lateinit var namedJdbc: NamedParameterJdbcTemplate
+
+    /** 기준선 차감 전략 (P4-2). 테스트가 직접 만드는 저장소(아웃박스를 깨뜨린 것 등)에 넣는다. */
+    private val conditional by lazy { ConditionalWalletDebit(namedJdbc, wallets) }
 
     private val references = RandomReferenceGenerator()
 
@@ -89,7 +99,7 @@ class JpaTransferStoreTest : ApiIntegrationTest() {
 
     @Test
     fun `아웃박스 저장이 실패하면 이체도 저장되지 않는다`() {
-        val broken = JpaTransferStore(transfers, outbox, tx, wallets, payloadOf = { "not-json" })
+        val broken = JpaTransferStore(transfers, outbox, tx, wallets, conditional, payloadOf = { "not-json" })
         val transfer = newTransfer()
 
         assertFails { broken.saveWithEvent(transfer, requested(transfer)) }
@@ -231,7 +241,7 @@ class JpaTransferStoreTest : ApiIntegrationTest() {
 
     @Test
     fun `재발행 - 아웃박스 INSERT 가 실패하면 횟수 증가도 롤백된다`() {
-        val broken = JpaTransferStore(transfers, outbox, tx, wallets, payloadOf = { "not-json" })
+        val broken = JpaTransferStore(transfers, outbox, tx, wallets, conditional, payloadOf = { "not-json" })
         val t = newTransfer().also { store.saveWithEvent(it, requested(it)) }
 
         assertFails { broken.republish(t.id, 0, Instant.now()) }
@@ -325,7 +335,7 @@ class JpaTransferStoreTest : ApiIntegrationTest() {
 
     @Test
     fun `접수 - 아웃박스 INSERT 가 실패하면 차감도 롤백된다`() {
-        val broken = JpaTransferStore(transfers, outbox, tx, wallets, payloadOf = { "not-json" })
+        val broken = JpaTransferStore(transfers, outbox, tx, wallets, conditional, payloadOf = { "not-json" })
         val before = wallets.balanceOf(user)
         val t = newTransfer()
 
@@ -428,5 +438,57 @@ class JpaTransferStoreTest : ApiIntegrationTest() {
         assertEquals(TransferStatus.FAILED, after.status)
         assertNull(after.userId)
         assertEquals(emptyList(), ledgerTypes(id))
+    }
+
+    @Test
+    fun `접수 - 바깥 트랜잭션 안에서 부르면 거부한다 (낙관적 재시도 · Redis 락은 트랜잭션 바깥이어야 한다)`() {
+        val t = newTransfer()
+
+        assertFailsWith<IllegalStateException> { tx.execute { store.saveWithEvent(t, requested(t)) } }
+
+        assertNull(store.findById(t.id))
+    }
+
+    @Test
+    fun `접수 - 차감 전략의 바깥(around)이 접수 트랜잭션 전체를 감싼다`() {
+        val seen = mutableListOf<String>()
+        var activeBefore: Boolean? = null
+        var committedAfter: Int? = null
+        val t = newTransfer()
+        val wrapping = object : WalletDebit by conditional {
+            override fun <T> around(userId: String, transaction: () -> T): T {
+                seen += userId
+                activeBefore = TransactionSynchronizationManager.isActualTransactionActive()
+                return transaction().also {
+                    // 다른 스레드(다른 커넥션)에서 보인다 = transaction() 이 돌아왔을 때 이미 커밋됐다
+                    committedAfter = CompletableFuture.supplyAsync {
+                        jdbc.queryForObject("SELECT COUNT(*) FROM transfer WHERE id = ?", Int::class.java, t.id.toString())
+                    }.get(10, TimeUnit.SECONDS)
+                }
+            }
+        }
+
+        JpaTransferStore(transfers, outbox, tx, wallets, wrapping).saveWithEvent(t, requested(t))
+
+        assertEquals(listOf(user), seen)
+        assertEquals(false, activeBefore)
+        assertEquals(1, committedAfter)
+    }
+
+    @Test
+    fun `접수 - 락을 못 잡으면(MySQL 1205 · 1213 = PessimisticLockingFailureException 계열) 전략과 무관하게 WalletBusy, 아무것도 남지 않는다`() {
+        for (failure in listOf(CannotAcquireLockException("Lock wait timeout exceeded (test)"), PessimisticLockingFailureException("Deadlock found (test)"))) {
+            val busy = object : WalletDebit {
+                override fun withdraw(userId: String, transferId: UUID, amount: Long, at: Instant): Boolean = throw failure
+            }
+            val before = wallets.balanceOf(user)
+            val t = newTransfer()
+
+            assertFailsWith<StoreConflict.WalletBusy> { JpaTransferStore(transfers, outbox, tx, wallets, busy).saveWithEvent(t, requested(t)) }
+
+            assertNull(store.findById(t.id))
+            assertEquals(before, wallets.balanceOf(user))
+            assertEquals(0, outbox.countByAggregateId(t.id.toString()))
+        }
     }
 }

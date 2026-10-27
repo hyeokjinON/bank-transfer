@@ -15,12 +15,12 @@ import java.util.UUID
 enum class LedgerType { DEPOSIT, WITHDRAW, REFUND }
 
 /**
- * 사용자 원화 잔고(wallet)와 append-only 원장(wallet_ledger)의 돈 움직임 SQL 을 한곳에 모은다 (P4-1, ADR-0008).
- * P4-2 에서 차감 방식을 비관적 락 · 낙관적 락(version) · Redis 분산락으로 바꿔 끼울 이음새가 [withdraw] 다.
+ * 사용자 원화 잔고(wallet)와 append-only 원장(wallet_ledger)의 SQL 을 모은다 (P4-1, ADR-0008).
+ * 차감 SQL 은 P4-2 부터 차감 전략([WalletDebit] — 조건부 · 비관적 · 낙관적 · Redis)이 갖고, 원장 기록만 [recordWithdraw] 로 여기를 거친다 (ADR-0009).
+ * 충전 · 환불은 전략과 무관하게 원자적 UPDATE(balance = balance + ?)다 — 더하기라 음수 위험이 없고, P4-2 의 비교 대상은 차감이다.
  *
- * - 차감은 조건부 UPDATE 한 문장(balance >= :amount)이라 행 락 한 번으로 원자적이다. 별도 락이 없다. 음수는 CHECK 제약이 2차로 막는다.
- * - [withdraw] · [refund] 는 호출자(JpaTransferStore)의 트랜잭션 안에서만 부른다: 출금 행 · 상태 전이 · 아웃박스와 함께 커밋되거나 함께 롤백돼야 한다.
- * - 원장의 balance_after 는 방금 바꾼 행(이 트랜잭션이 X 락을 쥔 행)을 다시 읽은 값이라 다른 트랜잭션과 섞이지 않는다.
+ * - [refund] · [recordWithdraw] 는 호출자(JpaTransferStore · 차감 전략)의 트랜잭션 안에서만 부른다: 출금 행 · 상태 전이 · 아웃박스와 함께 커밋되거나 함께 롤백돼야 한다.
+ * - 원장의 balance_after 는 이 트랜잭션이 X 락을 쥔 행의 값이라 다른 트랜잭션과 섞이지 않는다.
  * - 시각은 Timestamp 로 넘기고 KST 변환은 JDBC 설정(connectionTimeZone)이 한다 (database.md §2).
  */
 class WalletLedger(
@@ -49,20 +49,12 @@ class WalletLedger(
     }
 
     /**
-     * 차감 (출금 접수). 잔고가 [amount] 이상일 때만 빼고 원장에 WITHDRAW 를 남긴다. 지갑이 없거나 모자라면 0건 → false (아무것도 쓰지 않는다).
-     * 호출자 트랜잭션 안에서만 부른다 — false 면 호출자가 예외를 던져 출금 INSERT 까지 롤백한다.
+     * 차감 전략이 잔고를 뺀 뒤 원장에 WITHDRAW 를 남긴다 (P4-2). [balanceAfter] = 이 트랜잭션이 X 락을 쥔 지갑 행의 값 —
+     * 조건부 · Redis 는 UPDATE 뒤 다시 읽은 값, 비관적 · 낙관적은 계산해 쓴 값이다.
      */
-    fun withdraw(userId: String, transferId: UUID, amount: Long, at: Instant): Boolean {
+    internal fun recordWithdraw(userId: String, transferId: UUID, amount: Long, balanceAfter: Long, at: Instant) {
         requireCallerTransaction()
-        val ts = Timestamp.from(at.toDbPrecision())
-        val updated = jdbc.update(
-            "UPDATE wallet SET balance = balance - :amount, version = version + 1, updated_at = :at " +
-                "WHERE user_id = :userId AND balance >= :amount",
-            MapSqlParameterSource().addValue("userId", userId).addValue("amount", amount).addValue("at", ts),
-        )
-        if (updated == 0) return false
-        appendLedger(userId, LedgerType.WITHDRAW, amount, lockedBalance(userId), transferId, ts)
-        return true
+        appendLedger(userId, LedgerType.WITHDRAW, amount, balanceAfter, transferId, Timestamp.from(at.toDbPrecision()))
     }
 
     /**
@@ -103,7 +95,8 @@ class WalletLedger(
             Long::class.java,
         )!!
 
-    private fun lockedBalance(userId: String): Long =
+    /** 방금 이 트랜잭션이 바꾼 지갑 행의 잔고. X 락을 쥐고 있어 다른 트랜잭션의 값과 섞이지 않는다. */
+    internal fun lockedBalance(userId: String): Long =
         jdbc.queryForObject(
             "SELECT balance FROM wallet WHERE user_id = :userId",
             MapSqlParameterSource().addValue("userId", userId),
@@ -123,9 +116,10 @@ class WalletLedger(
                 .addValue("at", at),
         )
     }
-
-    private fun requireCallerTransaction() =
-        check(TransactionSynchronizationManager.isActualTransactionActive()) {
-            "must run inside the caller's transaction, together with the transfer row"
-        }
 }
+
+/** 잔고를 바꾸는 SQL(차감 전략 · 환불 · 원장 기록)은 호출자 트랜잭션 안에서만 — 출금 행 · 상태 전이 · 아웃박스와 함께 커밋되거나 함께 롤백돼야 한다. */
+internal fun requireCallerTransaction() =
+    check(TransactionSynchronizationManager.isActualTransactionActive()) {
+        "must run inside the caller's transaction, together with the transfer row"
+    }

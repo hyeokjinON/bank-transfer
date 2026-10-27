@@ -5,10 +5,12 @@ import io.github.hyeokjinon.banktransfer.account.BankPort
 import io.github.hyeokjinon.banktransfer.account.RandomCodeGenerator
 import io.github.hyeokjinon.banktransfer.account.VerificationRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.AccountVerificationJpaRepository
+import io.github.hyeokjinon.banktransfer.api.persistence.ConditionalWalletDebit
 import io.github.hyeokjinon.banktransfer.api.persistence.JpaTransferStore
 import io.github.hyeokjinon.banktransfer.api.persistence.JpaVerificationRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.OutboxEventJpaRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.TransferJpaRepository
+import io.github.hyeokjinon.banktransfer.api.persistence.WalletDebit
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletLedger
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
@@ -96,9 +98,13 @@ class AppConfiguration {
     fun verificationRepository(jpa: AccountVerificationJpaRepository, tx: TransactionTemplate): VerificationRepository =
         JpaVerificationRepository(jpa, tx, Clock.systemUTC())
 
-    /** 잔고 SQL 한 곳 (P4-1). 접수 · 실패 확정 트랜잭션 안에서 JpaTransferStore 가 부르고, 충전 · 조회는 WalletController 가 부른다. */
+    /** 잔고 SQL 한 곳 (P4-1). 실패 확정 트랜잭션 안에서 JpaTransferStore 가 환불을 부르고, 충전 · 조회는 WalletController 가 부른다. */
     @Bean
     fun walletLedger(jdbc: NamedParameterJdbcTemplate, tx: TransactionTemplate) = WalletLedger(jdbc, tx, Clock.systemUTC())
+
+    /** 잔고 차감 전략 (P4-2). 기준선 = P4-1 과 같은 조건부 UPDATE 한 문장. */
+    @Bean
+    fun walletDebit(jdbc: NamedParameterJdbcTemplate, wallets: WalletLedger): WalletDebit = ConditionalWalletDebit(jdbc, wallets)
 
     @Bean
     fun transferStore(
@@ -106,7 +112,8 @@ class AppConfiguration {
         outbox: OutboxEventJpaRepository,
         tx: TransactionTemplate,
         wallets: WalletLedger,
-    ): TransferStore = JpaTransferStore(transfers, outbox, tx, wallets)
+        debit: WalletDebit,
+    ): TransferStore = JpaTransferStore(transfers, outbox, tx, wallets, debit)
 
     /** transfer 모듈은 account 모듈을 모른다. "인증된 계좌인가?"를 1원인증 저장소에 연결하는 곳은 여기뿐이다. */
     @Bean
