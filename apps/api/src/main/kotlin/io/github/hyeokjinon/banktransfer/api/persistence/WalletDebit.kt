@@ -1,5 +1,6 @@
 package io.github.hyeokjinon.banktransfer.api.persistence
 
+import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.sql.Timestamp
@@ -42,6 +43,39 @@ class ConditionalWalletDebit(
         )
         if (updated == 0) return false
         ledger.recordWithdraw(userId, transferId, amount, ledger.lockedBalance(userId), at)
+        return true
+    }
+}
+
+/**
+ * 비관적 락: SELECT … FOR UPDATE 로 지갑 행의 X 락을 먼저 잡고, 읽은 잔고로 판단해 계산한 값을 쓴다.
+ * "읽고 → 비교 → 값 쓰기"여도 안전하다: 락을 쥔 동안 다른 차감 · 환불 · 충전의 UPDATE 가 커밋까지 기다리므로 덮어쓸 값이 생기지 않는다.
+ * 진 쪽은 FOR UPDATE 에서 기다렸다가 바뀐 잔고를 읽는다. 5초(innodb_lock_wait_timeout) 넘게 기다리면 MySQL 1205 → 저장소가 WalletBusy(503).
+ * 조건부 UPDATE 와 결과가 같고 왕복이 하나(SELECT … FOR UPDATE) 더 있다 — 그 비용이 P4-2 측정에서 보려는 것이다.
+ */
+class PessimisticWalletDebit(
+    private val jdbc: NamedParameterJdbcTemplate,
+    private val ledger: WalletLedger,
+) : WalletDebit {
+
+    override fun withdraw(userId: String, transferId: UUID, amount: Long, at: Instant): Boolean {
+        // 트랜잭션 밖이면 FOR UPDATE 가 문장 하나 끝에 풀려 락의 의미가 없다
+        requireCallerTransaction()
+        val balance = jdbc.query(
+            "SELECT balance FROM wallet WHERE user_id = :userId FOR UPDATE",
+            MapSqlParameterSource().addValue("userId", userId),
+            RowMapper { rs, _ -> rs.getLong("balance") },
+        ).singleOrNull()
+        if (balance == null || balance < amount) return false
+        val newBalance = balance - amount
+        jdbc.update(
+            "UPDATE wallet SET balance = :newBalance, version = version + 1, updated_at = :at WHERE user_id = :userId",
+            MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("newBalance", newBalance)
+                .addValue("at", Timestamp.from(at.toDbPrecision())),
+        )
+        ledger.recordWithdraw(userId, transferId, amount, newBalance, at)
         return true
     }
 }

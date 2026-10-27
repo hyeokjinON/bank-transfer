@@ -13,6 +13,13 @@ spring:
     url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:bank_transfer}?connectionTimeZone=Asia/Seoul&forceConnectionTimeZoneToSession=true
     username: ${MYSQL_USER:bank}
     password: ${MYSQL_PASSWORD:local-dev-only}
+    hikari:
+      # 풀 크기를 명시한다 (P4-2). 기본 10 이면 락 비교가 "풀이 작다"를 재게 된다(ADR-0008 의 10-way 경합 한계).
+      # minimum-idle 기본값 = 최대 → 측정 중 커넥션을 새로 만들지 않는다
+      maximum-pool-size: 20
+      # 락 대기 한도를 커넥션마다 5초로 (MySQL 기본 50초). 50초 동안 커넥션 · 톰캣 스레드를 붙잡으면 장애가 번진다.
+      # 넘으면 1205 → 503 WALLET_BUSY. 발행기 · 정리 작업 트랜잭션에도 적용된다 (지금은 짧아 영향 없음 — HANDOVER)
+      connection-init-sql: SET SESSION innodb_lock_wait_timeout = 5
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     producer:
