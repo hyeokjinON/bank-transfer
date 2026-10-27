@@ -15,7 +15,7 @@
 - 오류 코드 `WALLET_BUSY`(503) · `CONCURRENT_UPDATE`(409) + `Retry-After: 1`.
 - Redisson 4.8.0, 테스트용 Redis 컨테이너(`redis:7.4-alpine`).
 - `load/` (k6 2.3.0 핫스팟 · 분산, 시드 · 정리 · 검증 · `run.sh` · `summarize.sh`), compose `k6` (`load` 프로필), 실행 구성 `5. API (부하 측정)`.
-- ADR-0009, 측정 결과 문서 (`docs/perf/p4-2-lock-comparison.md`, 측정 뒤 채움).
+- ADR-0009, 측정 결과 `docs/perf/p4-2-lock-comparison.md` · 원본 `docs/perf/raw/` (24회 + drift 확인 1회).
 ### Changed
 - Hikari 풀 20 명시 · 락 대기 5초(`innodb_lock_wait_timeout`, 모든 커넥션).
 - MySQL 1205 · 1213 → 503 (전에는 500).

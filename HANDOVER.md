@@ -13,7 +13,7 @@
 | P3-3a 결과조회 · 정리 작업 | ✅ 완료 (2026-10-21, [#7](https://github.com/hyeokjinON/bank-transfer/pull/7)) | ADR-0006 채택, 테스트 135개. CI `build` · `infra-smoke` 통과. 손 확인: Postman 3-1 → 3-5 로 무응답 계좌 출금 5건 모두 `COMPLETED 0000`, `sending_at` 뒤 32~38초에 확정(30초 유예 + 주기), `inquiry_attempts` 0 |
 | P3-3b 재시도 | ✅ 완료 (2026-10-26, [#9](https://github.com/hyeokjinON/bank-transfer/pull/9)) | ADR-0007 채택, 테스트 161개. CI `build` · `infra-smoke` 통과. 재시도 토픽 · DLT · 제한 재발행 · `FAILED E001`. 손 확인: 은행을 내린 채 접수한 2건이 재시도 토픽 경로로 은행 복구 뒤 `COMPLETED 0000` (재발행 0회, `sending_at` 은 접수 약 95초 뒤 = 5s·30s·60s 마지막 재시도). 재발행 경로(DLT → 재발행 → `COMPLETED` / 3회 뒤 `E001`)는 자동 흐름 테스트로만 증명 — 손으로 보려면 실행 구성 `4. API (재발행 손 확인)` 으로 은행을 15초 넘게 내려 둔다 |
 | P4-1 원화 잔고 | ✅ 완료 (2026-10-26, [#11](https://github.com/hyeokjinON/bank-transfer/pull/11)) | ADR-0008 채택, 테스트 206개. CI `build` · `infra-smoke` 통과. 손 확인: Postman 5 폴더로 `user-p41` 출금 19건(COMPLETED 6 · 은행 거절 FAILED 1001 13) — 환불 13건이 거절 건수와 정확히 같고, 잔고 1,500,000 = 원장 합 |
-| P4-2 락 전략 비교 | 🟡 리뷰 중 (측정 결과는 측정 뒤 `docs/perf/p4-2-lock-comparison.md` 와 ADR-0009 결과 절에 채움) | ADR-0009 제안, 테스트 239개. 차감 전략 4종 · 409/503 · k6 도구 |
+| P4-2 락 전략 비교 | 🟡 리뷰 중 | ADR-0009 제안, 테스트 240개. 차감 전략 4종 · 409/503 · k6 도구. 측정 24회 완료 ([docs/perf](docs/perf/p4-2-lock-comparison.md)): 핫스팟 접수 조건부 106/s > 비관적 99 > Redis 81 > 낙관적 45(409 77%), 분산은 차이 없음 |
 | P5 ~ P9 | ⬜ 예정 | README 로드맵 |
 
 ## 2. P3 설계 (합의된 것)
@@ -66,7 +66,7 @@ P3-1 (PR #3) · P3-2 (PR #5) · P3-3a (PR #7) · P3-3b (PR #9) 모두 머지됐�
 
 ## 3. 다음 할 일 (순서대로)
 1. velog `#7` (P4-1: 조건부 UPDATE 한 문장으로 잔고 음수 막기 · 실패 확정 경로 단일화 · 뮤테이션 확인). `#2` ~ `#6` 은 비공개로 올라가 있다. (아직 안 했으면)
-2. P4-2 측정 결과 리뷰 · ADR-0009 의 기본 전략 판단 확인. 측정 중 다른 API 인스턴스(IntelliJ 등)는 모두 끄고, 끝나면 `bash load/run.sh cleanup` ([OPERATION §8](OPERATION.md#8-부하-측정-p4-2-k6)).
+2. P4-2 PR 리뷰 · 머지 (측정 24회 완료 — [결과](docs/perf/p4-2-lock-comparison.md) · ADR-0009 결과 절의 기본 전략 판단 확인). 다시 잴 때는 다른 API 인스턴스(IntelliJ 등)를 모두 끄고, 끝나면 `bash load/run.sh cleanup` ([OPERATION §8](OPERATION.md#8-부하-측정-p4-2-k6)).
 3. velog `#8` (P4-2: 락 전략 4종의 비용이 어디서 생기나 — 숫자로).
 4. P5 설계 (일마감 대사).
 
