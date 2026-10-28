@@ -27,6 +27,7 @@ import kotlin.random.Random
  * 정리 작업도 마찬가지로 끈다 (TransferReconciler.reconcile() 을 직접 부른다).
  * 재시도 토픽 간격은 위 프로퍼티로 줄인다. 은행 장애는 [withBankDown] 으로 만든다.
  * 잔고 단언이 다른 테스트에 흔들리지 않게 테스트마다 새 사용자를 쓴다 (P4-1): 정리 작업(RepublishFlowTest 의 1ms 대기)이 남은 RECEIVED 를 모두 훑어 환불할 수 있다.
+ * Redis 컨테이너는 차감 전략 테스트(RedisWalletDebitTest)용이다 (P4-2). 앱은 기본 전략(conditional)이라 Redis 를 쓰지 않는다.
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -39,7 +40,7 @@ import kotlin.random.Random
         "transfer.retry.max-delay-ms=2000",
     ],
 )
-@Import(MySqlTestContainer::class, KafkaTestContainer::class)
+@Import(MySqlTestContainer::class, KafkaTestContainer::class, RedisTestContainer::class)
 abstract class ApiIntegrationTest {
 
     companion object {

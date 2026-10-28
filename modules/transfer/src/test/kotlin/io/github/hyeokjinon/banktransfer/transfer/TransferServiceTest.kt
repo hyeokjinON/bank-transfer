@@ -27,7 +27,11 @@ class TransferServiceTest {
         /** 지갑 잔고 (사용자 하나만 본다). 실제 저장소처럼 저장과 함께 빼고, 모자라면 아무것도 남기지 않고 InsufficientBalance. */
         var balance: Long = Long.MAX_VALUE
 
+        /** 지정하면 다음 저장 한 번에서 이 예외를 던진다 (잔고를 잡지 못함 · 동시 변경으로 포기 — P4-2). 실제 저장소처럼 아무것도 남기지 않는다. */
+        var failure: RuntimeException? = null
+
         override fun saveWithEvent(transfer: Transfer, event: TransferEvent): Transfer {
+            failure?.let { failure = null; throw it }
             raceWinner?.let { winner ->
                 raceWinner = null
                 transfers[winner.id] = winner
@@ -243,6 +247,27 @@ class TransferServiceTest {
         assertEquals(mine.id, service.get(USER, mine.id).id)
         assertFailsWith<TransferException.TransferNotFound> { service.get(OTHER, mine.id) }   // 존재 여부도 숨긴다
         assertFailsWith<TransferException.TransferNotFound> { service.get(USER, legacy.id) }
+    }
+
+    @Test
+    fun `저장소가 잔고를 지금 잡지 못하면 WalletBusy 이고 출금 기록 · 이벤트를 남기지 않는다`() {
+        store.failure = StoreConflict.WalletBusy(USER)
+
+        assertFailsWith<TransferException.WalletBusy> { service.request(command()) }
+
+        assertTrue(store.transfers.isEmpty())
+        assertTrue(store.events.isEmpty())
+    }
+
+    @Test
+    fun `동시 변경으로 저장소가 포기하면 ConcurrentUpdate - 같은 요청을 다시 보내면 새로 접수된다`() {
+        store.failure = StoreConflict.ConcurrentUpdate(USER)
+
+        assertFailsWith<TransferException.ConcurrentUpdate> { service.request(command(key = "k-retry")) }
+        val retried = service.request(command(key = "k-retry"))   // Retry-After 뒤 같은 요청 — 앞 시도는 아무것도 남기지 않았다
+
+        assertTrue(retried.created)
+        assertEquals(1, store.transfers.size)
     }
 
     private companion object {

@@ -23,6 +23,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-kafka")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("tools.jackson.module:jackson-module-kotlin")
+    // Redis 분산락 (P4-2, redis 전략일 때만 클라이언트를 만든다). 스타터 없이 빈 하나만 필요하다. Netty 는 Boot BOM 버전(4.2.x)으로 맞춰진다
+    implementation("org.redisson:redisson:4.8.0")
     runtimeOnly("com.mysql:mysql-connector-j")
 
     testImplementation(project(":apps:mock-bank"))
@@ -32,6 +34,7 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-kafka")
     testImplementation("org.awaitility:awaitility-kotlin")
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
+    testImplementation("org.testcontainers:testcontainers")   // GenericContainer (Redis 전용 모듈이 없다)
 }
 
 // 테스트 JVM 시간대를 UTC 로 고정한다. 기본값(개발자 PC 의 KST)에 기대어 KST 변환 테스트가 우연히 통과하지 않게,

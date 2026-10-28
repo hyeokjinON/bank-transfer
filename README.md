@@ -28,7 +28,8 @@
 - **결과조회와 정리 작업 (P3-3a)**: 응답을 못 받은 이체(`UNKNOWN`)와 30초 넘게 멈춘 `SENDING` 을 다시 보내지 않고, 이용기관 거래번호로 은행에 결과조회(`INQ`, 전문 규격 v0.2)해 보낸 지 30초 유예 뒤 10초마다 `COMPLETED` / `FAILED` 로 확정. 10번 물어도 모르면 멈추고 경고(일마감 대사 대상) ([ADR-0006](docs/adr/0006-inquire-instead-of-resend.md))
 - **재시도 토픽 · 제한 재발행 (P3-3b)**: 은행에 보내지도 못한 출금은 재시도 토픽(5s · 30s · 60s, 뒤 메시지를 막지 않음) → DLT → 정리 작업이 아웃박스로 최대 3번 다시 발행, 그래도 안 되면 FAILED E001 (돈은 움직이지 않음). 결과조회 중 연결 없음은 시도로 세지 않음 ([ADR-0007](docs/adr/0007-retry-topic-and-bounded-republish.md))
 - **원화 잔고 (P4-1)**: 사용자(`X-User-Id`)별 원화 잔고와 append-only 원장. 출금 접수 트랜잭션에서 조건부 UPDATE 로 차감(잔고 부족 422), 실패로 확정되면 같은 트랜잭션에서 환불, 결과를 모르는 출금은 보류로 묶음. 동시 출금 100건에도 잔고는 음수가 되지 않음. 멱등키 · 1원인증 · 조회는 사용자 범위 ([ADR-0008](docs/adr/0008-wallet-debit-on-intake-refund-on-failure.md))
-- **테스트 206개**: 전문 직렬화, 쪼개진 TCP 패킷, 동시 요청 50건 매칭, 타임아웃, 재접속, API 통합(HTTP → TCP), MySQL · Kafka 통합(Testcontainers: 같은 키 동시 10건, 아웃박스 원자성, 발행기 2개 동시 발행 · 접수가 발행기에 막히지 않음, 같은 메시지 두 번 → 은행 1건, 처리 후 무응답 → 결과조회로 확정 · 입금 1건, 은행 장애 → 재시도 토픽 → DLT → 재발행 → 입금 1건, 동시 출금 100건 → 정확히 10건 · 잔고 0, 실패 확정 경로마다 환불)
+- **잔고 차감 락 전략 (P4-2)**: 같은 차감을 조건부 UPDATE · 비관적 락(FOR UPDATE) · 낙관적 락(version + 재시도) · Redis 분산락(Redisson, DB 앞의 줄 세우기)으로 바꿔 끼우고 기동 설정으로 하나를 고른다. 네 전략 모두 동시 출금 100건에도 음수 없음 · 잔고 = 원장 합. 락을 못 잡으면 503 WALLET_BUSY, 재시도 소진은 409 CONCURRENT_UPDATE (둘 다 Retry-After). k6 핫스팟 · 분산 비교 → [측정 결과](docs/perf/p4-2-lock-comparison.md) (핫스팟 접수: 조건부 106/s > 비관적 99 > Redis 81 > 낙관적 45 — 409 77%) ([ADR-0009](docs/adr/0009-wallet-debit-strategies-and-lock-comparison.md))
+- **테스트 240개**: 전문 직렬화, 쪼개진 TCP 패킷, 동시 요청 50건 매칭, 타임아웃, 재접속, API 통합(HTTP → TCP), MySQL · Kafka 통합(Testcontainers: 같은 키 동시 10건, 아웃박스 원자성, 발행기 2개 동시 발행 · 접수가 발행기에 막히지 않음, 같은 메시지 두 번 → 은행 1건, 처리 후 무응답 → 결과조회로 확정 · 입금 1건, 은행 장애 → 재시도 토픽 → DLT → 재발행 → 입금 1건, 동시 출금 100건 → 정확히 10건 · 잔고 0, 차감 전략 4종 × 동시 출금 100건, 실패 확정 경로마다 환불)
 
 ## 구조
 
@@ -91,8 +92,9 @@ sequenceDiagram
 2. 오른쪽 위 실행 목록에 `.run/` 의 구성이 자동으로 뜹니다.
    - `0. Mock Bank + API` : 모의 은행(9090)과 API(8080)를 한 번에 실행
    - `1. Mock Bank (9090)` / `2. API (8080)` : 하나씩 실행 (벌레 아이콘으로 디버그)
-   - `3. All Tests` : 테스트 206개
+   - `3. All Tests` : 테스트 240개
    - `4. API (재발행 손 확인)` : 재시도 간격 2초 · 4초 · 8초, 재발행 대기 30초로 줄인 API (P3-3b 손 확인용, [`http/transfer.http`](http/transfer.http) 8절)
+   - `5. API (부하 측정)` : 발행기 · 정리 작업 · 컨슈머를 끄고 로그를 줄인 jar 실행 (P4-2 k6 측정용, [OPERATION §8](OPERATION.md#8-부하-측정-p4-2-k6))
 3. `http/account-verification.http` 를 열고 요청 왼쪽 ▶ 버튼으로 호출합니다.
    1번 요청이 응답의 `id` 를 저장하고, 모의 은행 콘솔의 `적요='BT1234'` 숫자를 2번 요청의 `code` 에 넣으면 `VERIFIED` 가 됩니다.
 
@@ -115,7 +117,7 @@ bash infra/verify.sh
 요구사항: JDK 21 (Gradle 은 래퍼가 내려받습니다)
 
 ```bash
-./gradlew build                                   # 컴파일 + 테스트 206개
+./gradlew build                                   # 컴파일 + 테스트 240개
 ./gradlew :apps:mock-bank:run --args="9090"       # 터미널 1: 모의 은행
 ./gradlew :apps:api:bootRun                       # 터미널 2: API (localhost:8080)
 ```
@@ -148,6 +150,8 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
 | 은행 무응답 | 504 | `BANK_TIMEOUT` |
 | 은행 연결 없음 | 503 | `BANK_UNAVAILABLE` |
 | `X-User-Id` 없음 | 400 | `USER_ID_REQUIRED` |
+| 잔고를 지금 잡지 못함 | 503 | `WALLET_BUSY` |
+| 동시 변경으로 포기 | 409 | `CONCURRENT_UPDATE` |
 
 ## 예전 시스템과 무엇을 다르게 했나
 
@@ -173,9 +177,9 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
   - [x] P3-2 처리: 폴링 퍼블리셔 → Kafka → 컨슈머 → 은행 → [ADR-0005](docs/adr/0005-kafka-delivery-and-consumer-idempotency.md)
   - [x] P3-3a 결과조회: 규격 v0.2 · 정리 작업 (PR #7) → [ADR-0006](docs/adr/0006-inquire-instead-of-resend.md)
   - [x] P3-3b 재시도: 재시도 토픽 · DLT · 제한 재발행 (PR #9) → [ADR-0007](docs/adr/0007-retry-topic-and-bounded-republish.md)
-- [ ] **P4** 잔액 동시성: 비관적 락 vs 낙관적 락 vs Redis 분산락, k6 부하테스트
+- [x] **P4** 잔액 동시성: 비관적 락 vs 낙관적 락 vs Redis 분산락, k6 부하테스트
   - [x] P4-1 원화 잔고: 접수 차감 · 실패 환불 · 사용자 범위 (PR #11) → [ADR-0008](docs/adr/0008-wallet-debit-on-intake-refund-on-failure.md)
-  - [ ] P4-2 같은 차감을 비관적 락 · 낙관적 락 · Redis 분산락으로 바꿔 k6 로 비교
+  - [x] P4-2 락 전략 비교: 조건부 · 비관적 · 낙관적 · Redis 분산락, k6 핫스팟 · 분산 → [ADR-0009](docs/adr/0009-wallet-debit-strategies-and-lock-comparison.md) · [측정 결과](docs/perf/p4-2-lock-comparison.md)
 - [ ] **P5** Spring Batch 일마감 대사 + 텔레그램 알림
 - [ ] **P6** WebFlux / Coroutines 버전과 성능 비교
 - [ ] **P7** Virtual Thread 적용 비교
@@ -184,4 +188,4 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
 
 ## 기술 스택
 
-Kotlin 2.3 · Java 21 · Spring Boot 4.1 (Spring MVC, Validation, Actuator) · Spring Data JPA (Hibernate 7) · Flyway · MySQL 8.4 · Spring Kafka (Kafka 4.1) · Testcontainers · Netty 4.2 · JUnit 5 · Gradle 9 (Kotlin DSL) · GitHub Actions
+Kotlin 2.3 · Java 21 · Spring Boot 4.1 (Spring MVC, Validation, Actuator) · Spring Data JPA (Hibernate 7) · Flyway · MySQL 8.4 · Spring Kafka (Kafka 4.1) · Testcontainers · Netty 4.2 · Redisson 4.8 (Redis 분산락) · k6 2.3 (부하 측정) · JUnit 5 · Gradle 9 (Kotlin DSL) · GitHub Actions

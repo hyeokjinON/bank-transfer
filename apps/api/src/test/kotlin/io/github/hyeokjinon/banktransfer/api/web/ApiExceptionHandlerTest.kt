@@ -1,13 +1,17 @@
 package io.github.hyeokjinon.banktransfer.api.web
 
+import io.github.hyeokjinon.banktransfer.transfer.TransferException
+import org.springframework.http.HttpHeaders
 import org.springframework.http.ProblemDetail
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.web.context.request.ServletWebRequest
 import org.springframework.web.context.request.async.AsyncRequestTimeoutException
 import org.springframework.web.bind.MissingServletRequestParameterException
+import java.util.concurrent.CompletionException
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 /** Spring MVC 표준 예외의 code 규칙: 5xx 는 전부 INTERNAL_ERROR, 400 은 INVALID_REQUEST, 그 밖의 4xx 는 상태 이름. */
 class ApiExceptionHandlerTest {
@@ -33,5 +37,39 @@ class ApiExceptionHandlerTest {
     @Test
     fun `그 밖의 4xx 는 상태 이름`() {
         assertEquals(405 to "METHOD_NOT_ALLOWED", codeOf(HttpRequestMethodNotSupportedException("PATCH")))
+    }
+
+    @Test
+    fun `잔고를 지금 잡지 못하면 503 WALLET_BUSY + Retry-After 1`() {
+        val response = handler.handle(TransferException.WalletBusy())
+
+        assertEquals(503, response.statusCode.value())
+        assertEquals("WALLET_BUSY", response.body!!.properties?.get("code"))
+        assertEquals("1", response.headers.getFirst(HttpHeaders.RETRY_AFTER))
+    }
+
+    @Test
+    fun `낙관적 재시도를 다 쓰면 409 CONCURRENT_UPDATE + Retry-After 1`() {
+        val response = handler.handle(TransferException.ConcurrentUpdate())
+
+        assertEquals(409, response.statusCode.value())
+        assertEquals("CONCURRENT_UPDATE", response.body!!.properties?.get("code"))
+        assertEquals("1", response.headers.getFirst(HttpHeaders.RETRY_AFTER))
+    }
+
+    @Test
+    fun `다시 보내도 같은 결과인 오류에는 Retry-After 를 붙이지 않는다`() {
+        val response = handler.handle(TransferException.InsufficientBalance())
+
+        assertEquals(422, response.statusCode.value())
+        assertNull(response.headers.getFirst(HttpHeaders.RETRY_AFTER))
+    }
+
+    @Test
+    fun `비동기 경로(CompletionException)로 감싸져 와도 같은 응답`() {
+        val response = handler.handle(CompletionException(TransferException.WalletBusy()))
+
+        assertEquals(503, response.statusCode.value())
+        assertEquals("1", response.headers.getFirst(HttpHeaders.RETRY_AFTER))
     }
 }

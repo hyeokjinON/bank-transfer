@@ -23,9 +23,9 @@ cd bank-transfer
 
 ### 2-2. 빌드 · 테스트
 ```bash
-./gradlew build      # 첫 실행은 의존성 다운로드로 몇 분 걸린다. 테스트 206개 통과해야 정상
+./gradlew build      # 첫 실행은 의존성 다운로드로 몇 분 걸린다. 테스트 240개 통과해야 정상
 ```
-테스트는 Testcontainers 로 MySQL 과 Kafka 를 띄우므로 Docker Desktop 이 켜져 있어야 한다 (설치는 2-4).
+테스트는 Testcontainers 로 MySQL · Kafka · Redis 를 띄우므로 Docker Desktop 이 켜져 있어야 한다 (설치는 2-4).
 
 ### 2-3. IntelliJ
 1. 폴더 열기 → Gradle 프로젝트로 가져오기.
@@ -46,6 +46,12 @@ cd bank-transfer
    bash infra/verify.sh        # → "모두 정상입니다."
    ```
 5. (선택) 메모리 제한: `%UserProfile%\.wslconfig` 에 `[wsl2]` / `memory=4GB`.
+
+### 2-5. 부하 측정 도구 (선택, P4-2)
+설치할 것이 없다. k6 는 Docker 이미지(`grafana/k6:2.3.0`)로 돌고, 측정 스크립트는 `load/` 에 있다.
+- 확인: `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile load run --rm k6 version` → `k6 v2.3.0` (첫 실행은 이미지를 받는다).
+- 실행은 [OPERATION §8](OPERATION.md#8-부하-측정-p4-2-k6).
+- Windows: `load/run.sh` 는 Git Bash 로 실행한다 (PowerShell 의 `bash` 는 WSL 실행기다). Git Bash 의 경로 변환을 막는 `MSYS_NO_PATHCONV=1` 은 스크립트가 알아서 설정한다.
 
 ## 3. Windows 에서 알아둘 것
 | 상황 | 해결 |

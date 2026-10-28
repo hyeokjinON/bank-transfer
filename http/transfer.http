@@ -264,3 +264,36 @@ X-User-Id: user-1
 ### 9-7) 지갑 조회 → balance 가 9-3 과 같다 (실패 확정과 같은 트랜잭션에서 환불). DB 원장: WITHDRAW 20000 → REFUND 20000
 GET http://localhost:8080/api/v1/wallet
 X-User-Id: user-1
+
+
+### ============================================================
+### 손 확인: 잔고 차감 전략 (P4-2) — redis 전략에서 Redis 가 죽으면 503 WALLET_BUSY + Retry-After: 1 (fail-closed)
+### 준비: API 를 redis 전략으로 띄운다 → ./gradlew :apps:api:bootRun --args="--wallet.debit-strategy=redis"
+###       (확인: GET http://localhost:8080/actuator/info → {"wallet":{"debit-strategy":"redis"}}). 9-1 로 충전, 1002123456789 는 user-1 로 인증.
+### 10-1) Redis 가 살아 있으면 → 202 (락 안에서 조건부 UPDATE 로 차감)
+POST http://localhost:8080/api/v1/transfers
+Content-Type: application/json
+X-User-Id: user-1
+Idempotency-Key: {{$random.uuid}}
+
+{
+  "bankCode": "090",
+  "accountNo": "1002123456789",
+  "amount": 1000,
+  "memo": "락확인"
+}
+
+### 10-2) Redis 를 멈춘다: docker compose -f infra/docker-compose.yml --env-file infra/.env stop redis
+###       → 같은 요청이 수 초 안에 503 WALLET_BUSY, 응답 헤더 Retry-After: 1. 출금 · 잔고는 그대로 (API 로그에 'redis unavailable' ERROR)
+###       끝나면: docker compose -f infra/docker-compose.yml --env-file infra/.env start redis → 다시 보내면 202
+POST http://localhost:8080/api/v1/transfers
+Content-Type: application/json
+X-User-Id: user-1
+Idempotency-Key: {{$random.uuid}}
+
+{
+  "bankCode": "090",
+  "accountNo": "1002123456789",
+  "amount": 1000,
+  "memo": "락확인"
+}

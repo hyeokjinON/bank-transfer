@@ -15,7 +15,8 @@ import java.util.UUID
  * 1. 형식 검증 (키 · 금액 · 적요)
  * 2. 이 사용자의 같은 키가 이미 있으면 내용이 같을 때만 그 건을 돌려준다 (멱등, 사용자 범위 — P4-1). 차감은 없다
  * 3. 받는 계좌가 **이 사용자의** 1원인증을 마쳤는지 확인
- * 4. 이체(RECEIVED) · 잔고 차감 · TransferRequested 이벤트를 함께 저장 → 잔고가 모자라면 422 (출금 자체를 받지 않는다). 은행 처리는 컨슈머가 한다
+ * 4. 이체(RECEIVED) · 잔고 차감 · TransferRequested 이벤트를 함께 저장 → 잔고가 모자라면 422 (출금 자체를 받지 않는다).
+ *    잔고를 지금 잡지 못하면 WalletBusy, 동시 변경으로 포기하면 ConcurrentUpdate — 둘 다 다시 보내면 될 수 있다 (P4-2). 은행 처리는 컨슈머가 한다
  *
  * 2번의 "먼저 조회"는 빠른 길일 뿐이다. 동시에 들어온 같은 키는 DB UNIQUE 가 막고,
  * 진 쪽은 [StoreConflict.DuplicateIdempotencyKey] 를 받아 이긴 쪽 건을 돌려준다 (진 쪽의 차감도 함께 롤백된다).
@@ -61,6 +62,12 @@ class TransferService(
             } catch (e: StoreConflict.InsufficientBalance) {
                 // 잔고가 모자라면 출금 자체를 받지 않는다 (출금 기록 · 이벤트도 함께 롤백됐다). 다시 시도해도 같다
                 throw TransferException.InsufficientBalance()
+            } catch (e: StoreConflict.WalletBusy) {
+                // 락을 못 잡았다 (어떤 락인지는 저장소만 안다). 아무것도 남지 않았고, 같은 요청을 다시 보내면 될 수 있다 → 503 + Retry-After
+                throw TransferException.WalletBusy()
+            } catch (e: StoreConflict.ConcurrentUpdate) {
+                // 낙관적 재시도를 다 썼다. 거래번호 재시도와 달리 여기서 또 돌리지 않는다 — 저장소가 이미 정한 횟수만큼 했다 → 409 + Retry-After
+                throw TransferException.ConcurrentUpdate()
             } catch (conflict: StoreConflict.DuplicateReference) {
                 // 무작위 거래번호가 우연히 겹쳤다. 새 번호로 다시 시도한다.
             }

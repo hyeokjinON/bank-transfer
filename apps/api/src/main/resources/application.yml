@@ -13,6 +13,13 @@ spring:
     url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:bank_transfer}?connectionTimeZone=Asia/Seoul&forceConnectionTimeZoneToSession=true
     username: ${MYSQL_USER:bank}
     password: ${MYSQL_PASSWORD:local-dev-only}
+    hikari:
+      # 풀 크기를 명시한다 (P4-2). 기본 10 이면 락 비교가 "풀이 작다"를 재게 된다(ADR-0008 의 10-way 경합 한계).
+      # minimum-idle 기본값 = 최대 → 측정 중 커넥션을 새로 만들지 않는다
+      maximum-pool-size: 20
+      # 락 대기 한도를 커넥션마다 5초로 (MySQL 기본 50초). 50초 동안 커넥션 · 톰캣 스레드를 붙잡으면 장애가 번진다.
+      # 넘으면 1205 → 503 WALLET_BUSY. 발행기 · 정리 작업 트랜잭션에도 적용된다 (지금은 짧아 영향 없음 — HANDOVER)
+      connection-init-sql: SET SESSION innodb_lock_wait_timeout = 5
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     producer:
@@ -54,6 +61,9 @@ management:
     web:
       exposure:
         include: health,info
+  info:
+    env:
+      enabled: true   # info.* 설정을 /actuator/info 에 보인다 (P4-2: 차감 전략)
 
 transfer:
   retry:                       # 재시도 토픽 (P3-3b). 은행에 보내지도 못한 메시지만 온다
@@ -74,3 +84,18 @@ transfer:
     batch-size: 100
     republish-after: 5m    # 마지막 변경 후 이만큼 지나야 재발행 (재시도 토픽 · DLT 약 95초와 겹치지 않게, P3-3b)
     max-republish: 3       # 다 쓰고도 은행에 못 보내면 FAILED E001 (은행에 간 적 없음 → 사용자가 다시 요청)
+
+wallet:
+  # 잔고 차감 전략 (P4-2, ADR-0009): conditional | pessimistic | optimistic | redis. 기동 때 하나만 — 모르는 이름이면 기동 실패
+  debit-strategy: conditional
+  optimistic:
+    max-attempts: 5        # 버전 충돌이면 트랜잭션 전체를 처음부터. 다 쓰면 409 CONCURRENT_UPDATE
+    backoff-min: 10ms      # 시도 사이 무작위 대기 — 같은 순간 다시 부딪히지 않게
+    backoff-max: 50ms
+  lock:
+    wait-time: 3s          # redis 전략: 사용자 락을 기다리는 최대 시간. 넘으면 503 WALLET_BUSY
+    redis-address: "redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}"   # redis 전략일 때만 클라이언트를 만든다
+
+info:
+  wallet:
+    debit-strategy: ${wallet.debit-strategy}   # /actuator/info 로 지금 전략을 본다 (load/run.sh 가 측정 전에 확인)

@@ -64,7 +64,7 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
         TransferException::class,
         UserIdRequiredException::class,
     )
-    fun handle(e: Exception): ProblemDetail {
+    fun handle(e: Exception): ResponseEntity<ProblemDetail> {
         val cause = if (e is CompletionException && e.cause != null) e.cause!! else e
         val (status, code) = when (cause) {
             is AccountVerificationException.AccountNotFound -> HttpStatus.NOT_FOUND to "ACCOUNT_NOT_FOUND"
@@ -84,6 +84,9 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
             is TransferException.InvalidAccount -> HttpStatus.BAD_REQUEST to "INVALID_ACCOUNT"
             is TransferException.AccountNotVerified -> HttpStatus.UNPROCESSABLE_CONTENT to "ACCOUNT_NOT_VERIFIED"
             is TransferException.InsufficientBalance -> HttpStatus.UNPROCESSABLE_CONTENT to "INSUFFICIENT_BALANCE"
+            // P4-2: 요청은 옳은데 지금 잔고를 잡지 못했다. 잔고 부족(422 — 다시 보내도 같다)과 구분한다
+            is TransferException.ConcurrentUpdate -> HttpStatus.CONFLICT to "CONCURRENT_UPDATE"
+            is TransferException.WalletBusy -> HttpStatus.SERVICE_UNAVAILABLE to "WALLET_BUSY"
             is TransferException.IdempotencyKeyReused -> HttpStatus.UNPROCESSABLE_CONTENT to "IDEMPOTENCY_KEY_REUSED"
             is TransferException.TransferNotFound -> HttpStatus.NOT_FOUND to "TRANSFER_NOT_FOUND"
             is TransferException.IllegalTransition -> HttpStatus.CONFLICT to "ILLEGAL_TRANSITION"
@@ -94,9 +97,24 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
         }
         // 500 은 내부 메시지(SQL · 경로 등)를 응답에 싣지 않는다. 원인은 위 log.error 로 남아 있다.
         val detail = if (status == HttpStatus.INTERNAL_SERVER_ERROR) "internal error" else cause.message ?: code
-        return ProblemDetail.forStatusAndDetail(status, detail).apply {
+        val problem = ProblemDetail.forStatusAndDetail(status, detail).apply {
             setProperty("code", code)
             if (cause is AccountVerificationException.WrongCode) setProperty("remainingAttempts", cause.remainingAttempts)
         }
+        // 헤더를 붙이려고 ResponseEntity 로 감싼다. 본문 · 상태 · problem+json 처리는 ProblemDetail 을 바로 돌려줄 때와 같다
+        return ResponseEntity.status(status)
+            .headers { headers -> if (cause.isRetryable()) headers.set(HttpHeaders.RETRY_AFTER, RETRY_AFTER_SECONDS) }
+            .body(problem)
+    }
+
+    /**
+     * 같은 요청을 잠시 뒤 다시 보내면 될 수 있는 오류 (P4-2). 클라이언트에게 언제 다시 해도 되는지 알린다.
+     * Redis 장애와 락 경합을 구분하지 않는다 — 클라이언트가 할 일(잠시 뒤 다시)이 같다. 운영자는 로그 수준으로 구분한다.
+     */
+    private fun Throwable.isRetryable() = this is TransferException.WalletBusy || this is TransferException.ConcurrentUpdate
+
+    private companion object {
+        /** 초 단위. 바로 다시 부딪히지 않을 만큼만 — 락 대기(5초) · 분산락 대기(3초)보다 짧다. */
+        const val RETRY_AFTER_SECONDS = "1"
     }
 }

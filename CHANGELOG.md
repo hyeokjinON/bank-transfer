@@ -9,6 +9,19 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
+## [P4-2] 잔고 차감 락 전략 비교 — 2026-10-27
+### Added
+- `WalletDebit` 이음새와 전략 4종(`conditional` · `pessimistic` · `optimistic` · `redis`), 설정 `wallet.*` · `GET /actuator/info` 의 전략.
+- 오류 코드 `WALLET_BUSY`(503) · `CONCURRENT_UPDATE`(409) + `Retry-After: 1`.
+- Redisson 4.8.0, 테스트용 Redis 컨테이너(`redis:7.4-alpine`).
+- `load/` (k6 2.3.0 핫스팟 · 분산, 시드 · 정리 · 검증 · `run.sh` · `summarize.sh`), compose `k6` (`load` 프로필), 실행 구성 `5. API (부하 측정)`.
+- ADR-0009, 측정 결과 `docs/perf/p4-2-lock-comparison.md` · 원본 `docs/perf/raw/` (24회 + drift 확인 1회).
+### Changed
+- Hikari 풀 20 명시 · 락 대기 5초(`innodb_lock_wait_timeout`, 모든 커넥션).
+- MySQL 1205 · 1213 → 503 (전에는 500).
+- `saveWithEvent` 를 바깥 트랜잭션 안에서 부르면 거부.
+- 차감 SQL 이 `WalletLedger` 에서 전략으로.
+
 ## [P4-1] 원화 잔고 — 2026-10-26 ([#11](https://github.com/hyeokjinON/bank-transfer/pull/11), 머지 후 정리 [#12](https://github.com/hyeokjinON/bank-transfer/pull/12))
 ### Added
 - `wallet` · `wallet_ledger`(V3), 잔고 SQL 한 곳 `WalletLedger`, 지갑 API(`POST /api/v1/wallet/deposits` 관리 · 테스트용 충전, `GET /api/v1/wallet` 잔고 · 보류).

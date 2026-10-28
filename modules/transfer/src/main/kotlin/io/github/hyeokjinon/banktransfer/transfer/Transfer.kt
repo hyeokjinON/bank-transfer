@@ -138,6 +138,7 @@ interface TransferStore {
     /**
      * 이체 저장 · 잔고 차감 · 이벤트 기록은 함께 성공하거나 함께 실패한다 (P4-1: 차감 추가).
      * [transfer] 의 userId 지갑에서 amount 를 뺀다 — 잔고가 모자라면(지갑이 없어도 잔고 0) [StoreConflict.InsufficientBalance] 이고 아무것도 남지 않는다.
+     * 잔고를 지금 잡지 못하면 [StoreConflict.WalletBusy], 동시 변경이 이어져 포기하면 [StoreConflict.ConcurrentUpdate] (P4-2) — 둘 다 아무것도 남지 않는다.
      * UNIQUE 위반이면 [StoreConflict] 를 던진다.
      */
     fun saveWithEvent(transfer: Transfer, event: TransferEvent): Transfer
@@ -198,6 +199,15 @@ sealed class StoreConflict(message: String) : RuntimeException(message) {
 
     /** 잔고가 출금액보다 적다 (지갑이 없으면 잔고 0). 저장소는 아무것도 남기지 않고 롤백한다 (P4-1). */
     class InsufficientBalance(userId: String, amount: Long) : StoreConflict("balance of '$userId' is less than $amount")
+
+    /**
+     * 지금 잔고를 잡지 못했다 — 락 대기 한도 초과 · 데드락 · 분산락 대기 초과 · 분산락 저장소 장애 (P4-2).
+     * 어떤 락인지는 저장소만 안다. 아무것도 남기지 않았고, 잠시 뒤 다시 하면 될 수 있다.
+     */
+    class WalletBusy(userId: String) : StoreConflict("wallet of '$userId' is busy, try again later")
+
+    /** 다른 변경과 계속 부딪혀 저장소가 정한 횟수만큼 다시 하고도 포기했다 (P4-2, 낙관적 락). 아무것도 남기지 않았다. */
+    class ConcurrentUpdate(userId: String) : StoreConflict("wallet of '$userId' kept changing concurrently, try again later")
 }
 
 /**
@@ -219,6 +229,12 @@ sealed class TransferException(message: String) : RuntimeException(message) {
     class InvalidAccount : TransferException("bankCode must be 3 digits and accountNo 10-16 digits")
     class AccountNotVerified : TransferException("account is not verified")
     class InsufficientBalance : TransferException("wallet balance is not enough for this transfer")
+
+    /** 잔고를 지금 잡지 못했다. 요청은 옳다 — 잠시 뒤 다시 보내면 된다 (P4-2). */
+    class WalletBusy : TransferException("wallet is busy, retry after a moment")
+
+    /** 동시 변경이 이어져 포기했다. 요청은 옳다 — 잠시 뒤 다시 보내면 된다 (P4-2). */
+    class ConcurrentUpdate : TransferException("wallet was updated concurrently, retry after a moment")
     class IdempotencyKeyReused : TransferException("idempotency key was already used with a different request")
     class TransferNotFound(id: UUID) : TransferException("transfer $id not found")
     class IllegalTransition(from: TransferStatus, to: TransferStatus) : TransferException("cannot move from $from to $to")

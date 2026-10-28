@@ -1,6 +1,6 @@
 # ARCHITECTURE — 구조와 흐름
 
-> 기준: P4-1 원화 잔고 완료 (2026-10-26, PR #11 머지). P3 완료(P3-3b PR #9 머지). P3 · P4 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p4)에 적는다.
+> 기준: P4-2 잔고 차감 락 전략 (2026-10-27, 리뷰 중). P4-1 원화 잔고 완료 (2026-10-26, PR #11 머지). P3 완료(P3-3b PR #9 머지). P3 · P4 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p4)에 적는다.
 
 ## 1. 한눈에 보기
 
@@ -15,6 +15,9 @@ flowchart LR
         SVC -- "VerificationRepository" --> REPO[(MySQL<br/>Flyway)]
         API --> TRF[도메인 서비스<br/>modules/transfer]
         TRF -- "TransferStore (차감 · 환불)" --> REPO
+        TRF -- "saveWithEvent 차감" --> DEB[WalletDebit 전략<br/>조건부 · 비관적 · 낙관적 · Redis]
+        DEB --> REPO
+        DEB -. "redis 전략: 사용자 락" .-> RD
         WL --> REPO
         RELAY[OutboxRelay<br/>api/messaging] -- "미발행 행 읽기" --> REPO
         LSN[TransferRequestedListener] --> PROC[TransferProcessor<br/>modules/transfer]
@@ -41,6 +44,7 @@ flowchart LR
 - **모듈러 모놀리스**: 배포는 `apps/api` 하나, 경계는 Gradle 모듈로 나눈다. 나중(P8)에 경계를 그대로 서비스로 떼어낸다.
 - **포트/어댑터**: 도메인은 인터페이스(포트)만 알고, Netty·DB 를 붙이는 구현(어댑터)은 `apps/api` 에서 조립한다.
 - **사용자 식별**: `X-User-Id` 를 `RequestUserResolver` 한 곳에서 꺼낸다 (인증은 범위 밖, P4-1).
+- **잔고 차감 방식**은 기동 설정 `wallet.debit-strategy` 로 하나를 고른다 (ADR-0009).
 
 ## 2. 모듈
 
@@ -50,7 +54,7 @@ flowchart LR
 | `modules/bank-gateway` | 은행 접속 클라이언트: 폴링, 재접속(지수 백오프), 전문번호 기반 응답 매칭, 타임아웃 | `bank-protocol` (api) | Netty |
 | `modules/account` | 1원 계좌인증 도메인 + 포트(`BankPort`, `VerificationRepository`, `CodeGenerator`) | **없음** | 없음 |
 | `modules/transfer` | 출금이체 도메인: 상태 전이, 사용자 범위 멱등 접수, 실패 확정 포트 `fail()`, 거래번호, 처리(`TransferProcessor`), 정리 작업(`TransferReconciler`) + 포트(`TransferStore`, `VerifiedAccounts`, `ReferenceGenerator`, `BankTransferPort`, `BankInquiryPort`) | **없음** | 없음 |
-| `apps/api` | REST API, 예외 → HTTP 매핑, 조립(`AppConfiguration`), 어댑터, 잔고 SQL(`WalletLedger`), JPA 저장소(`persistence/`), Kafka 발행 · 소비(`messaging/`) | `account`, `transfer`, `bank-gateway` | Spring Boot 4 (MVC, JPA, Kafka) |
+| `apps/api` | REST API, 예외 → HTTP 매핑, 조립(`AppConfiguration`), 어댑터, 잔고 SQL(`WalletLedger` · 차감 전략 `WalletDebit`), JPA 저장소(`persistence/`), Kafka 발행 · 소비(`messaging/`) | `account`, `transfer`, `bank-gateway` | Spring Boot 4 (MVC, JPA, Kafka) |
 | `apps/mock-bank` | 모의 은행 FEP 서버. 실행 가능 + 테스트 픽스처 | `bank-protocol` (api) | Netty |
 
 의존 방향 (화살표 = "의존한다"):
@@ -74,13 +78,17 @@ apps/api/src/main/kotlin/.../api/
   config/AppConfiguration.kt        # 빈 조립, BankGatewayAdapter(BankPort 구현), 설정 프로퍼티
   config/BankTransferAdapter.kt     # BankTransferPort 구현: 게이트웨이 예외를 완료 · 거절 · 결과 모름 · 미전송으로 분류
   config/BankInquiryAdapter.kt      # BankInquiryPort 구현: 확실한 답(0000 · 2001)만 확정, 나머지는 모름 (예외 없음)
+  config/WalletDebitConfiguration.kt  # wallet.* 설정, 차감 전략 하나 선택, redis 일 때만 RedissonClient
   web/AccountVerificationController.kt
   web/TransferController.kt         # POST/GET /api/v1/transfers (X-User-Id, Idempotency-Key, 202/200)
   web/RequestUser.kt                # X-User-Id → RequestUser (헤더를 읽는 유일한 곳), WebConfiguration
   web/WalletController.kt           # POST /api/v1/wallet/deposits (관리 · 테스트용), GET /api/v1/wallet
   web/ApiExceptionHandler.kt        # 도메인/게이트웨이 예외 → ProblemDetail + code (표준 Spring 오류에도 code)
   persistence/                      # JPA 엔티티 · 리포지토리 · JpaVerificationRepository · JpaTransferStore (transfer + 차감 + outbox_event 한 트랜잭션, 조건부 상태 UPDATE, fail() = 전이 + 환불)
-  persistence/WalletLedger.kt       # 충전 · 차감 · 환불 · 잔고 · 보류 SQL 한 곳 (P4-2 이음새)
+  persistence/WalletLedger.kt       # 충전 · 환불 · 잔고 · 보류 SQL, 원장 기록 (차감 SQL 은 WalletDebit 전략)
+  persistence/WalletDebit.kt        # 차감 이음새(around · withdraw) + 조건부 · 비관적
+  persistence/OptimisticWalletDebit.kt  # version 비교 + 트랜잭션 전체 재시도
+  persistence/RedisWalletDebit.kt   # Redisson 사용자 락(바깥) + 조건부 UPDATE(안), redissonConfig
   messaging/MessagingConfiguration.kt     # 토픽 · 릴레이 · 프로세서 조립, 재시도 토픽 전용 스케줄러 (RetryTopicSchedulerWrapper)
   messaging/OutboxRelay.kt                # 폴링 퍼블리셔 (SKIP LOCKED, 발행 확인 후 published_at)
   messaging/TransferRequestedListener.kt  # transfer.requested 컨슈머 (수동 ack, @RetryableTopic 재시도 토픽 · @DltHandler)
@@ -100,6 +108,7 @@ modules/bank-protocol/.../protocol/
   BankMessage.kt · Header.kt · FixedLength.kt · BankMessageSerializer.kt
   netty/AsciiLengthFieldFrameDecoder.kt · netty/BankCodec.kt
 apps/mock-bank/.../mockbank/MockBankServer.kt
+load/                               # k6 부하 측정 (시나리오 · 시드 · 정리 · 검증 · run.sh), docs/perf/ 결과
 ```
 
 ## 3. 런타임 흐름: 1원 계좌인증
@@ -144,7 +153,7 @@ Docker Compose 한 파일로 MySQL 8.4 · Kafka 4.1(KRaft 단일 노드) · Redi
 CI `infra-smoke` 잡이 같은 파일을 띄워 `verify.sh` 로 읽기/쓰기를 확인한다. → [ADR-0003](docs/adr/0003-local-infra-docker-compose.md), [infra/README.md](infra/README.md)
 
 ## 6. 진행 상황 (P3 · P4)
-- P3-1 접수 ✅ (ADR-0004). P3-2 처리 ✅ (ADR-0005). P3-3a 결과조회 · 정리 작업 ✅ (ADR-0006). P3-3b 재시도 토픽 · DLT · 제한 재발행 ✅ (ADR-0007). P4-1 원화 잔고 ✅ (ADR-0008). P4-2 락 전략 비교 · k6 예정.
+- P3-1 접수 ✅ (ADR-0004). P3-2 처리 ✅ (ADR-0005). P3-3a 결과조회 · 정리 작업 ✅ (ADR-0006). P3-3b 재시도 토픽 · DLT · 제한 재발행 ✅ (ADR-0007). P4-1 원화 잔고 ✅ (ADR-0008). P4-2 잔고 차감 락 전략 🟡 (ADR-0009 제안).
 
 ### P3-2 처리 흐름
 ```mermaid
@@ -280,8 +289,28 @@ sequenceDiagram
 
 - 잔고는 상태에 따라 움직인다: `RECEIVED` · `SENDING` · `UNKNOWN` = 빠진 채(보류, `GET /wallet` 의 `pending`), `COMPLETED` = 빠진 채(확정), `FAILED` = 복원. `CONFLICT` 는 잔고를 건드리지 않고 경고만 남긴다 (수동 확인, P5 대사).
 - 별도 락 없이 조건부 UPDATE 한 문장의 행 락과 `CHECK (balance >= 0)` 으로 음수를 막는다. 출금 INSERT 를 차감보다 먼저 두어 같은 키 경합의 진 쪽이 지갑을 건드리지 않는다.
-- `WalletLedger` 가 잔고 SQL 의 유일한 곳이라 P4-2 에서 비관적 · 낙관적 · Redis 분산락으로 바꿔 끼우는 이음새다.
+- 차감 SQL 은 P4-2 에서 `WalletDebit` 전략으로 옮겼다 (아래).
 - 근거와 한계: [ADR-0008](docs/adr/0008-wallet-debit-on-intake-refund-on-failure.md)
+
+### P4-2 잔고 차감 전략
+```mermaid
+flowchart TB
+    S["JpaTransferStore.saveWithEvent"] --> G{"바깥 트랜잭션 안?"}
+    G -- 예 --> X["거부 (IllegalStateException)"]
+    G -- 아니오 --> A["debit.around(userId)<br/>optimistic: 버전 충돌이면 처음부터 (최대 5회)<br/>redis: 사용자 락 tryLock(3초) → 커밋 뒤 unlock"]
+    A --> T["tx.execute — 한 트랜잭션<br/>INSERT transfer → debit.withdraw → INSERT outbox_event"]
+    T --> W{"withdraw"}
+    W -- "conditional · redis" --> C["UPDATE … WHERE balance >= ?"]
+    W -- "pessimistic" --> P["SELECT … FOR UPDATE → UPDATE balance = 계산값"]
+    W -- "optimistic" --> O["SELECT balance, version → UPDATE … WHERE version = ?"]
+    T -. "1205 · 1213" .-> B["503 WALLET_BUSY"]
+    A -. "락 대기 초과 · Redis 장애" .-> B
+    A -. "재시도 소진" .-> R["409 CONCURRENT_UPDATE"]
+```
+
+- 전략은 기동 때 하나다 (`wallet.debit-strategy`). 환불 · 충전은 전략과 무관한 원자적 UPDATE 다.
+- Redis 락은 같은 사용자 요청을 DB 앞에서 줄 세울 뿐이고 정확성은 DB(조건부 UPDATE + `CHECK`)가 지킨다.
+- 네 전략의 비용 비교: [docs/perf/p4-2-lock-comparison.md](docs/perf/p4-2-lock-comparison.md). 근거: [ADR-0009](docs/adr/0009-wallet-debit-strategies-and-lock-comparison.md)
 
 ## 7. 관련 문서
 - 데이터베이스 모델 · 테이블 정의: [docs/database.md](docs/database.md)
@@ -298,3 +327,4 @@ sequenceDiagram
 | [0006](docs/adr/0006-inquire-instead-of-resend.md) | 결과를 모르는 이체는 다시 보내지 않고 이용기관 거래번호로 은행에 물어서 확정 |
 | [0007](docs/adr/0007-retry-topic-and-bounded-republish.md) | 은행에 못 보낸 출금은 논블로킹 재시도 토픽 + 은행 시도 흔적 기준의 제한 재발행, 포기는 FAILED E001 |
 | [0008](docs/adr/0008-wallet-debit-on-intake-refund-on-failure.md) | 원화 잔고는 접수 트랜잭션에서 조건부 UPDATE 로 차감, 실패 확정 시 같은 트랜잭션에서 환불, 원장은 append-only |
+| [0009](docs/adr/0009-wallet-debit-strategies-and-lock-comparison.md) | 잔고 차감은 전략 인터페이스로 바꿔 끼우고(조건부 · 비관적 · 낙관적 · Redis), Redis 락은 DB 앞의 줄 세우기로만 |

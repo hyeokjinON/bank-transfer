@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.dao.DataAccessException
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.util.UUID
@@ -14,11 +15,14 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-/** 지갑 · 원장 SQL (P4-1). 차감 · 환불은 호출자 트랜잭션 안에서만 부르므로 테스트도 tx.execute 로 감싼다. */
+/** 지갑 · 원장 SQL (P4-1). 차감 SQL 은 P4-2 부터 전략이 갖는다 — 여기서는 기준선 [ConditionalWalletDebit] 으로 뺀다. 차감 · 환불은 호출자 트랜잭션 안에서만 부르므로 tx.execute 로 감싼다. */
 class WalletLedgerTest : ApiIntegrationTest() {
 
     @Autowired private lateinit var tx: TransactionTemplate
     @Autowired private lateinit var jdbc: JdbcTemplate
+    @Autowired private lateinit var namedJdbc: NamedParameterJdbcTemplate
+
+    private val conditional by lazy { ConditionalWalletDebit(namedJdbc, wallets) }
 
     private fun ledgerRows(userId: String) = jdbc.queryForList(
         "SELECT type, amount, balance_after, transfer_id FROM wallet_ledger WHERE user_id = ? ORDER BY id", userId,
@@ -40,14 +44,14 @@ class WalletLedgerTest : ApiIntegrationTest() {
     }
 
     @Test
-    fun `차감 - 잔고가 충분하면 빼고 WITHDRAW, 모자라거나 지갑이 없으면 0건이고 아무것도 쓰지 않는다`() {
+    fun `조건부 차감 - 잔고가 충분하면 빼고 WITHDRAW, 모자라거나 지갑이 없으면 0건이고 아무것도 쓰지 않는다`() {
         val user = fundedUser(10_000)
         val first = UUID.randomUUID()
         val now = Instant.now()
 
-        assertTrue(tx.execute { wallets.withdraw(user, first, 7_000, now) }!!)
-        assertFalse(tx.execute { wallets.withdraw(user, UUID.randomUUID(), 3_001, now) }!!)
-        assertFalse(tx.execute { wallets.withdraw(newUserId(), UUID.randomUUID(), 1, now) }!!)   // 지갑 없음 = 잔고 0
+        assertTrue(tx.execute { conditional.withdraw(user, first, 7_000, now) }!!)
+        assertFalse(tx.execute { conditional.withdraw(user, UUID.randomUUID(), 3_001, now) }!!)
+        assertFalse(tx.execute { conditional.withdraw(newUserId(), UUID.randomUUID(), 1, now) }!!)   // 지갑 없음 = 잔고 0
 
         assertEquals(3_000L, wallets.balanceOf(user))
         val rows = ledgerRows(user)
@@ -60,7 +64,7 @@ class WalletLedgerTest : ApiIntegrationTest() {
     fun `차감 · 환불은 호출자 트랜잭션 밖에서 부르면 거부한다`() {
         val user = fundedUser(10_000)
 
-        assertFailsWith<IllegalStateException> { wallets.withdraw(user, UUID.randomUUID(), 1, Instant.now()) }
+        assertFailsWith<IllegalStateException> { conditional.withdraw(user, UUID.randomUUID(), 1, Instant.now()) }
         assertFailsWith<IllegalStateException> { wallets.refund(UUID.randomUUID(), Instant.now()) }
 
         assertEquals(10_000L, wallets.balanceOf(user))
@@ -71,7 +75,7 @@ class WalletLedgerTest : ApiIntegrationTest() {
         val user = fundedUser(10_000)
         val transferId = UUID.randomUUID()
         val now = Instant.now()
-        tx.execute { wallets.withdraw(user, transferId, 4_000, now) }
+        tx.execute { conditional.withdraw(user, transferId, 4_000, now) }
 
         assertTrue(tx.execute { wallets.refund(transferId, now) }!!)
         assertFalse(tx.execute { wallets.refund(UUID.randomUUID(), now) }!!)   // P3 시절 출금: 뺀 적이 없으니 돌려줄 것도 없다
@@ -85,7 +89,7 @@ class WalletLedgerTest : ApiIntegrationTest() {
         val user = fundedUser(10_000)
         val transferId = UUID.randomUUID()
         val now = Instant.now()
-        tx.execute { wallets.withdraw(user, transferId, 4_000, now) }
+        tx.execute { conditional.withdraw(user, transferId, 4_000, now) }
         tx.execute { wallets.refund(transferId, now) }
 
         assertFailsWith<DuplicateKeyException> { tx.execute { wallets.refund(transferId, now) } }
@@ -112,8 +116,8 @@ class WalletLedgerTest : ApiIntegrationTest() {
         val refunded = UUID.randomUUID()
         val at = Instant.parse("2026-10-26T00:00:00Z")
         tx.execute {
-            wallets.withdraw(user, UUID.randomUUID(), 20_000, at)
-            wallets.withdraw(user, refunded, 5_000, at)
+            conditional.withdraw(user, UUID.randomUUID(), 20_000, at)
+            conditional.withdraw(user, refunded, 5_000, at)
             wallets.refund(refunded, at)
         }
 
