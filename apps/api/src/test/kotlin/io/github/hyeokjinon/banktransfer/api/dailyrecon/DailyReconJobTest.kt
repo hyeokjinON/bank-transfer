@@ -5,6 +5,7 @@ import io.github.hyeokjinon.banktransfer.api.alert.AlertText
 import io.github.hyeokjinon.banktransfer.protocol.ReconDetail
 import io.github.hyeokjinon.banktransfer.transfer.ReconIssueType
 import io.github.hyeokjinon.banktransfer.transfer.ReconVerdict
+import io.github.hyeokjinon.banktransfer.transfer.StatementSettler
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus.COMPLETED
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus.FAILED
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus.RECEIVED
@@ -12,6 +13,8 @@ import io.github.hyeokjinon.banktransfer.transfer.TransferStatus.SENDING
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus.UNKNOWN
 import org.springframework.batch.core.BatchStatus
 import org.springframework.batch.core.job.SimpleJob
+import org.springframework.batch.infrastructure.item.Chunk
+import org.springframework.batch.infrastructure.item.ExecutionContext
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.batch.autoconfigure.JobLauncherApplicationRunner
 import org.springframework.context.ApplicationContext
@@ -20,6 +23,8 @@ import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.interceptor.TransactionAttribute
+import org.springframework.transaction.support.TransactionTemplate
+import java.time.Clock
 import java.time.Instant
 import java.time.LocalTime
 import java.util.UUID
@@ -54,6 +59,34 @@ class DailyReconJobTest : DailyReconTestSupport() {
             val attribute = ReflectionTestUtils.getField(steps.getValue(name), "transactionAttribute") as TransactionAttribute
             assertEquals(TransactionDefinition.ISOLATION_READ_COMMITTED, attribute.isolationLevel, name)
         }
+    }
+
+    /**
+     * ③ 쓰기의 배선 고정 (ADR-0010 결정 3): 리더가 D일 출금으로 읽은 뒤 다시 보내져 sending_at 이 D+1 이 된 출금이 쓰기에 온다.
+     * 잡 안에서는 리더와 쓰기 사이에 경합을 끼울 곳이 없으므로, 잡과 같은 팩토리로 ③ 쓰기를 만들어 그 id 를 직접 넘긴다.
+     * 쓰기가 D일 범위를 settler 에 넘기지 않으면 은행 줄이 없는 SENDING 이라 AUTO_FAIL(E002 + 환불)이 된다 — 은행이 처리 중일 수 있어 이중 지급.
+     */
+    @Test
+    fun `③ 쓰기 - 리더가 읽은 뒤 다시 보내진(sending_at D+1) 출금은 확정하지 않는다 = SENDING 그대로, 환불 없음, RESENT_LATER`() {
+        val day = ReconTestDates.unique()
+        val user = fundedUser()
+        val resent = seed(user, SENDING, at(day.plusDays(1), 1))
+        val balance = wallets.balanceOf(user)
+        val writer = context.getBean(DailyReconJobConfiguration::class.java)
+            .transferSettlingWriter(context.getBean(StatementSettler::class.java), repo, context.getBean(Clock::class.java), day)
+        val stepContext = ExecutionContext()
+
+        writer.open(ExecutionContext())
+        TransactionTemplate(transactionManager).apply { isolationLevel = TransactionDefinition.ISOLATION_READ_COMMITTED }
+            .executeWithoutResult { writer.write(Chunk(listOf(resent.id))) }
+        writer.update(stepContext)
+
+        assertEquals(SENDING, status(resent))
+        assertEquals(listOf("WITHDRAW"), ledgerTypes(resent.id))
+        assertEquals(balance, wallets.balanceOf(user))
+        assertEquals(1, stepContext.getInt(VerdictCounts.key(ReconVerdict.RESENT_LATER)))
+        assertEquals(0, stepContext.getInt(VerdictCounts.key(ReconVerdict.AUTO_FAIL)))
+        assertEquals(emptyMap<String, List<String?>>(), issueRefs(day))
     }
 
     @Test
@@ -213,7 +246,7 @@ class DailyReconJobTest : DailyReconTestSupport() {
 
         assertEquals(BatchStatus.COMPLETED, execution.status)
         assertEquals(COMPLETED to FAILED, status(completed) to status(failed))
-        assertEquals(emptyMap(), issueRefs(day))
+        assertEquals(emptyMap<String, List<String?>>(), issueRefs(day))
         val alert = recordedAlerts.about(day).single()
         assertEquals(AlertLevel.INFO, alert.level)
         assertTrue("완료 — 불일치 없음" in alert.title)

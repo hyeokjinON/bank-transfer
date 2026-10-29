@@ -74,7 +74,7 @@ class StatementSettlerTest {
         val store = OneTransferStore(transfer(TransferStatus.UNKNOWN))
         var askedFor: String? = null
 
-        val settlement = StatementSettler(store, clock).settle(store.current.id) { askedFor = it; listOf(paid) }
+        val settlement = StatementSettler(store, clock).settle(store.current.id, null) { askedFor = it; listOf(paid) }
 
         assertEquals(ReconVerdict.AUTO_COMPLETE, settlement.verdict)
         assertEquals(TransferStatus.UNKNOWN, settlement.transfer!!.status)
@@ -87,7 +87,7 @@ class StatementSettlerTest {
     fun `SENDING + 없음 - fail(E002) 로 확정 (환불은 저장소가 같은 트랜잭션에서)`() {
         val store = OneTransferStore(transfer(TransferStatus.SENDING))
 
-        val settlement = StatementSettler(store, clock).settle(store.current.id) { emptyList() }
+        val settlement = StatementSettler(store, clock).settle(store.current.id, null) { emptyList() }
 
         assertEquals(ReconVerdict.AUTO_FAIL, settlement.verdict)
         assertEquals(listOf("fail SENDING E002"), store.calls)
@@ -99,7 +99,7 @@ class StatementSettlerTest {
     fun `확정된 건은 건드리지 않는다 - 판정만 돌려준다`() {
         val store = OneTransferStore(transfer(TransferStatus.COMPLETED))
 
-        val settlement = StatementSettler(store, clock).settle(store.current.id) { emptyList() }
+        val settlement = StatementSettler(store, clock).settle(store.current.id, null) { emptyList() }
 
         assertEquals(ReconVerdict.COMPLETED_NOT_AT_BANK, settlement.verdict)
         assertTrue(store.calls.isEmpty())
@@ -109,7 +109,7 @@ class StatementSettlerTest {
     fun `경합 - 확정이 0건이면(그 사이 정리 작업이 COMPLETED) 다시 읽어 바뀐 상태로 판정한다`() {
         val store = OneTransferStore(transfer(TransferStatus.UNKNOWN)).apply { raceTo = TransferStatus.COMPLETED }
 
-        val settlement = StatementSettler(store, clock).settle(store.current.id) { listOf(paid) }
+        val settlement = StatementSettler(store, clock).settle(store.current.id, null) { listOf(paid) }
 
         assertEquals(ReconVerdict.MATCHED, settlement.verdict)
         assertEquals(TransferStatus.COMPLETED, settlement.transfer!!.status)
@@ -120,7 +120,7 @@ class StatementSettlerTest {
     fun `경합 - 그 사이 결과조회가 FAILED 로 확정했는데 은행 줄이 있으면 REFUNDED_BUT_PAID`() {
         val store = OneTransferStore(transfer(TransferStatus.UNKNOWN)).apply { raceTo = TransferStatus.FAILED }
 
-        val settlement = StatementSettler(store, clock).settle(store.current.id) { listOf(paid) }
+        val settlement = StatementSettler(store, clock).settle(store.current.id, null) { listOf(paid) }
 
         assertEquals(ReconVerdict.REFUNDED_BUT_PAID, settlement.verdict)
     }
@@ -129,7 +129,7 @@ class StatementSettlerTest {
     fun `다시 읽어도 계속 바뀌면(옛 스냅숏) 3번 뒤 포기 - 단계가 실패하고 재시작으로 이어간다`() {
         val store = OneTransferStore(transfer(TransferStatus.UNKNOWN)).apply { snapshotStale = true }
 
-        assertFailsWith<IllegalStateException> { StatementSettler(store, clock).settle(store.current.id) { listOf(paid) } }
+        assertFailsWith<IllegalStateException> { StatementSettler(store, clock).settle(store.current.id, null) { listOf(paid) } }
         assertEquals(3, store.calls.size)
     }
 

@@ -130,11 +130,12 @@ class StatementSettler(
     /**
      * [sentWithin] = ③ 의 대상 범위(대사일 D 의 하루). 주면 확정 UPDATE 가 "sendingAt 이 아직 그 안" 을 상태와 함께 조건으로 건다 —
      * 읽은 뒤 RECEIVED → SENDING 으로 다시 보내진 출금(sendingAt = 지금)은 상태만 보면 다시 SENDING 이라 E002 환불이 통과해 이중 지급이 된다.
-     * 다시 읽어 범위 밖이면 [ReconVerdict.RESENT_LATER] (확정 없음). ④ 는 범위 없이 부른다 — 줄이 있어 환불(AUTO_FAIL)이 나올 수 없다.
+     * 다시 읽어 범위 밖이면 [ReconVerdict.RESENT_LATER] (확정 없음). ④ 는 범위 없이(null) 부른다 — 줄이 있어 환불(AUTO_FAIL)이 나올 수 없다.
+     * 기본값을 두지 않는다: 부르는 쪽마다 범위를 명시해 ③ 이 범위를 빠뜨리는 배선 실수(→ 이중 지급)가 눈에 띄게.
      */
     fun settle(
         transferId: UUID,
-        sentWithin: OpenEndRange<Instant>? = null,
+        sentWithin: OpenEndRange<Instant>?,
         linesOf: (String) -> List<BankStatementLine>,
     ): Settlement {
         var transfer = read(transferId)

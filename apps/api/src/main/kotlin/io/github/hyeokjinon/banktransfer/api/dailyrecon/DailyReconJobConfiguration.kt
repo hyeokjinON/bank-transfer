@@ -203,7 +203,8 @@ class DailyReconJobConfiguration {
         @Value("#{jobParameters['reconDate']}") reconDate: LocalDate,
     ): ItemStreamWriter<BankLineRef> = SettlingWriter(reconDate, repo, clock) { ref: BankLineRef ->
         val lines = repo.linesOf(ref.reference)
-        ref.transferId?.let { id -> settler.settle(id) { lines } } ?: settler.unknownReference(lines)
+        // 범위 없음(null): ④ 의 출금은 이 거래번호의 은행 줄이 있어 AUTO_FAIL(환불)이 나올 수 없고, 자동 완료는 은행이 낸 금액 · 계좌와 같을 때만이다
+        ref.transferId?.let { id -> settler.settle(id, null) { lines } } ?: settler.unknownReference(lines)
     }
 
     @Bean

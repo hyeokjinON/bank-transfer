@@ -67,7 +67,7 @@ class StatementSettlerIsolationTest : DailyReconTestSupport() {
         val settler = StatementSettler(racingStore(), Clock.systemUTC())
         return TransactionTemplate(transactionManager).apply { isolationLevel = isolation }.execute {
             store.findById(transferId)
-            settler.settle(transferId) { listOf(line) }
+            settler.settle(transferId, null) { listOf(line) }
         }
     }
 
