@@ -25,9 +25,14 @@ import io.netty.channel.socket.SocketChannel
 import io.netty.channel.socket.nio.NioServerSocketChannel
 import org.slf4j.LoggerFactory
 import java.net.InetSocketAddress
+import java.nio.file.Path
+import java.time.Clock
 import java.time.Duration
+import java.time.LocalDate
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -41,6 +46,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * - 결과조회(v0.2): 처리한 이체의 이용기관 거래번호면 0000, 아니면 2001
  * - silentAfterProcessingAccounts: 이체를 처리(입금 · 거래번호 기록)하고 응답만 보내지 않는다. 단 1원 이체는 정상 응답 — 1원인증으로 수취 계좌를 등록할 수 있게 (결과조회 시나리오용)
  * - pause/resume: 은행 장애 흉내 (새 연결을 받지 않고 붙은 연결도 끊었다가, 같은 포트로 다시 연다). 입금 · 처리 기록은 그대로 (P3-3b)
+ * - bankFiles (P5-1): 처리한 이체를 일자별 거래 기록에 남기고, 기동할 때 처리한 거래번호를 되살리고, 매일 00:05(KST)에 전날 대사 파일을 만든다 ([BankJournal]).
+ *   null(테스트 기본값)이면 지금처럼 메모리만 쓴다
  */
 class MockBankServer(
     private val port: Int = 0,
@@ -48,6 +55,9 @@ class MockBankServer(
     private val silentAccounts: Set<String> = emptySet(),
     private val silentAfterProcessingAccounts: Set<String> = DEFAULT_SILENT_AFTER_PROCESSING,
     private val responseDelay: Duration = Duration.ZERO,
+    /** 일자별 거래 기록 · 대사 파일 디렉터리 (P5-1). null 이면 기록하지 않는다. */
+    bankFiles: Path? = null,
+    private val clock: Clock = Clock.systemUTC(),
 ) : AutoCloseable {
 
     private val log = LoggerFactory.getLogger(javaClass)
@@ -58,6 +68,12 @@ class MockBankServer(
     private val pollCounter = AtomicInteger()
     private lateinit var serverChannel: Channel
     private val clients = DefaultChannelGroup(GlobalEventExecutor.INSTANCE)
+    private val journal: BankJournal? = bankFiles?.let { BankJournal(it, clock) }
+
+    /** 00:05 일마감 예약 (기록할 때만). 데몬 스레드라 프로세스 종료를 막지 않는다. */
+    private val closer: ScheduledExecutorService? = journal?.let {
+        Executors.newSingleThreadScheduledExecutor { task -> Thread(task, "mock-bank-daily-close").apply { isDaemon = true } }
+    }
 
     /** port = 0 이면 OS 가 고른 포트를 기억해 둔다 — resume 이 같은 포트로 다시 열어야 게이트웨이가 그대로 다시 붙는다. */
     @Volatile private var listenPort = port
@@ -78,9 +94,15 @@ class MockBankServer(
     val pollCount: Int get() = pollCounter.get()
 
     fun start(): MockBankServer {
+        journal?.let {
+            // 재기동해도 결과조회가 처리 기록대로 답한다 — 메모리의 처리 목록만 쓰면 재기동 뒤 모든 조회가 2001 이 된다
+            processedReferences += it.processedReferences()
+            log.info("mock bank restored {} processed references from the journal", processedReferences.size)
+        }
         serverChannel = bootstrap.bind(listenPort).sync().channel()
         listenPort = (serverChannel.localAddress() as InetSocketAddress).port
         log.info("mock bank listening on {}", listenPort)
+        scheduleDailyClose()
         return this
     }
 
@@ -105,7 +127,26 @@ class MockBankServer(
 
     fun hasProcessed(reference: String): Boolean = reference in processedReferences
 
+    private fun scheduleDailyClose() {
+        val executor = closer ?: return
+        executor.schedule({
+            closeYesterday()
+            scheduleDailyClose()
+        }, delayUntilNextClose(clock.instant()).toMillis(), TimeUnit.MILLISECONDS)
+    }
+
+    /** 일마감: 전날(KST) 기록으로 대사 파일을 만든다. 실패해도 서버는 계속 돈다 — 손으로 --close-day 로 다시 만든다. */
+    private fun closeYesterday() {
+        val yesterday = LocalDate.ofInstant(clock.instant(), KST).minusDays(1)
+        try {
+            log.info("[일마감] {} 대사 파일: {}", yesterday, journal!!.closeDay(yesterday))
+        } catch (e: Exception) {
+            log.error("[일마감] {} 대사 파일을 만들지 못함 — --close-day 로 다시 만든다", yesterday, e)
+        }
+    }
+
     override fun close() {
+        closer?.shutdownNow()
         if (::serverChannel.isInitialized) serverChannel.close().awaitUninterruptibly(1, TimeUnit.SECONDS)
         boss.shutdownGracefully(0, 1, TimeUnit.SECONDS)
         workers.shutdownGracefully(0, 1, TimeUnit.SECONDS).awaitUninterruptibly(3, TimeUnit.SECONDS)
@@ -142,6 +183,8 @@ class MockBankServer(
     }
 
     private fun deposit(message: TransferRequest) {
+        // 메모리보다 먼저 — "처리함" 의 기준이 기록이다. 쓰기가 실패하면 예외 → 채널이 닫혀 응답이 없다 = 결과를 모름
+        journal?.record(message)
         deposits.computeIfAbsent(message.accountNo) { CopyOnWriteArrayList() }.add(message)
         processedReferences += message.reference
         log.info("[통장] {} 입금 {}원 적요='{}' 거래번호={}", message.accountNo, message.amount, message.memo, message.reference)
@@ -174,12 +217,20 @@ class MockBankServer(
             "9990000000002" to "무응답",
         )
         val DEFAULT_SILENT_AFTER_PROCESSING = setOf("9990000000002")
+
+        /** 모의 은행의 은행코드. 대사 파일 헤더에 쓴다 (예시 · 테스트가 모두 이 코드로 보낸다). */
+        const val BANK_CODE = "090"
     }
 }
 
 fun main(args: Array<String>) {
-    val port = args.firstOrNull()?.toIntOrNull() ?: 9090
-    MockBankServer(port).start()
-    println("Mock bank FEP started on port $port. Accounts: ${MockBankServer.DEFAULT_ACCOUNTS}")
+    val options = MockBankOptions.parse(args)
+    options.closeDay?.let { day ->
+        // 서버를 띄우지 않고 그 날짜 파일만 만든다 (손 확인 · 재생성용). 이미 있으면 그대로 둔다
+        println("Recon file for $day: ${BankJournal(options.bankFiles).closeDay(day).toAbsolutePath()}")
+        return
+    }
+    MockBankServer(options.port, bankFiles = options.bankFiles).start()
+    println("Mock bank FEP started on port ${options.port}. Accounts: ${MockBankServer.DEFAULT_ACCOUNTS}. Bank files: ${options.bankFiles.toAbsolutePath()}")
     Thread.currentThread().join()
 }

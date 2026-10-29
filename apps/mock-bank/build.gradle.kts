@@ -15,4 +15,6 @@ application {
 // Windows 콘솔·IntelliJ 실행 창에서 한글 로그가 깨지지 않도록 출력 인코딩을 UTF-8 로 고정
 tasks.named<JavaExec>("run") {
     jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    // ./bank-files 를 API 와 같은 곳(저장소 루트)으로 읽게 (P5-1). 기본값은 모듈 폴더(apps/mock-bank)다
+    workingDir = rootProject.projectDir
 }

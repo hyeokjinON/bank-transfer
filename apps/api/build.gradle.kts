@@ -45,4 +45,6 @@ tasks.withType<Test> {
 
 tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
     jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+    // daily-recon.file-dir 기본값 ./bank-files 를 모의 은행과 같은 곳(저장소 루트)으로 (P5-1)
+    workingDir = rootProject.projectDir
 }
