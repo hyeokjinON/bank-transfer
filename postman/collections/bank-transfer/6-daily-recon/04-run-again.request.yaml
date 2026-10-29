@@ -10,6 +10,9 @@ scripts:
       if (pm.variables.get("manualRecon") !== "true") {
         pm.execution.skipRequest();
       }
+      if (!pm.collectionVariables.get("reconDate")) {
+        pm.collectionVariables.set("reconDate", new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10));
+      }
   - type: afterResponse
     language: text/javascript
     code: |-

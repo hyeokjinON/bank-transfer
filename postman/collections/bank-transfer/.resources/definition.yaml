@@ -32,4 +32,3 @@ variables:
   walletBalance: ""
   overAmount: ""
   refundTransferId: ""
-  manualWalletBusy: ""
