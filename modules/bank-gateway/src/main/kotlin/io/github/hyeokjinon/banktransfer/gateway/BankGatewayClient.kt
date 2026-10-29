@@ -64,6 +64,18 @@ open class BankUnavailableException(message: String, cause: Throwable? = null) :
 class BankNotSentException(message: String) : BankUnavailableException(message)
 
 /**
+ * 지금 은행에 보내도 되는지 (P5-1, 점검 시간). 닫혀 있으면 이유를 돌려준다 — 그 요청은 "연결 없음" 과 같이 [BankNotSentException] 으로 끝난다:
+ * 이체는 RECEIVED 로 돌아가 재시도 · 재발행, 결과조회는 시도로 세지 않는다 (어댑터는 두 이유를 구분하지 않는다).
+ */
+fun interface SendGate {
+    fun closedReason(): String?
+
+    companion object {
+        val OPEN = SendGate { null }
+    }
+}
+
+/**
  * 은행 FEP 에 TCP 로 붙는 클라이언트.
  *
  * 전 직장 코드와 다르게 바꾼 점
@@ -75,6 +87,8 @@ class BankNotSentException(message: String) : BankUnavailableException(message)
 class BankGatewayClient(
     private val config: BankGatewayConfig,
     private val clock: Clock = Clock.systemDefaultZone(),
+    /** 점검 시간 등으로 보내지 않을 때 (P5-1). 기본은 늘 열림. */
+    private val sendGate: SendGate = SendGate.OPEN,
 ) : AutoCloseable {
 
     private val log = LoggerFactory.getLogger(javaClass)
@@ -131,8 +145,10 @@ class BankGatewayClient(
      * 요청을 보내고 즉시 future 를 돌려준다.
      * 실패는 future 안에 담긴다: 연결 없음 -> BankNotSentException (안 보냄),
      * 쓰기 실패 · 보낸 뒤 연결 끊김 -> BankUnavailableException (보냈을 수 있음), 시간 초과 -> BankTimeoutException.
+     * 보내기 문이 닫혀 있으면(점검 시간, P5-1) 연결이 있어도 쓰지 않고 BankNotSentException 이다. 폴링은 send 를 거치지 않아 점검 중에도 회선은 유지된다.
      */
     fun send(request: BankMessage): CompletableFuture<BankMessage> {
+        sendGate.closedReason()?.let { return CompletableFuture.failedFuture(BankNotSentException(it)) }
         val ch = channel
         if (ch == null || !ch.isActive) {
             return CompletableFuture.failedFuture(BankNotSentException("bank channel is not connected"))
