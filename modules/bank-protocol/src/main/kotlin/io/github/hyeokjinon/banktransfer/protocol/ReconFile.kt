@@ -5,6 +5,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
+import java.time.format.ResolverStyle
 import java.time.temporal.TemporalAccessor
 
 /**
@@ -47,8 +48,10 @@ object ReconFileFormat {
 
     private const val NEWLINE: Byte = 0x0A
     private const val SPACE: Byte = 0x20
-    private val DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd")
-    private val TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("HHmmss")
+    // 엄격 해석: 기본(SMART)은 20260230 을 2월 28일로, 240000 을 자정으로 고쳐 읽는다 — 은행 파일의 틀린 값을 받아들이지 않게.
+    // STRICT 에서 yyyy 는 연대(era)까지 요구하므로 uuuu(부호 있는 연도)를 쓴다
+    private val DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("uuuuMMdd").withResolverStyle(ResolverStyle.STRICT)
+    private val TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("HHmmss").withResolverStyle(ResolverStyle.STRICT)
 
     /** 은행이 날짜마다 만드는 대사 파일 이름. */
     fun fileName(date: LocalDate): String = "RECON_${DATE.format(date)}.dat"

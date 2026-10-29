@@ -90,6 +90,17 @@ class ReconFileFormatTest {
     }
 
     @Test
+    fun `없는 날짜 · 시각은 거부 (엄격 해석) - 20260230 을 2월 28일로, 240000 을 자정으로 고쳐 읽지 않는다`() {
+        val feb28 = LocalDate.of(2026, 2, 28)
+        val badDate = assertFailsWith<ProtocolException> { ReconFileFormat.read(fileOf("H20260230090", "T000000000000000000000000000"), feb28) }.message!!
+        assertTrue("line 1: not a valid date/time: '20260230'" in badDate, badDate)
+
+        val badTime = detailText(paid).replace("101530", "240000")
+        assertTrue("line 2: not a valid date/time: '240000'" in readFails(fileOf("H20261028090", badTime, "T000000001000000000000030000")))
+        assertFailsWith<ProtocolException> { ReconFileFormat.parseJournal((detailText(paid).replace("101530", "126000") + "\n").toByteArray(BankCharsets.EUC_KR)) }
+    }
+
+    @Test
     fun `숫자 칸에 숫자가 아니면 거부`() {
         val broken = detailText(paid).replace("0000000030000", "00000000300X0")
 
