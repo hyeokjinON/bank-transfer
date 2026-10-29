@@ -16,7 +16,7 @@
 - Spring Batch 6 잡 `dailyReconciliationJob`(6단계) · `StatementMatcher` · `StatementSettler` · 응답코드 `E002`, Flyway V4(Batch 메타 · `bank_statement_line` · `recon_issue`).
 - 스케줄 01 ~ 06시 매시 · `POST /admin/reconciliations`(200 / 409 `RECON_ALREADY_COMPLETED` · `RECON_RUNNING` / 400 `RECON_DATE_IN_FUTURE`), 마지막 회차의 "대사 미완료" 알림(실패 · 실행 중 모두).
 - `AlertNotifier` · `TelegramNotifier` · `LogNotifier`, 설정 `bank.maintenance.*` · `daily-recon.*` · `alert.telegram.*`.
-- 실행 구성 `6. API (대사 손 확인)`, `http/daily-recon.http`, Postman 6 폴더, ADR-0010, 전문 규격 v0.3, 테스트 240 → 354개.
+- 실행 구성 `6. API (대사 손 확인)`, `http/daily-recon.http`, Postman 6 폴더, ADR-0010, 전문 규격 v0.3, 테스트 240 → 365개.
 ### Changed
 - `Clock.systemUTC()` 배선을 `Clock` 빈 하나로.
 - 기존 경고 3곳(`CONFLICT` · DLT · 결과조회 한도)에 WARN 알림.
@@ -24,6 +24,11 @@
 - 스케줄 풀 2 → 3.
 - `spring-boot-starter-batch-jdbc` 추가.
 - 부하 측정 실행 구성에 `--daily-recon.schedule.enabled=false`.
+### Fixed (최종 리뷰)
+- ③ 자동 확정(완료 전이 · `E002` 실패 + 환불)은 `sending_at` 이 아직 대사일 안일 때만 — 상태와 같은 조건부 UPDATE 의 조건(`TransferStore.transition` · `fail` 의 `sentWithin`). 읽은 뒤 다시 보내진 출금을 환불해 이중 지급이 되던 틈을 막았다. 그런 건은 새 판정 `RESENT_LATER`(확정 · 이슈 없음), 요약 `resentLater`.
+- ④ · 줄 수에서 빼는 1원인증은 `V…` 이면서 1원인 줄만 — 1원이 아닌 `V…` 줄은 `UNKNOWN_REFERENCE` + 알림.
+- 대사 파일 날짜 · 시각 엄격 해석(`20260230` · `240000` 거부).
+- Postman 컬렉션 변수 `manualWalletBusy` 중복 키(lint 오류) 제거, 6-4 도 `reconDate` 기본값.
 
 ## [P4-2] 잔고 차감 락 전략 비교 — 2026-10-28 ([#13](https://github.com/hyeokjinON/bank-transfer/pull/13), 머지 후 정리 [#14](https://github.com/hyeokjinON/bank-transfer/pull/14))
 ### Added

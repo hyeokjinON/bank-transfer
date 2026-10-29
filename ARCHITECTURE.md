@@ -343,7 +343,7 @@ flowchart TB
     F --> V
     V --> LD["② loadStatement (500)<br/>bank_statement_line"]
     LD --> M3["③ matchTransfers (100, READ COMMITTED)<br/>sending_at = D 인 출금"]
-    M3 --> M4["④ matchBankLines (100, READ COMMITTED)<br/>파일 D 의 V 아닌 줄 중 ③ 밖"]
+    M3 --> M4["④ matchBankLines (100, READ COMMITTED)<br/>파일 D 의 1원인증(V · 1원) 아닌 줄 중 ③ 밖"]
     M4 --> C5["⑤ checkLedger<br/>잔고 ≠ 원장 합"]
     C5 --> R6["⑥ report → AlertNotifier"]
     M3 -- "UNKNOWN · SENDING 만" --> X["COMPLETED(0000) / fail(E002) + 환불"]
@@ -353,6 +353,7 @@ flowchart TB
 ```
 
 - 판정은 `StatementMatcher`(순수 함수), 확정은 `StatementSettler`(기존 조건부 전이 · `fail`). 조건부 전이가 0건이면 다시 읽어 판정(최대 3회) — 그래서 ③ ④ 는 `READ COMMITTED` 다.
+- ③ 의 확정 UPDATE 는 "`sending_at` 이 아직 D일 안" 도 조건으로 건다 — 읽은 뒤 다시 보내진 출금을 환불하지 않게(이중 지급). 그런 건은 `RESENT_LATER`(확정 · 이슈 없음, 그 날짜의 대사가 맡는다).
 - 실패하면 멈춘 단계 · 청크부터 다시 한다 (결과 같음, 이중 환불 없음). 날짜마다 잡 인스턴스 하나라 끝난 날짜는 거부하고 동시 실행은 하나만 돈다 (`SingleRunGuard` 가 Spring Batch 6 시작 경로의 틈을 막는다).
 - 점검 시간(23:50 ~ 00:10) 덕분에 "D일 송신" = "파일 D" 다. 근거: [ADR-0010](docs/adr/0010-daily-reconciliation.md)
 

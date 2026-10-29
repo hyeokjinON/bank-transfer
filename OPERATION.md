@@ -143,6 +143,7 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
 - 매일 00:05 (KST) 에 전날 기록으로 `bank-files/recon/RECON_yyyyMMdd.dat` 를 만든다 (형식: [protocol.md §7](docs/protocol.md)). 이미 있으면 덮어쓰지 않는다.
 - `./gradlew :apps:mock-bank:run --args="--close-day=20261029"` = 서버를 띄우지 않고 그 날짜 파일만 만들고 끝낸다 (콘솔 `Recon file for …`). 다시 만들려면 파일을 지우고 다시 실행한다.
 - `--bank-files=경로` 로 디렉터리를 바꾼다 (API 는 `daily-recon.file-dir` 로 같은 곳을 가리켜야 한다).
+- **기동이 `parseJournal` 의 `ProtocolException`("file must end with a newline (partially written?)")으로 실패하면** 기록을 쓰는 도중 죽어 마지막 줄이 잘린 것이다 — `bank-files/journal/yyyyMMdd.log` 의 잘린 마지막 줄(마지막 줄바꿈 뒤의 끝부분)만 지우고 다시 띄운다. 기록이 "처리함" 의 기준이고 응답도 나가지 않았으므로 그 한 건은 처리되지 않은 것이 된다 (API 쪽은 결과조회 `2001` 로 확정한다).
 - 손 확인 절차: [`http/daily-recon.http`](http/daily-recon.http).
 
 ## 4. API 오류 코드
@@ -283,7 +284,7 @@ bash load/summarize.sh                                               # 시나리
   ```
   | 응답 | 뜻 |
   |---|---|
-  | 200 `status = COMPLETED` + `summary` | 끝났다. `summary` = 출금 수 · 은행 줄 수 · 일치 · 자동 완료 · 자동 실패 · 재시도 중 · 종류별 불일치 |
+  | 200 `status = COMPLETED` + `summary` | 끝났다. `summary` = 출금 수 · 은행 줄 수 · 일치 · 자동 완료 · 자동 실패 · 재시도 중 · 종류별 불일치 · `resentLater`(다른 날 재송신 — 아래 9-3) |
   | 200 `status = FAILED` + `reason {code, message}` | 요청은 처리됐고 결과가 실패다. `code` = `FILE_NOT_READY` · `FILE_INVALID` · `RESTART_REFUSED` · `ERROR`(예외 클래스 이름만) |
   | 409 `RECON_ALREADY_COMPLETED` | 끝난 날짜는 다시 돌리지 않는다 |
   | 409 `RECON_RUNNING` | 같은 날짜가 실행 중이다 |
@@ -293,8 +294,10 @@ bash load/summarize.sh                                               # 시나리
 - 동시에 같은 날짜를 두 곳에서 돌려도 하나만 돈다 (나머지는 `RECON_RUNNING`).
 
 ### 9-3. 무엇을 맞추고 무엇을 자동으로 고치나
-- **대상**: `sending_at` 이 D일(KST)인 출금 전부(③) + 파일 D 의 줄 중 1원인증(`V…`)이 아니고 ③ 이 다루지 않은 것(④ — 다른 날 보낸 출금, 우리에게 없는 거래번호, `T` 가 아닌 낯선 접두의 거래번호도). 거래번호로 짝지을 때 적재된 모든 날짜의 줄을 본다. 1원인증 줄은 대조하지 않고 건수만 센다. 잔고 ≠ 원장 합(⑤)은 대사일과 무관하게 지금 전체를 본다.
+- **대상**: `sending_at` 이 D일(KST)인 출금 전부(③) + 파일 D 의 줄 중 1원인증이 아니고 ③ 이 다루지 않은 것(④ — 다른 날 보낸 출금, 우리에게 없는 거래번호, `T` 가 아닌 낯선 접두의 거래번호도). 거래번호로 짝지을 때 적재된 모든 날짜의 줄을 본다. 잔고 ≠ 원장 합(⑤)은 대사일과 무관하게 지금 전체를 본다.
+- **1원인증 줄 = `V…` 이면서 금액 1원인 줄**만이다. 대조하지 않고 건수만 센다. `V…` 여도 1원이 아니면 1원인증이 아니므로 ④ 가 대조해 `UNKNOWN_REFERENCE` 로 기록 · 알린다 (`V` 거래번호로 큰돈이 나가도 조용히 빠지지 않게).
 - **자동 확정은 `UNKNOWN` · `SENDING` 만**: 은행 줄이 있고 금액 · 은행 · 계좌가 같으면 `COMPLETED`(`0000`) + 이슈 `AUTO_COMPLETED`, 줄이 없으면 `FAILED` `E002` + 환불 + 이슈 `AUTO_FAILED`. **그 밖의 어긋남은 고치지 않고** `recon_issue` 에 남기고 알린다 — 확정된 건을 뒤집으면 보정이 새 사고가 된다.
+- **확정은 "`sending_at` 이 아직 D일 안" 일 때만** — 상태와 같은 조건부 UPDATE 의 조건이다. ③ 이 읽은 뒤 그 출금이 다시 보내지면(`RECEIVED → SENDING`, `sending_at` = 지금) 상태는 다시 `SENDING` 이지만 은행이 지금 처리 중일 수 있어, `E002` 로 환불하면 이중 지급이 된다. 이런 건은 확정하지 않고 요약의 `resentLater`(알림 첫 줄 "다른 날 재송신(확정 안 함) n", 있을 때만)로만 센다. 이슈는 남기지 않는다 — 새 `sending_at` 의 날짜 대사가 그 출금을 맡고, D일 파일의 줄은 ④ 가 본다. 평소에는 0 이고, Kafka · 컨슈머 장애가 자정을 넘겨 01시 무렵 복구될 때 나올 수 있다.
 
 ### 9-4. 이슈 처리
 - 열린 이슈 보기 · 처리 기록 남기기: [database.md §9](docs/database.md) "일마감 대사". `recon_issue` 는 append-only 라 사람이 `resolved_at` · `resolution_note` 만 SQL 로 채운다.
@@ -308,13 +311,13 @@ bash load/summarize.sh                                               # 시나리
 | `REFUNDED_BUT_PAID` | 우리는 `FAILED`(환불) 인데 은행이 처리했다 — 환불한 돈이 나갔다 | 은행 확인 후 잔고 보정 방법 결정 |
 | `COMPLETED_NOT_AT_BANK` | 우리는 `COMPLETED` 인데 은행 파일에 없다 | 은행에 확인 |
 | `AMOUNT_OR_ACCOUNT_MISMATCH` | 금액 · 은행코드 · 계좌가 다르다 (`UNKNOWN` 이어도 확정하지 않는다) | 은행 기록과 대조 |
-| `UNKNOWN_REFERENCE` | 우리에게 없는 거래번호의 줄 (1원인증 `V…` 제외) | 은행에 확인 |
+| `UNKNOWN_REFERENCE` | 우리에게 없는 거래번호의 줄 (1원인증 = `V…` 이면서 1원인 줄 제외 — 1원이 아닌 `V…` 줄도 여기) | 은행에 확인 |
 | `BALANCE_LEDGER_MISMATCH` | 잔고 ≠ 원장 합. 고칠 때까지 날마다 다시 나온다 | 원장을 고치지 말고 원인을 찾는다 |
 
 ### 9-5. 알림
 | 언제 | 수준 | 내용 |
 |---|---|---|
-| 대사 완료, 불일치 0 | INFO | 요약 (출금 N건: 일치 · 자동 완료 · 자동 실패 · 재시도 중 / 은행 줄 N건) |
+| 대사 완료, 불일치 0 | INFO | 요약 (출금 N건: 일치 · 자동 완료 · 자동 실패 · 재시도 중 [· 다른 날 재송신] / 은행 줄 N건) |
 | 대사 완료, 불일치 있음 | CRITICAL | 요약 + 불일치 목록(긴급 먼저, 최대 20건 + "외 n건"). 자동 확정은 요약의 건수로만 |
 | 대사 실패 (`FILE_NOT_READY` 가 아닌 이유) | CRITICAL | 이유 + 멈춘 단계부터 다시 돌리는 방법 |
 | 06시 마지막 회차에도 끝내지 못함 | CRITICAL | "대사 미완료" + 이유. 실패뿐 아니라 **실행이 아직 돌고 있는 것으로 끝난 경우(`RUNNING`)도** — 대사 도중 JVM 이 죽어 `STARTED` 로 남으면 회차마다 "실행 중" 만 돌아오므로 이 알림이 유일한 신호다 |

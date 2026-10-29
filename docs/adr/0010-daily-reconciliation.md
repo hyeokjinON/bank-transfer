@@ -12,9 +12,13 @@
 1. **은행 쪽 기록 = 일자별 대사 파일** (고정길이 EUC-KR 헤더 · 상세 · 트레일러, 규격 v0.3, [protocol.md §7](../protocol.md)). 형식 코드는 `bank-protocol` 하나(`ReconFileFormat`)에 두어 모의 은행이 쓰고 API 가 읽는다.
 2. **자동 보정은 `UNKNOWN` · `SENDING` 만.** 파일에 있으면 `COMPLETED`(`0000`) + 이슈 `AUTO_COMPLETED`, 없으면 `fail(E002)` + 환불 + 이슈 `AUTO_FAILED`. **이미 확정된 건의 어긋남**(금액 · 계좌 불일치, `COMPLETED` 인데 은행에 없음, `FAILED` 인데 은행에 있음, `RECEIVED` 인데 은행에 있음, 우리에게 없는 거래번호, 이중 지급, 잔고 ≠ 원장 합)은 `recon_issue` 에 남기고 알리기만 한다. 금액 · 계좌가 다르면 `UNKNOWN` 이어도 확정하지 않는다.
 3. **판정은 순수 함수 `StatementMatcher`, 확정은 `StatementSettler`.** 확정은 기존 조건부 전이(→ `COMPLETED`)와 `TransferStore.fail()`(→ `FAILED` `E002` + 환불, 한 트랜잭션)를 그대로 쓴다. 조건부 전이가 0건이면(그 사이 정리 작업 · 컨슈머가 바꿈) **다시 읽어 바뀐 상태로 다시 판정, 최대 3회**, 넘으면 예외 → 단계 실패 → 재시작으로 이어서.
+   - **③ 의 확정은 "`sending_at` 이 아직 D일 안" 을 같은 조건부 UPDATE 의 조건으로 건다** (`TransferStore.transition` · `fail` 의 `sentWithin`). 리더가 읽은 뒤 그 출금이 `SENDING → RECEIVED → SENDING` 으로 다시 보내지면(`sending_at` = 지금, D+1) 상태만 보는 조건은 다시 통과한다 — 줄이 없으니 `E002` + 환불인데, 은행은 새 전문을 처리하고 있을 수 있어 **이중 지급**이 된다. 별도 재조회 확인이 아니라 UPDATE 의 조건이어야 읽기와 쓰기 사이 틈이 없다.
+   - 조건에 걸려 0건이면 다시 읽는다. `sending_at` 이 D일 밖으로 옮겨 갔으면 새 판정 **`RESENT_LATER`**: 확정하지 않고 이슈도 남기지 않는다(어긋남이 아니다 — 아직 결과를 모르는 진행 중인 출금이다). 새 `sending_at` 의 날짜 대사가 그 출금을 ③ 으로 맡고(적재된 모든 날짜의 줄을 보므로 D일 줄도 본다), D일 파일에 그 거래번호 줄이 있으면 같은 D일 ④ 가 다룬다. 요약에는 `resentLater` 로 세고 알림 첫 줄에 있을 때만 붙인다 — 장애 복구 직후 대사에서 몇 건이 넘어갔는지 보이게. 아직 D일 안이면 기존의 다시 읽기 · 다시 판정(최대 3회) 그대로다.
+   - ④ 는 범위 없이 확정한다 — 줄이 있으므로 환불(`AUTO_FAIL`)이 나올 수 없고, 자동 완료는 은행이 낸 돈과 같은 금액 · 계좌일 때만이라 돈이 더 나가지 않는다.
 4. **API 앱 안의 Spring Batch 6**, JDBC 잡 저장소(`spring-boot-starter-batch-jdbc`, 메타 표는 Flyway `V4`). 잡 `dailyReconciliationJob` 은 6단계: ① `validateFile` ② `loadStatement`(청크 500) ③ `matchTransfers`(청크 100) ④ `matchBankLines`(청크 100) ⑤ `checkLedger` ⑥ `report`.
    - ③ 은 `sending_at` 이 D일(KST)인 출금 전부를 거래번호로 파일 줄과 짝짓는다(**적재된 모든 날짜의** 줄을 본다 — 이중 지급 · 늦은 처리를 잡으려고).
-   - ④ 는 파일 D 의 줄 중 **1원인증(`V…`) 줄이 아니고 ③ 이 다루지 않은 것 전부**를 판정한다. `T…` 만이 아니라 낯선 접두의 거래번호도 `UNKNOWN_REFERENCE` 가 된다 — 은행이 내보낸 돈이 접두 때문에 보고되지 않는 구멍을 두지 않는다. 같은 거래번호의 여러 줄은 첫 줄 하나만 읽고 판정은 그 거래번호의 모든 줄로 한 번 한다(이중 지급을 두 번 세지 않는다). `V…` 줄은 적재하되 대조하지 않고 건수만 보고한다.
+   - ④ 는 파일 D 의 줄 중 **1원인증 줄이 아니고 ③ 이 다루지 않은 것 전부**를 판정한다. `T…` 만이 아니라 낯선 접두의 거래번호도 `UNKNOWN_REFERENCE` 가 된다 — 은행이 내보낸 돈이 접두 때문에 보고되지 않는 구멍을 두지 않는다. 같은 거래번호의 여러 줄은 첫 줄 하나만 읽고 판정은 그 거래번호의 모든 줄로 한 번 한다(이중 지급을 두 번 세지 않는다).
+   - **1원인증 줄 = `V…` 이면서 금액 1원.** 적재하되 대조하지 않고 건수만 보고한다. 스펙은 "`V` 줄은 대조하지 않는다" 였지만 그대로면 `V` 거래번호로 1원이 아닌 돈(예: 100만 원)이 나가도 "1원인증 n건" 에 섞여 기록도 알림도 없다. 1원인증 송금은 늘 1원이므로 **1원이 아닌 `V…` 줄은 우리에게 없는 거래번호로 대조해 `UNKNOWN_REFERENCE`** 로 남긴다. ④ 리더 · 줄 수(`countLines`)가 같은 조건(`ReconRepository.verificationLine`)을 쓰고, "거래번호마다 첫 줄" 도 대조 대상 줄 중에서 고른다(같은 `V` 거래번호의 1원 줄 뒤에 큰 금액 줄이 와도 빠지지 않게). 1원 외 금액의 인증 송금을 새로 만들면 이 조건을 함께 고친다.
    - **단계 트랜잭션 설정은 회귀 테스트로 고정했다.** Spring Batch 6 의 `chunk(size)` 는 트랜잭션 관리자를 넘기지 않으면 조용히 `ResourcelessTransactionManager`(트랜잭션 없음)로 돌아, 확정 · 환불이 청크와 함께 롤백되지 않는다. 그래서 여섯 단계 모두 JPA 트랜잭션 관리자를 명시하고, ③ ④ 는 `READ COMMITTED` 다. 이 설정은 `DailyReconJobTest` 가 리플렉션으로 단계마다 단언한다.
    - **③ ④ 가 `READ COMMITTED` 인 이유**: MySQL 기본 `REPEATABLE READ` 에서는 청크의 첫 읽기(리더)가 스냅숏을 잡아, 조건부 UPDATE 가 0건일 때의 "다시 읽기" 가 바뀐 상태를 보지 못한다. `StatementSettlerIsolationTest` 가 둘을 나란히 보인다 — `READ COMMITTED` 는 다시 읽어 일치, `REPEATABLE READ` 는 스냅숏 때문에 3회 뒤 포기.
 5. **날짜마다 잡 인스턴스 하나** (식별 파라미터 `reconDate`): 끝난 날짜는 거부(409 `RECON_ALREADY_COMPLETED`), 실패하면 멈춘 단계 · 마지막 커밋 청크부터, 동시 실행은 하나만.
@@ -34,10 +38,10 @@
 ## 결과
 - 증명 테스트:
   - **판정** (`StatementMatcherTest`): 설계 §6 표를 줄마다 — 1 ~ 11 + `RECEIVED` 있음 / 없음 + 순서 규칙(이중 지급이 금액 비교보다 먼저).
-  - **확정** (`StatementSettlerTest`): 미확정만 확정하고 확정된 건은 판정만 돌려준다 / 경합(확정이 0건)이면 다시 읽어 바뀐 상태로 판정 / 3회 넘게 바뀌면 포기. `StatementSettlerIsolationTest`: `READ COMMITTED` 는 다시 읽어 일치, `REPEATABLE READ` 는 스냅숏 때문에 포기 — 격리 수준을 낮춘 근거.
-  - **잡** (`DailyReconJobTest`): 전 칸 — 전이 · 환불 · 이슈 종류별 · 알림 요약, 여섯 단계의 트랜잭션 관리자 · 격리 수준(리플렉션).
+  - **확정** (`StatementSettlerTest`): 미확정만 확정하고 확정된 건은 판정만 돌려준다 / 경합(확정이 0건)이면 다시 읽어 바뀐 상태로 판정(`SENDING → UNKNOWN` 이면 `UNKNOWN` 에서 다시 `fail`) / 3회 넘게 바뀌면 포기 / 읽은 뒤 다시 보내지면(`sending_at` D+1) 환불 · 자동 완료 없이 `RESENT_LATER`. `StatementSettlerIsolationTest`: `READ COMMITTED` 는 다시 읽어 일치, `REPEATABLE READ` 는 스냅숏 때문에 포기 — 격리 수준을 낮춘 근거 / 실제 MySQL 에서 다른 트랜잭션이 다시 보내고 커밋하면 `fail` 0건 · 환불 없음. `JpaTransferStoreTest`: `sentWithin` 범위 밖이면 상태가 맞아도 0건(환불 없음), 안이면 확정.
+  - **잡** (`DailyReconJobTest`): 전 칸 — 전이 · 환불 · 이슈 종류별 · 알림 요약, 여섯 단계의 트랜잭션 관리자 · 격리 수준(리플렉션), 1원이 아닌 `V…` 줄 → `UNKNOWN_REFERENCE` + 건수. `ReconRepositoryTest`: 1원인증 줄 수 = `V…` 이면서 1원.
   - **실행** (`DailyReconLauncherTest`): 끝난 날짜 재실행 거부 / ③ 중간 청크 실패 → 재시작 → 이중 환불 없음 / 동시 실행 하나 / `SingleRunGuard` / `FILE_NOT_READY` / 마지막 회차 알림 / `FILE_INVALID`. `DailyReconSchedulerTest`(회차 · 마지막 회차 판정), `ReconciliationApiTest`(200 / 409 / 400).
-  - **파일 · 모의 은행**: `ReconFileFormatTest`(왕복 · 건수 · 합계 · 날짜 · 길이), `BankJournalTest` · `MockBankRestartTest`(기록 · 재기동 복원 · 일마감 · 덮어쓰지 않음).
+  - **파일 · 모의 은행**: `ReconFileFormatTest`(왕복 · 건수 · 합계 · 날짜 · 길이 · 없는 날짜/시각 `20260230` · `240000` 거부 — 엄격 해석), `BankJournalTest` · `MockBankRestartTest`(기록 · 재기동 복원 · 일마감 · 덮어쓰지 않음).
   - **점검 시간**: `BankMaintenanceWindowTest`(포함 · 제외 · 자정 넘김 · 올림 · 꺼짐 · UTC 시계 → KST 판정), `BankMaintenanceApiTest`(503 + `Retry-After`, 조회 · 충전 · 관리 API 는 그대로) · `BankMaintenanceFlowTest`(송신 보류 → 점검 뒤 처리).
   - **알림**: `TelegramNotifierTest`(가짜 서버 · 500 · 시간 초과 · 토큰이 로그에 없음).
 - **테스트가 실제로 잡아내는지 확인** (일회성 변이 검사, 커밋하지 않음 — Task 8 커밋 `52e24e9` 본문의 결과):
@@ -46,6 +50,7 @@
   - 줄 수 `>= 2` → `> 2` → `11 같은 거래번호 2줄 이상` 실패: `RECEIVED ==> expected PAID_TWICE but was RETRYING`
   - 줄 없음 `RECEIVED` → `AUTO_FAIL` → `RECEIVED + 없음 = 재시도 중` 실패: `expected RETRYING but was AUTO_FAIL`
   - 다시 읽기(`transfer = read(transferId)`) 제거 → `경합 - 확정이 0건이면 … 다시 읽어 바뀐 상태로 판정한다` · `경합 - … REFUNDED_BUT_PAID` 실패: `IllegalStateException` (3회 안에 확정 못 함)
+  - (최종 수정) `sending_at` 범위 없이 확정 → 다시 보내진 `SENDING` 이 `FAILED`(`expected SENDING but was FAILED`), 실제 MySQL 에서 `expected RESENT_LATER but was AUTO_FAIL`. JPA 가 범위를 무시하면 `JpaTransferStoreTest` 의 범위 밖 `fail` 이 1건(`Expected value to be false`).
 - 한계:
   - 점검 시작 직전에 보낸 출금을 은행이 20분 넘게 붙잡았다가 처리하면, 그날 회차는 자동 실패(`E002` + 환불)로 확정하고 다음 날 회차의 ④ 가 `REFUNDED_BUT_PAID` 로 잡아 알린다. 자동 복구는 없다. 그래서 점검 길이는 재발행 포기(`E001`)까지의 약 26분보다 짧게 두는 것을 설정 주석 · OPERATION 에 적었다.
   - 확정된 건의 어긋남은 사람이 SQL 로 처리하고 `resolved_at` 을 남긴다(해결 API 는 범위 밖).
