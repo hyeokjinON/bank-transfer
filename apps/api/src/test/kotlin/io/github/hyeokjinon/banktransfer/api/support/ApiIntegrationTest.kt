@@ -16,6 +16,8 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.web.client.RestClient
+import java.nio.file.Files
+import java.nio.file.Path
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -49,11 +51,15 @@ abstract class ApiIntegrationTest {
         /** 9990000000001 = 무응답 · 처리 안 함. 9990000000002 = 처리 후 무응답 (MockBankServer 기본값). 컨텍스트와 수명이 같으므로 닫지 않는다. */
         val bank: MockBankServer = MockBankServer(silentAccounts = setOf("9990000000001")).start()
 
+        /** 대사 파일 디렉터리 (P5-1). 테스트가 RECON_yyyyMMdd.dat 를 직접 써 넣는다 — 저장소의 ./bank-files 를 건드리지 않게 임시 디렉터리. */
+        val bankFiles: Path = Files.createTempDirectory("bank-files-")
+
         @JvmStatic
         @DynamicPropertySource
         fun bankProperties(registry: DynamicPropertyRegistry) {
             registry.add("bank.gateway.port") { bank.boundPort }
             registry.add("bank.gateway.response-timeout") { "500ms" }
+            registry.add("daily-recon.file-dir") { bankFiles.toString() }
         }
     }
 
