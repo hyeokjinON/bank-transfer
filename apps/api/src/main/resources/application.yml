@@ -50,6 +50,10 @@ bank:
     port: 9090
     response-timeout: 3s
     poll-interval: 30s
+  maintenance:                 # 은행 점검 시간 (P5-1, KST). 점검 중에는 출금 접수 · 1원인증 503, 은행 송신 보류
+    enabled: true
+    start: "23:50"             # 따옴표 필수 — YAML 은 23:50 을 60진수 정수로 읽는다. 시작 포함 · 끝 제외, 자정을 넘어도 된다
+    end: "00:10"               # 점검 길이는 재발행 포기(E001)까지의 약 26분보다 짧게 (OPERATION §9)
 
 account:
   verification:

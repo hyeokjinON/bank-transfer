@@ -71,8 +71,8 @@ class MessagingConfiguration {
     fun outboxRelayScheduler(relay: OutboxRelay) = OutboxRelayScheduler(relay)
 
     @Bean
-    fun transferProcessor(store: TransferStore, client: BankGatewayClient) =
-        TransferProcessor(store, BankTransferAdapter(client), Clock.systemUTC())
+    fun transferProcessor(store: TransferStore, client: BankGatewayClient, clock: Clock) =
+        TransferProcessor(store, BankTransferAdapter(client), clock)
 
     @Bean
     fun transferRequestedListener(processor: TransferProcessor) = TransferRequestedListener(processor::process)

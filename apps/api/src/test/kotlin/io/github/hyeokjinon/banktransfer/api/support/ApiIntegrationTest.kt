@@ -6,6 +6,7 @@ import io.github.hyeokjinon.banktransfer.account.VerificationStatus
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletLedger
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.mockbank.MockBankServer
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
@@ -28,6 +29,7 @@ import kotlin.random.Random
  * 재시도 토픽 간격은 위 프로퍼티로 줄인다. 은행 장애는 [withBankDown] 으로 만든다.
  * 잔고 단언이 다른 테스트에 흔들리지 않게 테스트마다 새 사용자를 쓴다 (P4-1): 정리 작업(RepublishFlowTest 의 1ms 대기)이 남은 RECEIVED 를 모두 훑어 환불할 수 있다.
  * Redis 컨테이너는 차감 전략 테스트(RedisWalletDebitTest)용이다 (P4-2). 앱은 기본 전략(conditional)이라 Redis 를 쓰지 않는다.
+ * 앱 시계는 [testClock] 이다 (P5-1): 점검 시간 · 대사 테스트는 fix 로 시각을 정하고, 테스트가 끝나면 진짜 시각으로 돌아간다.
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -40,7 +42,7 @@ import kotlin.random.Random
         "transfer.retry.max-delay-ms=2000",
     ],
 )
-@Import(MySqlTestContainer::class, KafkaTestContainer::class, RedisTestContainer::class)
+@Import(MySqlTestContainer::class, KafkaTestContainer::class, RedisTestContainer::class, TestClockConfiguration::class)
 abstract class ApiIntegrationTest {
 
     companion object {
@@ -65,6 +67,9 @@ abstract class ApiIntegrationTest {
 
     @Autowired
     protected lateinit var wallets: WalletLedger
+
+    @Autowired
+    protected lateinit var testClock: TestClock
 
     // 이름에 test 를 붙인다: 하위 클래스가 이미 private verifications · jdbc 를 갖고 있어 같은 이름이면 가려진다
     @Autowired
@@ -110,6 +115,10 @@ abstract class ApiIntegrationTest {
 
     @BeforeEach
     fun waitForBankConnection() = awaitGateway(connected = true, timeout = Duration.ofSeconds(5))
+
+    /** 시각을 고정한 테스트가 다음 테스트 · 백그라운드 컨슈머에 고정 시각을 남기지 않게. */
+    @AfterEach
+    fun releaseClock() = testClock.release()
 
     /**
      * 은행 장애를 만든다: 모의 은행을 내려(붙어 있던 연결도 끊음) [block] 을 돌리고, 끝나면 **반드시** 같은 포트로 다시 올린다.

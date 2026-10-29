@@ -52,11 +52,11 @@ class ReconcileConfiguration {
     private val log = LoggerFactory.getLogger(javaClass)
 
     @Bean
-    fun transferReconciler(store: TransferStore, client: BankGatewayClient, props: ReconcileProperties) =
+    fun transferReconciler(store: TransferStore, client: BankGatewayClient, props: ReconcileProperties, clock: Clock) =
         TransferReconciler(
             store = store,
             bank = BankInquiryAdapter(client),
-            clock = Clock.systemUTC(),
+            clock = clock,
             sendingTimeout = props.sendingTimeout,
             maxInquiries = props.maxInquiries,
             batchSize = props.batchSize,
