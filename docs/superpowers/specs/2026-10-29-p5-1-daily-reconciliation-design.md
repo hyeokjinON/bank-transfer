@@ -67,6 +67,7 @@ P5-1 은 하루치 출금을 **은행이 보내 준 대사 파일**과 맞춰 �
 ### 5-2. 실행
 - 스케줄: `daily-recon.schedule.enabled` (기본 `true`), **01:00 ~ 06:00 매시 정각**에 전날 날짜로 실행. 파일이 아직 없으면(`FILE_NOT_READY`) 다음 정각에 재시작. 이미 완료면 조용히 넘어간다(INFO). 06:00 회차까지 완료하지 못하면 "대사 미완료" 긴급 알림.
 - 수동: `POST /admin/reconciliations?date=yyyy-MM-dd` → 200 `{status, summary}` (실패해도 200 + `status=FAILED` + 이유). 이미 완료 409 `RECON_ALREADY_COMPLETED`, 실행 중 409 `RECON_RUNNING`, 내일 이후 날짜 400 (오늘은 손 확인용으로 허용).
+  - **(마감 후 수정)** 오늘도 기본은 400 `RECON_DATE_NOT_CLOSED` — 마감된 날(어제 이전, KST)만 받는다. 오늘을 대사하면 아직 파일에 없는 방금 보낸 출금을 `E002` 환불 → 은행이 그 뒤 처리하면 이중 지급. 손 확인은 `daily-recon.allow-today=true`(실행 구성 6)일 때만 오늘을 허용 ([ADR-0010](../../adr/0010-daily-reconciliation.md) 결정 7).
 - 끝난 날짜 재실행 거부 · 실패 시 이어서 · 동시 실행 하나만 — 모두 Spring Batch 잡 저장소가 보장한다. 이어서 할 때 이미 확정된 건은 조건부 전이 0건, 이슈는 유니크로 무시 → **어디서 다시 시작해도 결과가 같다.**
 - 부하 측정 실행 구성(`5. API (부하 측정)`) · 다른 테스트는 `daily-recon.schedule.enabled=false`.
 
@@ -128,7 +129,7 @@ P5-1 은 하루치 출금을 **은행이 보내 준 대사 파일**과 맞춰 �
 
 **손 확인 (Postman 6 폴더 · `http/daily-recon.http`)**
 1. 점검 시간: 지금 시각을 포함하도록 `--bank.maintenance.start/end` 를 주고 띄운다 → 출금 503 + `Retry-After`, 잔고 조회 200.
-2. 대사: `transfer.reconcile.enabled=false` 로 띄워 결과를 모르는 출금을 남긴다 → 오늘 출금(정상 · 없는 계좌 · 처리 후 무응답 계좌) → 모의 은행 `--close-day=오늘` → `POST /admin/reconciliations?date=오늘` → 요약 · DB(자동 완료 · 자동 실패 · 환불) → 다시 보내면 409. 봇을 설정했으면 휴대폰으로 요약.
+2. 대사: `transfer.reconcile.enabled=false` 로 띄워 결과를 모르는 출금을 남긴다 → 오늘 출금(정상 · 없는 계좌 · 처리 후 무응답 계좌) → 모의 은행 `--close-day=오늘` → `POST /admin/reconciliations?date=오늘` (마감 후 수정: API 는 실행 구성 6 = `allow-today=true` 로 띄워야 오늘을 받는다) → 요약 · DB(자동 완료 · 자동 실패 · 환불) → 다시 보내면 409. 봇을 설정했으면 휴대폰으로 요약.
 3. 주의: 오늘을 미리 마감하는 것은 손 확인용이다 (그 뒤 출금은 파일에 없다).
 
 ## 11. 위험과 한계

@@ -90,6 +90,7 @@
 - 결정(계획): 판정별 건수(일치 · 재시도 중 · 대상 수)는 단계 ExecutionContext(`verdict.<이름>`)에, 자동 확정 · 불일치 건수는 `recon_issue` 에서 센다 — 재시작해도 늘지 않는다.
 - 결정(계획): 실패 이유 코드 = `FILE_NOT_READY` · `FILE_INVALID` · `RESTART_REFUSED` · `ERROR`(예외 클래스 이름만 — 내부 메시지를 응답에 싣지 않는다). 관리 API 의 `reason` = `{code, message}`.
 - 결정(계획): 내일 이후 날짜의 400 코드 = **`RECON_DATE_IN_FUTURE`**. 날짜 형식 오류 · 누락은 기존 규칙대로 400 `INVALID_REQUEST`.
+  - **(마감 후 수정, 사용자 결정)** `RECON_DATE_NOT_CLOSED` 로 대체 — 오늘(KST)도 기본은 400, 손 확인은 `daily-recon.allow-today=true`(실행 구성 6)일 때만 오늘 허용. 이유: 오늘 대사는 아직 파일에 없는 출금을 `E002` 환불 → 이중 지급 ([ADR-0010](../../adr/0010-daily-reconciliation.md) 결정 7). 아래 Task 11 의 코드는 계획 당시 그대로 둔다.
 - 결정(계획): 실패 알림 — 스케줄 마지막 회차(06:00)는 이유와 무관하게 "대사 미완료" CRITICAL 하나, 그 전 회차 · 수동의 `FILE_NOT_READY` 는 알리지 않음(INFO 로그), 그 밖 실패는 회차 · 수동마다 CRITICAL. "실행 중" · "이미 완료" 는 알리지 않는다.
 - 결정(계획): "마지막 회차" = **같은 cron 의 다음 실행이 다음 날인 회차** — 설정 키를 늘리지 않고 cron 을 바꿔도 맞게.
 - 결정(계획): `spring.task.scheduling.pool.size` 2 → **3** — 대사가 스케줄 스레드에서 동기로 도는 동안 발행기 · 정리 작업이 한 스레드를 나눠 쓰지 않게.

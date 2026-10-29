@@ -5,6 +5,7 @@ url: '{{baseUrl}}/admin/reconciliations?date={{reconDate}}'
 order: 3000
 description: |-
   수동 확인 전용 — manualRecon 이 true 일 때만 나간다. 준비: 실행 구성 "6. API (대사 손 확인)", 출금(정상 · 9990000000002) 뒤
+  (오늘 날짜는 그 구성의 --daily-recon.allow-today=true 일 때만 받는다 — 다른 구성이면 400 RECON_DATE_NOT_CLOSED)
   ./gradlew :apps:mock-bank:run --args="--close-day=오늘(yyyyMMdd)" 로 오늘 파일을 만든다 (http/daily-recon.http 2).
   reconDate 가 비어 있으면 오늘(KST)을 넣는다.
 scripts:

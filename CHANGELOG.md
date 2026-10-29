@@ -14,9 +14,9 @@
 - 대사 파일 형식 v0.3 (`ReconFileFormat`, 헤더 · 상세 · 트레일러, 59바이트 레코드), 모의 은행 거래 기록 · 재기동 복원 · 00:05 일마감 · `--close-day` · `--bank-files`.
 - `BankMaintenanceWindow` · `SendGate` (점검 시간에는 은행으로 보내지 않음), 웹 503 `BANK_MAINTENANCE` + `Retry-After`.
 - Spring Batch 6 잡 `dailyReconciliationJob`(6단계) · `StatementMatcher` · `StatementSettler` · 응답코드 `E002`, Flyway V4(Batch 메타 · `bank_statement_line` · `recon_issue`).
-- 스케줄 01 ~ 06시 매시 · `POST /admin/reconciliations`(200 / 409 `RECON_ALREADY_COMPLETED` · `RECON_RUNNING` / 400 `RECON_DATE_IN_FUTURE`), 마지막 회차의 "대사 미완료" 알림(실패 · 실행 중 모두).
+- 스케줄 01 ~ 06시 매시 · `POST /admin/reconciliations`(200 / 409 `RECON_ALREADY_COMPLETED` · `RECON_RUNNING` / 400 `RECON_DATE_NOT_CLOSED`), 마지막 회차의 "대사 미완료" 알림(실패 · 실행 중 모두).
 - `AlertNotifier` · `TelegramNotifier` · `LogNotifier`, 설정 `bank.maintenance.*` · `daily-recon.*` · `alert.telegram.*`.
-- 실행 구성 `6. API (대사 손 확인)`, `http/daily-recon.http`, Postman 6 폴더, ADR-0010, 전문 규격 v0.3, 테스트 240 → 365개.
+- 실행 구성 `6. API (대사 손 확인)`, `http/daily-recon.http`, Postman 6 폴더, ADR-0010, 전문 규격 v0.3, 테스트 240 → 370개.
 ### Changed
 - `Clock.systemUTC()` 배선을 `Clock` 빈 하나로.
 - 기존 경고 3곳(`CONFLICT` · DLT · 결과조회 한도)에 WARN 알림.
@@ -29,6 +29,9 @@
 - ④ · 줄 수에서 빼는 1원인증은 `V…` 이면서 1원인 줄만 — 1원이 아닌 `V…` 줄은 `UNKNOWN_REFERENCE` + 알림.
 - 대사 파일 날짜 · 시각 엄격 해석(`20260230` · `240000` 거부).
 - Postman 컬렉션 변수 `manualWalletBusy` 중복 키(lint 오류) 제거, 6-4 도 `reconDate` 기본값.
+### Fixed (마감 후)
+- 수동 대사는 마감된 날(어제 이전, KST)만 — 오늘 이후 400 `RECON_DATE_NOT_CLOSED`(`RECON_DATE_IN_FUTURE` 대체). 오늘을 대사하면 아직 은행 파일에 없는 방금 보낸 출금을 `E002` 환불 → 은행이 그 뒤 처리하면 이중 지급. 손 확인용 설정 `daily-recon.allow-today`(기본 `false`, 실행 구성 6 만 `true`).
+- `StatementSettler.settle` 의 범위 인자 기본값 제거(③ 은 D일 범위, ④ 는 `null` 명시) + ③ 쓰기가 범위를 넘기는 배선을 잡 수준 테스트로 고정.
 
 ## [P4-2] 잔고 차감 락 전략 비교 — 2026-10-28 ([#13](https://github.com/hyeokjinON/bank-transfer/pull/13), 머지 후 정리 [#14](https://github.com/hyeokjinON/bank-transfer/pull/14))
 ### Added

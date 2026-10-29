@@ -174,7 +174,7 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
 | 은행 점검 시간 (23:50 ~ 00:10) 의 출금 접수 · 1원인증 요청 · 확인 | 503 | `BANK_MAINTENANCE` (+ `Retry-After`: 점검 종료까지 남은 초) |
 | 대사: 이미 완료한 날짜 | 409 | `RECON_ALREADY_COMPLETED` |
 | 대사: 같은 날짜가 실행 중 | 409 | `RECON_RUNNING` |
-| 대사: 내일 이후 날짜 (KST) | 400 | `RECON_DATE_IN_FUTURE` |
+| 대사: 아직 마감되지 않은 날짜 (오늘 이후, KST) | 400 | `RECON_DATE_NOT_CLOSED` |
 | 허용되지 않는 상태 전이 | 409 | `ILLEGAL_TRANSITION` |
 | 그 밖의 표준 Spring 오류 (405 · 415 …) | 해당 상태 | HTTP 상태 이름 (예 `METHOD_NOT_ALLOWED`) |
 
@@ -277,7 +277,8 @@ bash load/summarize.sh                                               # 시나리
 
 ### 9-2. 대사 실행
 - **자동**: 매일 01:00 ~ 06:00 매시 정각(KST)에 **전날** 대사. 파일이 아직 없으면(`FILE_NOT_READY`) 다음 정각에 멈춘 곳부터 다시, 이미 끝났으면 조용히(INFO) 넘어간다. 06:00 이 마지막 회차다.
-- **수동**: `date` 는 `yyyy-MM-dd` (KST).
+- **수동**: `date` 는 `yyyy-MM-dd` (KST). **마감된 날(어제 이전)만** 받는다 — 오늘 이후는 400 `RECON_DATE_NOT_CLOSED`. 오늘을 대사하면 방금 보내 아직 은행 파일에 없는 출금을 "은행이 처리하지 않았다" 로 보고 `E002` 환불하는데, 은행이 그 출금을 그 뒤 처리하면 **이중 지급**이다 ([ADR-0010](docs/adr/0010-daily-reconciliation.md) 결정 7).
+  - 로컬 손 확인에서만 `daily-recon.allow-today=true`(실행 구성 `6. API (대사 손 확인)`)로 오늘을 허용한다(내일 이후는 그래도 거부). **운영에서는 절대 켜지 않는다.** 스케줄은 늘 전날이라 이 설정과 무관하다.
   ```bash
   curl -X POST "http://localhost:8080/admin/reconciliations?date=2026-10-28"
   # {"date":"2026-10-28","status":"COMPLETED","summary":{"transfers":…,"bankLines":…,"autoCompleted":…,"autoFailed":…,"mismatches":{…},…}}
@@ -288,7 +289,7 @@ bash load/summarize.sh                                               # 시나리
   | 200 `status = FAILED` + `reason {code, message}` | 요청은 처리됐고 결과가 실패다. `code` = `FILE_NOT_READY` · `FILE_INVALID` · `RESTART_REFUSED` · `ERROR`(예외 클래스 이름만) |
   | 409 `RECON_ALREADY_COMPLETED` | 끝난 날짜는 다시 돌리지 않는다 |
   | 409 `RECON_RUNNING` | 같은 날짜가 실행 중이다 |
-  | 400 `RECON_DATE_IN_FUTURE` | 내일 이후(KST). 오늘은 손 확인용으로 허용 |
+  | 400 `RECON_DATE_NOT_CLOSED` | 아직 마감되지 않은 날(오늘 이후, KST). 지난 날만 대사할 수 있다 (`allow-today=true` 면 오늘은 허용) |
   | 400 `INVALID_REQUEST` | `date` 가 없거나 형식 오류 |
 - **실패하면 멈춘 곳부터**: 같은 날짜를 다시 돌리면 끝난 단계는 건너뛰고 멈춘 단계는 마지막 커밋 청크부터 잇는다. 결과는 한 번에 끝낸 것과 같고 환불은 두 번 되지 않는다.
 - 동시에 같은 날짜를 두 곳에서 돌려도 하나만 돈다 (나머지는 `RECON_RUNNING`).
@@ -357,4 +358,5 @@ DELETE FROM BATCH_JOB_INSTANCE WHERE JOB_INSTANCE_ID = ? AND NOT EXISTS (SELECT 
 
 ### 9-7. 손 확인할 때 주의
 - 손 확인은 [`http/daily-recon.http`](http/daily-recon.http), 실행 구성 `6. API (대사 손 확인)` (정리 작업을 꺼서 결과를 모르는 출금이 `UNKNOWN` 으로 남는다).
+- **오늘을 대사하려면 API 를 반드시 실행 구성 6 으로 띄운다** — `--daily-recon.allow-today=true` 가 켜져 있어야 오늘 날짜를 받는다. 다른 구성(`2. API (8080)` 등)으로 띄우면 400 `RECON_DATE_NOT_CLOSED` 다. 명령줄로는 `./gradlew :apps:api:bootRun --args="--transfer.reconcile.enabled=false --daily-recon.allow-today=true"`.
 - **손으로 오늘을 마감하는 것(`--close-day=오늘`)은 손 확인용이다.** 그 뒤에 처리된 출금은 이미 만들어진 오늘 파일에 없다. 오늘 대사를 아직 돌리지 않았다면 내일 01시 회차가 그 파일로 돌아, 그 출금들이 은행에 없는 것으로 보인다 (`UNKNOWN` 은 `E002` 로 확정 · 환불, `COMPLETED` 는 `COMPLETED_NOT_AT_BANK` 이슈). 손 확인을 끝낸 뒤에는 `bank-files/recon/RECON_오늘.dat` 를 지워 두면 00:05 에 모의 은행이 정상 파일을 만든다 (이미 오늘 대사를 끝냈다면 그 날짜는 "이미 완료" 로 조용히 넘어간다).

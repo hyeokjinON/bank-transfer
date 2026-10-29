@@ -23,7 +23,7 @@ cd bank-transfer
 
 ### 2-2. 빌드 · 테스트
 ```bash
-./gradlew build      # 첫 실행은 의존성 다운로드로 몇 분 걸린다. 테스트 365개 통과해야 정상
+./gradlew build      # 첫 실행은 의존성 다운로드로 몇 분 걸린다. 테스트 370개 통과해야 정상
 ```
 테스트는 Testcontainers 로 MySQL · Kafka · Redis 를 띄우므로 Docker Desktop 이 켜져 있어야 한다 (설치는 2-4).
 
@@ -68,7 +68,7 @@ cd bank-transfer
    `"chat":{"id":123456789` 의 숫자가 chat id 다 (비어 있으면 2번을 다시).
 4. Windows **사용자 환경 변수**에 넣는다: 시작 → "계정의 환경 변수 편집" → 새로 만들기 → `ALERT_TELEGRAM_BOT_TOKEN` = 토큰, `ALERT_TELEGRAM_CHAT_ID` = chat id. (파일이 아니라 사용자 프로필에 저장된다. `setx` 는 명령 기록에 토큰이 남으니 쓰지 않는다.)
 5. IntelliJ · 터미널을 다시 열고 API 를 띄운다 → 로그 `alerts go to telegram chat 123456789 (and the log)`. 실행 구성(`.run/*.xml`)의 환경 변수 칸에는 넣지 않는다 — 그 파일은 커밋된다.
-6. 확인: [`http/daily-recon.http`](http/daily-recon.http) 의 2) 대사를 돌리면 휴대폰에 요약이 온다.
+6. 확인: [`http/daily-recon.http`](http/daily-recon.http) 의 2) 대사를 돌리면 휴대폰에 요약이 온다 (API 는 실행 구성 `6. API (대사 손 확인)` 으로 — 오늘 날짜 대사는 그 구성의 `daily-recon.allow-today=true` 일 때만 받는다).
 
 토큰이 새었다면 `@BotFather` → `/revoke` 로 바로 폐기하고 새 토큰으로 4번을 다시 한다. 끄려면 두 환경 변수를 지운다.
 

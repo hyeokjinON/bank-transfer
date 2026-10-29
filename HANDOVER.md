@@ -14,7 +14,7 @@
 | P3-3b 재시도 | ✅ 완료 (2026-10-26, [#9](https://github.com/hyeokjinON/bank-transfer/pull/9)) | ADR-0007 채택, 테스트 161개. CI `build` · `infra-smoke` 통과. 재시도 토픽 · DLT · 제한 재발행 · `FAILED E001`. 손 확인: 은행을 내린 채 접수한 2건이 재시도 토픽 경로로 은행 복구 뒤 `COMPLETED 0000` (재발행 0회, `sending_at` 은 접수 약 95초 뒤 = 5s·30s·60s 마지막 재시도). 재발행 경로(DLT → 재발행 → `COMPLETED` / 3회 뒤 `E001`)는 자동 흐름 테스트로만 증명 — 손으로 보려면 실행 구성 `4. API (재발행 손 확인)` 으로 은행을 15초 넘게 내려 둔다 |
 | P4-1 원화 잔고 | ✅ 완료 (2026-10-26, [#11](https://github.com/hyeokjinON/bank-transfer/pull/11)) | ADR-0008 채택, 테스트 206개. CI `build` · `infra-smoke` 통과. 손 확인: Postman 5 폴더로 `user-p41` 출금 19건(COMPLETED 6 · 은행 거절 FAILED 1001 13) — 환불 13건이 거절 건수와 정확히 같고, 잔고 1,500,000 = 원장 합 |
 | P4-2 락 전략 비교 | ✅ 완료 (2026-10-28, [#13](https://github.com/hyeokjinON/bank-transfer/pull/13)) | ADR-0009 채택, 테스트 240개. CI `build` · `infra-smoke` 통과. 차감 전략 4종 · 409/503 · k6 도구. 측정 24회 ([docs/perf](docs/perf/p4-2-lock-comparison.md)): 핫스팟 접수 조건부 106/s > 비관적 99 > Redis 81 > 낙관적 45(409 77%), 분산은 차이 없음. 손 확인: `redis` 전략 + Redis 정지 상태에서 API 기동 → 출금 접수 503 `WALLET_BUSY` + `Retry-After: 1`, 남은 출금 없음 (Postman 5-8 · curl, 인증 사용자 `user-p41`). `manualWalletBusy` 를 켜지 않고 Send 하면 5-8 이 나가지 않음(응답 없음)도 확인 |
-| P5-1 일마감 대사 | 🟡 리뷰 중 | ADR-0010 제안, 테스트 365개. 대사 파일 v0.3 · 점검 시간 · Spring Batch 잡 · 알림 |
+| P5-1 일마감 대사 | 🟡 리뷰 중 | ADR-0010 제안, 테스트 370개. 대사 파일 v0.3 · 점검 시간 · Spring Batch 잡 · 알림 |
 | P5-2 ~ P9 | ⬜ 예정 | README 로드맵 |
 
 ## 2. P3 설계 (합의된 것)
@@ -74,6 +74,7 @@ P3-1 (PR #3) · P3-2 (PR #5) · P3-3a (PR #7) · P3-3b (PR #9) 모두 머지됐�
 | 자동 보정 범위 | **결과를 모르는 출금(`UNKNOWN` · `SENDING`)만** 파일로 확정 (있으면 `COMPLETED`, 없으면 `FAILED E002` + 환불). 이미 확정된 건은 기록 + 알림 — 뒤집으면 보정이 새 사고가 된다. 확정은 `sending_at` 이 아직 D일 안일 때만(같은 조건부 UPDATE) — 다시 보내진 출금은 `RESENT_LATER` 로 넘긴다. 1원인증 줄 = `V…` 이면서 1원만(1원이 아닌 `V…` 는 `UNKNOWN_REFERENCE`) |
 | 실행 위치 | **API 앱 안의 Spring Batch 잡**(JDBC 잡 저장소). 확정 · 환불에 기존 `TransferStore` 경로를 그대로 쓴다. 별도 배치 앱은 P8 |
 | 중복 실행 · 재시작 | 잡 파라미터 `reconDate`, 날짜마다 인스턴스 하나: 끝난 날짜는 거부(409), 실패하면 멈춘 곳부터, 동시 실행은 하나(`SingleRunGuard` 가 Spring Batch 6 시작 경로의 틈을 막음) |
+| 수동 대사 날짜 | **마감된 날(어제 이전, KST)만** — 오늘 이후 400 `RECON_DATE_NOT_CLOSED`. 오늘을 대사하면 아직 파일에 없는 출금을 `E002` 환불 → 은행이 그 뒤 처리하면 이중 지급. 손 확인만 `daily-recon.allow-today=true`(실행 구성 6) |
 | 날짜 경계 | **은행 점검 시간 23:50 ~ 00:10 (KST)**: 은행을 건드리는 웹 요청 503 + 은행 송신 보류 → "D일 송신" = "파일 D" |
 | 알림 | `AlertNotifier` + 텔레그램 Bot API(토큰 · chat id 가 둘 다 있을 때) / 로그. 실패는 삼키고 대사에 영향 없음. 기존 경고 3곳도 WARN |
 | 이름 | 일마감 대사 = `dailyrecon` (잡 `dailyReconciliationJob`) — 10초 주기 "정리 작업"(`reconcile`)과 구분 |

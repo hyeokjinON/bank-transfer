@@ -31,7 +31,7 @@
 - **원화 잔고 (P4-1)**: 사용자(`X-User-Id`)별 원화 잔고와 append-only 원장. 출금 접수 트랜잭션에서 조건부 UPDATE 로 차감(잔고 부족 422), 실패로 확정되면 같은 트랜잭션에서 환불, 결과를 모르는 출금은 보류로 묶음. 동시 출금 100건에도 잔고는 음수가 되지 않음. 멱등키 · 1원인증 · 조회는 사용자 범위 ([ADR-0008](docs/adr/0008-wallet-debit-on-intake-refund-on-failure.md))
 - **잔고 차감 락 전략 (P4-2)**: 같은 차감을 조건부 UPDATE · 비관적 락(FOR UPDATE) · 낙관적 락(version + 재시도) · Redis 분산락(Redisson, DB 앞의 줄 세우기)으로 바꿔 끼우고 기동 설정으로 하나를 고른다. 네 전략 모두 동시 출금 100건에도 음수 없음 · 잔고 = 원장 합. 락을 못 잡으면 503 WALLET_BUSY, 재시도 소진은 409 CONCURRENT_UPDATE (둘 다 Retry-After). k6 핫스팟 · 분산 비교 → [측정 결과](docs/perf/p4-2-lock-comparison.md) (핫스팟 접수: 조건부 106/s > 비관적 99 > Redis 81 > 낙관적 45 — 409 77%) ([ADR-0009](docs/adr/0009-wallet-debit-strategies-and-lock-comparison.md))
 - **일마감 대사 · 은행 점검 시간 · 알림 (P5-1)**: 모의 은행이 매일 00:05 에 만드는 대사 파일(고정길이 EUC-KR, 규격 v0.3)과 하루치 출금을 Spring Batch 잡으로 맞춘다 — 결과를 모르는 출금(UNKNOWN · SENDING)만 자동 확정(완료 / FAILED E002 + 환불), 확정된 건의 어긋남(이중 지급 · 환불했는데 나감 등)은 기록 · 알림. 끝난 날짜 거부 · 실패하면 멈춘 곳부터 · 동시 실행 하나. 23:50 ~ 00:10 은행 점검 시간에는 출금 · 1원인증 503 + Retry-After. 알림은 텔레그램(선택) / 로그 ([ADR-0010](docs/adr/0010-daily-reconciliation.md))
-- **테스트 365개**: 전문 직렬화, 쪼개진 TCP 패킷, 동시 요청 50건 매칭, 타임아웃, 재접속, API 통합(HTTP → TCP), MySQL · Kafka 통합(Testcontainers: 같은 키 동시 10건, 아웃박스 원자성, 발행기 2개 동시 발행 · 접수가 발행기에 막히지 않음, 같은 메시지 두 번 → 은행 1건, 처리 후 무응답 → 결과조회로 확정 · 입금 1건, 은행 장애 → 재시도 토픽 → DLT → 재발행 → 입금 1건, 동시 출금 100건 → 정확히 10건 · 잔고 0, 차감 전략 4종 × 동시 출금 100건, 실패 확정 경로마다 환불, 대사 전 칸 · 재시작(이중 환불 없음) · 동시 실행 하나 · 점검 시간 503 · UTC 시계 → KST 판정)
+- **테스트 370개**: 전문 직렬화, 쪼개진 TCP 패킷, 동시 요청 50건 매칭, 타임아웃, 재접속, API 통합(HTTP → TCP), MySQL · Kafka 통합(Testcontainers: 같은 키 동시 10건, 아웃박스 원자성, 발행기 2개 동시 발행 · 접수가 발행기에 막히지 않음, 같은 메시지 두 번 → 은행 1건, 처리 후 무응답 → 결과조회로 확정 · 입금 1건, 은행 장애 → 재시도 토픽 → DLT → 재발행 → 입금 1건, 동시 출금 100건 → 정확히 10건 · 잔고 0, 차감 전략 4종 × 동시 출금 100건, 실패 확정 경로마다 환불, 대사 전 칸 · 재시작(이중 환불 없음) · 동시 실행 하나 · 점검 시간 503 · UTC 시계 → KST 판정)
 
 ## 구조
 
@@ -94,10 +94,10 @@ sequenceDiagram
 2. 오른쪽 위 실행 목록에 `.run/` 의 구성이 자동으로 뜹니다.
    - `0. Mock Bank + API` : 모의 은행(9090)과 API(8080)를 한 번에 실행
    - `1. Mock Bank (9090)` / `2. API (8080)` : 하나씩 실행 (벌레 아이콘으로 디버그)
-   - `3. All Tests` : 테스트 365개
+   - `3. All Tests` : 테스트 370개
    - `4. API (재발행 손 확인)` : 재시도 간격 2초 · 4초 · 8초, 재발행 대기 30초로 줄인 API (P3-3b 손 확인용, [`http/transfer.http`](http/transfer.http) 8절)
    - `5. API (부하 측정)` : 발행기 · 정리 작업 · 컨슈머를 끄고 로그를 줄인 jar 실행 (P4-2 k6 측정용, [OPERATION §8](OPERATION.md#8-부하-측정-p4-2-k6))
-   - `6. API (대사 손 확인)` : 정리 작업을 꺼서 결과를 모르는 출금이 `UNKNOWN` 으로 남게 한 API (P5-1 대사 손 확인용, [`http/daily-recon.http`](http/daily-recon.http))
+   - `6. API (대사 손 확인)` : 정리 작업을 꺼서 결과를 모르는 출금이 `UNKNOWN` 으로 남게 하고, 오늘 날짜 수동 대사를 허용(`daily-recon.allow-today=true`)한 API (P5-1 대사 손 확인 전용, [`http/daily-recon.http`](http/daily-recon.http)). 다른 구성은 지난 날만 대사한다 (오늘 이후 400 `RECON_DATE_NOT_CLOSED`)
 3. `http/account-verification.http` 를 열고 요청 왼쪽 ▶ 버튼으로 호출합니다.
    1번 요청이 응답의 `id` 를 저장하고, 모의 은행 콘솔의 `적요='BT1234'` 숫자를 2번 요청의 `code` 에 넣으면 `VERIFIED` 가 됩니다.
 
@@ -120,7 +120,7 @@ bash infra/verify.sh
 요구사항: JDK 21 (Gradle 은 래퍼가 내려받습니다)
 
 ```bash
-./gradlew build                                   # 컴파일 + 테스트 365개
+./gradlew build                                   # 컴파일 + 테스트 370개
 ./gradlew :apps:mock-bank:run --args="9090"       # 터미널 1: 모의 은행
 ./gradlew :apps:mock-bank:run --args="--close-day=20261029"   # 서버 없이 그 날짜 대사 파일만
 ./gradlew :apps:api:bootRun                       # 터미널 2: API (localhost:8080)

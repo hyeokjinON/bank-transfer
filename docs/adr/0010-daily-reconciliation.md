@@ -15,6 +15,7 @@
    - **③ 의 확정은 "`sending_at` 이 아직 D일 안" 을 같은 조건부 UPDATE 의 조건으로 건다** (`TransferStore.transition` · `fail` 의 `sentWithin`). 리더가 읽은 뒤 그 출금이 `SENDING → RECEIVED → SENDING` 으로 다시 보내지면(`sending_at` = 지금, D+1) 상태만 보는 조건은 다시 통과한다 — 줄이 없으니 `E002` + 환불인데, 은행은 새 전문을 처리하고 있을 수 있어 **이중 지급**이 된다. 별도 재조회 확인이 아니라 UPDATE 의 조건이어야 읽기와 쓰기 사이 틈이 없다.
    - 조건에 걸려 0건이면 다시 읽는다. `sending_at` 이 D일 밖으로 옮겨 갔으면 새 판정 **`RESENT_LATER`**: 확정하지 않고 이슈도 남기지 않는다(어긋남이 아니다 — 아직 결과를 모르는 진행 중인 출금이다). 새 `sending_at` 의 날짜 대사가 그 출금을 ③ 으로 맡고(적재된 모든 날짜의 줄을 보므로 D일 줄도 본다), D일 파일에 그 거래번호 줄이 있으면 같은 D일 ④ 가 다룬다. 요약에는 `resentLater` 로 세고 알림 첫 줄에 있을 때만 붙인다 — 장애 복구 직후 대사에서 몇 건이 넘어갔는지 보이게. 아직 D일 안이면 기존의 다시 읽기 · 다시 판정(최대 3회) 그대로다.
    - ④ 는 범위 없이 확정한다 — 줄이 있으므로 환불(`AUTO_FAIL`)이 나올 수 없고, 자동 완료는 은행이 낸 돈과 같은 금액 · 계좌일 때만이라 돈이 더 나가지 않는다.
+   - `StatementSettler.settle` 의 범위 인자에는 **기본값이 없다** — ③ 은 D일 범위, ④ 는 `null` 을 이유 주석과 함께 명시한다. ③ 이 범위를 빠뜨리는 배선 실수는 `DailyReconJobTest` 가 잡 팩토리로 만든 ③ 쓰기에 다시 보내진(`sending_at` D+1) 출금을 직접 넘겨 잡는다(`SENDING` 그대로 · 원장 `WITHDRAW` 만 · `RESENT_LATER`).
 4. **API 앱 안의 Spring Batch 6**, JDBC 잡 저장소(`spring-boot-starter-batch-jdbc`, 메타 표는 Flyway `V4`). 잡 `dailyReconciliationJob` 은 6단계: ① `validateFile` ② `loadStatement`(청크 500) ③ `matchTransfers`(청크 100) ④ `matchBankLines`(청크 100) ⑤ `checkLedger` ⑥ `report`.
    - ③ 은 `sending_at` 이 D일(KST)인 출금 전부를 거래번호로 파일 줄과 짝짓는다(**적재된 모든 날짜의** 줄을 본다 — 이중 지급 · 늦은 처리를 잡으려고).
    - ④ 는 파일 D 의 줄 중 **1원인증 줄이 아니고 ③ 이 다루지 않은 것 전부**를 판정한다. `T…` 만이 아니라 낯선 접두의 거래번호도 `UNKNOWN_REFERENCE` 가 된다 — 은행이 내보낸 돈이 접두 때문에 보고되지 않는 구멍을 두지 않는다. 같은 거래번호의 여러 줄은 첫 줄 하나만 읽고 판정은 그 거래번호의 모든 줄로 한 번 한다(이중 지급을 두 번 세지 않는다).
@@ -25,7 +26,9 @@
    - Spring Batch 6.0.5 의 시작은 "인스턴스 조회 → 돌고 있는 실행 확인 → 실행 생성" 을 서로 다른 트랜잭션으로 한다. 그래서 스펙이 기대한 "잡 저장소가 하나만 보장" 은 절반만 맞다. 처음 시작하는 날짜는 인스턴스 UNIQUE 가 막지만 진 쪽은 `DuplicateKeyException`(직렬화 격리라 데드락일 수도)을 받고, 실패한 날짜를 두 곳이 동시에 재시작하면 둘 다 확인을 통과할 수 있다.
    - 해결: 런처가 그 예외들을 "실행 중"(409 `RECON_RUNNING`)으로 바꾸고, 잡 리스너 **`SingleRunGuard`** 가 같은 인스턴스에 먼저 만든 실행이 아직 돌고 있으면 나중 실행을 멈춘다. 인스턴스만 만들어지고 실행이 아직 없는 짧은 순간에 온 쪽은 잠깐 기다려 한 번 더 시도한다. 결과가 같다는 보장(조건부 전이 · 유니크)은 그대로라, 이 가드가 막는 것은 알림 중복이다.
 6. **점검 시간 23:50 ~ 00:10 (KST)로 날짜 경계를 맞춘다.** 점검 중에는 아무것도 은행에 가지 않으므로 "D일에 보낸 출금" 과 "D일 파일" 이 같은 범위가 된다. 웹은 503 `BANK_MAINTENANCE` + `Retry-After`(출금 접수 · 1원인증 요청 · 확인), 은행 호출은 `BankGatewayClient.send()` 의 `SendGate` 한 곳에서 "연결 없음" 과 같은 길로 보류한다(이체는 `RECEIVED` 로 돌아가 재시도 · 재발행, 결과조회는 횟수를 세지 않음). 판단은 `Clock` 빈 하나를 `Asia/Seoul` 로 바꿔서 한다.
-7. **스케줄 01 ~ 06시 매시 정각**(`0 0 1-6 * * *`, `Asia/Seoul`)에 전날 대사. 파일이 아직 없으면(`FILE_NOT_READY`) 다음 정각에 멈춘 곳부터 다시. **마지막 회차**(같은 cron 의 다음 실행이 다음 날인 회차)는 이유와 무관하게 끝내지 못했으면 "대사 미완료" CRITICAL 을 보낸다 — 실패일 때뿐 아니라 **실행이 아직 돌고 있는 것으로 끝났을 때(이유 `RUNNING`)도**. 대사 도중 JVM 이 죽어 실행이 `STARTED` 로 남으면 회차마다 "실행 중" 만 돌아와 아무도 모르게 되기 때문이다(계획의 "실행 중은 알리지 않음" 은 마지막 회차에 한해 바꿨다). 수동 `POST /admin/reconciliations?date=` 는 200(`COMPLETED` / `FAILED` + 이유) · 409 · 400(`RECON_DATE_IN_FUTURE`, 오늘은 손 확인용으로 허용).
+7. **스케줄 01 ~ 06시 매시 정각**(`0 0 1-6 * * *`, `Asia/Seoul`)에 전날 대사. 파일이 아직 없으면(`FILE_NOT_READY`) 다음 정각에 멈춘 곳부터 다시. **마지막 회차**(같은 cron 의 다음 실행이 다음 날인 회차)는 이유와 무관하게 끝내지 못했으면 "대사 미완료" CRITICAL 을 보낸다 — 실패일 때뿐 아니라 **실행이 아직 돌고 있는 것으로 끝났을 때(이유 `RUNNING`)도**. 대사 도중 JVM 이 죽어 실행이 `STARTED` 로 남으면 회차마다 "실행 중" 만 돌아와 아무도 모르게 되기 때문이다(계획의 "실행 중은 알리지 않음" 은 마지막 회차에 한해 바꿨다). 수동 `POST /admin/reconciliations?date=` 는 200(`COMPLETED` / `FAILED` + 이유) · 409 · 400(`RECON_DATE_NOT_CLOSED`).
+   - **수동 대사는 마감된 날(어제 이전, KST)만 받는다** — 오늘 이후는 400 `RECON_DATE_NOT_CLOSED`. 오늘을 대사하면 방금 보내 아직 은행 파일에 없는 출금을 "은행이 처리하지 않았다" 로 보고 `AUTO_FAIL`(`E002` + 환불)하는데, 은행은 그 출금을 아직 처리할 수 있다 → **이중 지급**. ③ 의 `sending_at` 조건은 리더 뒤에 *다시 보내진* 출금만 막고, 이 경우(한 번 보낸 그대로 `SENDING` · `UNKNOWN`)는 막지 못한다.
+   - 손 확인용 탈출구 `daily-recon.allow-today`(기본 `false`): `true` 면 오늘도 받는다(내일 이후는 그래도 거부). 실행 구성 `6. API (대사 손 확인)` 만 켜고, 운영에서는 절대 켜지 않는다. 스케줄은 늘 전날이라 이 설정과 무관하다. 판정은 `DailyRecon.requireClosed` 한곳, 날짜는 KST(`ReconDatePolicyTest` 의 KST 00:30 = UTC 전날 15:30 경계).
 8. **알림** `AlertNotifier`: 텔레그램 토큰 · chat id 가 둘 다 있으면 `TelegramNotifier`(일반 텍스트, 로그에도 먼저 남김), 아니면 `LogNotifier`. 알림 실패는 삼키고(ERROR 로그만) 대사를 실패시키거나 되돌리지 않는다 — 기록의 원본은 `recon_issue`. 계좌번호는 가운데를 가리고, 사용자 id 는 싣지 않고, 목록은 20건 · 전체 4,096자까지. 기존 경고 3곳(`CONFLICT` · DLT · 결과조회 한도 소진)도 WARN 으로 같은 길을 쓴다.
 
 ### 가정과 알려진 모양
@@ -39,8 +42,8 @@
 - 증명 테스트:
   - **판정** (`StatementMatcherTest`): 설계 §6 표를 줄마다 — 1 ~ 11 + `RECEIVED` 있음 / 없음 + 순서 규칙(이중 지급이 금액 비교보다 먼저).
   - **확정** (`StatementSettlerTest`): 미확정만 확정하고 확정된 건은 판정만 돌려준다 / 경합(확정이 0건)이면 다시 읽어 바뀐 상태로 판정(`SENDING → UNKNOWN` 이면 `UNKNOWN` 에서 다시 `fail`) / 3회 넘게 바뀌면 포기 / 읽은 뒤 다시 보내지면(`sending_at` D+1) 환불 · 자동 완료 없이 `RESENT_LATER`. `StatementSettlerIsolationTest`: `READ COMMITTED` 는 다시 읽어 일치, `REPEATABLE READ` 는 스냅숏 때문에 포기 — 격리 수준을 낮춘 근거 / 실제 MySQL 에서 다른 트랜잭션이 다시 보내고 커밋하면 `fail` 0건 · 환불 없음. `JpaTransferStoreTest`: `sentWithin` 범위 밖이면 상태가 맞아도 0건(환불 없음), 안이면 확정.
-  - **잡** (`DailyReconJobTest`): 전 칸 — 전이 · 환불 · 이슈 종류별 · 알림 요약, 여섯 단계의 트랜잭션 관리자 · 격리 수준(리플렉션), 1원이 아닌 `V…` 줄 → `UNKNOWN_REFERENCE` + 건수. `ReconRepositoryTest`: 1원인증 줄 수 = `V…` 이면서 1원.
-  - **실행** (`DailyReconLauncherTest`): 끝난 날짜 재실행 거부 / ③ 중간 청크 실패 → 재시작 → 이중 환불 없음 / 동시 실행 하나 / `SingleRunGuard` / `FILE_NOT_READY` / 마지막 회차 알림 / `FILE_INVALID`. `DailyReconSchedulerTest`(회차 · 마지막 회차 판정), `ReconciliationApiTest`(200 / 409 / 400).
+  - **잡** (`DailyReconJobTest`): 전 칸 — 전이 · 환불 · 이슈 종류별 · 알림 요약, 여섯 단계의 트랜잭션 관리자 · 격리 수준(리플렉션), 1원이 아닌 `V…` 줄 → `UNKNOWN_REFERENCE` + 건수, ③ 쓰기가 D일 범위를 넘기는 배선(다시 보내진 출금 → 환불 없음). `ReconRepositoryTest`: 1원인증 줄 수 = `V…` 이면서 1원.
+  - **실행** (`DailyReconLauncherTest`): 끝난 날짜 재실행 거부 / ③ 중간 청크 실패 → 재시작 → 이중 환불 없음 / 동시 실행 하나 / `SingleRunGuard` / `FILE_NOT_READY` / 마지막 회차 알림 / `FILE_INVALID`. `DailyReconSchedulerTest`(회차 · 마지막 회차 판정), `ReconciliationApiTest`(200 / 409 / 400 — 오늘 · 내일 `RECON_DATE_NOT_CLOSED`, 어제 실행, KST 경계), `ReconDatePolicyTest`(기본 · `allow-today` · KST 경계).
   - **파일 · 모의 은행**: `ReconFileFormatTest`(왕복 · 건수 · 합계 · 날짜 · 길이 · 없는 날짜/시각 `20260230` · `240000` 거부 — 엄격 해석), `BankJournalTest` · `MockBankRestartTest`(기록 · 재기동 복원 · 일마감 · 덮어쓰지 않음).
   - **점검 시간**: `BankMaintenanceWindowTest`(포함 · 제외 · 자정 넘김 · 올림 · 꺼짐 · UTC 시계 → KST 판정), `BankMaintenanceApiTest`(503 + `Retry-After`, 조회 · 충전 · 관리 API 는 그대로) · `BankMaintenanceFlowTest`(송신 보류 → 점검 뒤 처리).
   - **알림**: `TelegramNotifierTest`(가짜 서버 · 500 · 시간 초과 · 토큰이 로그에 없음).
@@ -51,6 +54,7 @@
   - 줄 없음 `RECEIVED` → `AUTO_FAIL` → `RECEIVED + 없음 = 재시도 중` 실패: `expected RETRYING but was AUTO_FAIL`
   - 다시 읽기(`transfer = read(transferId)`) 제거 → `경합 - 확정이 0건이면 … 다시 읽어 바뀐 상태로 판정한다` · `경합 - … REFUNDED_BUT_PAID` 실패: `IllegalStateException` (3회 안에 확정 못 함)
   - (최종 수정) `sending_at` 범위 없이 확정 → 다시 보내진 `SENDING` 이 `FAILED`(`expected SENDING but was FAILED`), 실제 MySQL 에서 `expected RESENT_LATER but was AUTO_FAIL`. JPA 가 범위를 무시하면 `JpaTransferStoreTest` 의 범위 밖 `fail` 이 1건(`Expected value to be false`).
+  - (마감 후 수정) ③ 쓰기가 범위 대신 `null` 을 넘기면 → `DailyReconJobTest` ③ 쓰기 테스트 실패: `expected SENDING but was FAILED` (E002 환불). 수동 대사의 옛 규칙(오늘 허용) → `ReconciliationApiTest` · `ReconDatePolicyTest` 실패: `expected (400, RECON_DATE_NOT_CLOSED) but was (200, null)`.
 - 한계:
   - 점검 시작 직전에 보낸 출금을 은행이 20분 넘게 붙잡았다가 처리하면, 그날 회차는 자동 실패(`E002` + 환불)로 확정하고 다음 날 회차의 ④ 가 `REFUNDED_BUT_PAID` 로 잡아 알린다. 자동 복구는 없다. 그래서 점검 길이는 재발행 포기(`E001`)까지의 약 26분보다 짧게 두는 것을 설정 주석 · OPERATION 에 적었다.
   - 확정된 건의 어긋남은 사람이 SQL 로 처리하고 `resolved_at` 을 남긴다(해결 API 는 범위 밖).
