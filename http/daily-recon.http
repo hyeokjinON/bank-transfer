@@ -66,8 +66,8 @@ POST http://localhost:8080/admin/reconciliations?date={{reconDate}}
 ### 2-5) 다시 보내면 409 RECON_ALREADY_COMPLETED
 POST http://localhost:8080/admin/reconciliations?date={{reconDate}}
 
-### 2-5b) 내일 날짜는 실행 구성 6 이어도 400 RECON_DATE_NOT_CLOSED (아래 날짜를 내일로 고친다). 다른 구성으로 띄웠으면 2-4 의 오늘도 같은 400 이다
-POST http://localhost:8080/admin/reconciliations?date=2026-10-29
+### 2-5b) 내일 이후 날짜는 실행 구성 6 이어도 400 RECON_DATE_NOT_CLOSED (고치지 않아도 되게 먼 미래 날짜). 다른 구성으로 띄웠으면 2-4 의 오늘도 같은 400 이다
+POST http://localhost:8080/admin/reconciliations?date=2099-12-31
 
 ### 2-6) DB 확인 (MySQL): 2-2 의 출금이 COMPLETED(0000), 이슈 AUTO_COMPLETED 한 줄 (recon_date = @reconDate 의 날짜)
 ###      SELECT status, bank_response_code FROM transfer WHERE memo = '대사무응답' ORDER BY created_at DESC LIMIT 1;
