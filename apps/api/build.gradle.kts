@@ -21,6 +21,9 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-flyway")
     implementation("org.flywaydb:flyway-mysql")
     implementation("org.springframework.boot:spring-boot-starter-kafka")
+    // 일마감 대사 (P5-1). Boot 4 는 배치 자동 설정을 나눴다: starter-batch 만이면 메모리 잡 저장소(ResourcelessJobRepository)라
+    // 재시작 · 중복 거부가 프로세스를 넘지 못한다. JDBC 잡 저장소(BATCH_* 표)는 이 스타터가 켠다. 버전은 Boot BOM (Spring Batch 6.0.5)
+    implementation("org.springframework.boot:spring-boot-starter-batch-jdbc")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("tools.jackson.module:jackson-module-kotlin")
     // Redis 분산락 (P4-2, redis 전략일 때만 클라이언트를 만든다). 스타터 없이 빈 하나만 필요하다. Netty 는 Boot BOM 버전(4.2.x)으로 맞춰진다

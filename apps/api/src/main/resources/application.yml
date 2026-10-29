@@ -43,6 +43,11 @@ spring:
       hibernate.jdbc.time_zone: Asia/Seoul
       # Hibernate 7 은 Instant 를 기본으로 UTC 로 쓴다. 위 time_zone 을 따르게 하려면 이 설정이 필요하다
       hibernate.type.preferred_instant_jdbc_type: TIMESTAMP
+  batch:
+    job:
+      enabled: false           # 기동 때 잡을 자동 실행하지 않는다 (기본 true). 대사는 스케줄 · 관리 API 가 날짜를 주어 돌린다 (P5-1)
+    jdbc:
+      initialize-schema: never # BATCH_* 표는 Flyway V4 가 만든다 (스키마는 Flyway 로만)
 
 bank:
   gateway:
