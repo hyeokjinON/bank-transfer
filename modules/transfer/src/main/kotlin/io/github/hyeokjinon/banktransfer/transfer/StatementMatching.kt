@@ -66,7 +66,7 @@ enum class ReconVerdict(val issue: ReconIssueType?) {
     /** — RECEIVED + 없음: 재시도 중 (재발행 · E001 이 맡는다). */
     RETRYING(null),
 
-    /** 9 우리에게 없는 거래번호의 T 줄. */
+    /** 9 우리에게 없는 거래번호의 줄 (1원인증 V 줄은 대조하지 않는다 — T 가 아닌 낯선 접두도 여기). */
     UNKNOWN_REFERENCE(ReconIssueType.UNKNOWN_REFERENCE),
 
     /** 11 같은 거래번호 2줄 이상 (긴급). */

@@ -15,7 +15,7 @@ data class ReconSummary(
     val reconDate: LocalDate,
     /** ③ 대상: D일(KST)에 은행에 보낸 출금. */
     val transfers: Int,
-    /** 파일 D 의 출금 줄(T). */
+    /** 파일 D 의 1원인증(V)이 아닌 줄 — 출금(T)과 낯선 거래번호. ④ 가 대조하는 범위와 같다. */
     val bankLines: Int,
     /** 파일 D 의 1원인증 줄(V) — 대조하지 않고 건수만. */
     val verificationLines: Int,
@@ -42,8 +42,8 @@ class ReconSummaryReader(private val jobRepository: JobRepository, private val r
         return ReconSummary(
             reconDate = date,
             transfers = transfers.total,
-            bankLines = repo.countLines(date, "T"),
-            verificationLines = repo.countLines(date, "V"),
+            bankLines = repo.countLines(date, verification = false),
+            verificationLines = repo.countLines(date, verification = true),
             matched = transfers[ReconVerdict.MATCHED] + bankOnly[ReconVerdict.MATCHED],
             retrying = transfers[ReconVerdict.RETRYING] + bankOnly[ReconVerdict.RETRYING],
             autoCompleted = issues[ReconIssueType.AUTO_COMPLETED] ?: 0,

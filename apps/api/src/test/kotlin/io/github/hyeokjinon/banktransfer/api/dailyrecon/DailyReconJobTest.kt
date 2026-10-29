@@ -4,22 +4,31 @@ import io.github.hyeokjinon.banktransfer.api.alert.AlertLevel
 import io.github.hyeokjinon.banktransfer.api.alert.AlertText
 import io.github.hyeokjinon.banktransfer.protocol.ReconDetail
 import io.github.hyeokjinon.banktransfer.transfer.ReconIssueType
+import io.github.hyeokjinon.banktransfer.transfer.ReconVerdict
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus.COMPLETED
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus.FAILED
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus.RECEIVED
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus.SENDING
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus.UNKNOWN
 import org.springframework.batch.core.BatchStatus
+import org.springframework.batch.core.job.SimpleJob
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.batch.autoconfigure.JobLauncherApplicationRunner
 import org.springframework.context.ApplicationContext
+import org.springframework.orm.jpa.JpaTransactionManager
+import org.springframework.test.util.ReflectionTestUtils
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.interceptor.TransactionAttribute
 import java.time.Instant
 import java.time.LocalTime
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /** 일마감 대사 잡 전 칸 (P5-1, 설계 §6 · §10). 실제 Spring Batch · Testcontainers MySQL. */
@@ -28,6 +37,55 @@ class DailyReconJobTest : DailyReconTestSupport() {
     @Autowired private lateinit var repo: ReconRepository
     @Autowired private lateinit var summaries: ReconSummaryReader
     @Autowired private lateinit var context: ApplicationContext
+    @Autowired private lateinit var transactionManager: PlatformTransactionManager
+
+    private fun strangerRef(prefix: Char = 'T') = prefix + UUID.randomUUID().toString().replace("-", "").take(19).uppercase()
+
+    @Test
+    fun `단계 트랜잭션 - 여섯 단계 모두 JPA 트랜잭션 관리자, ③ ④ 는 READ COMMITTED`() {
+        // Batch 6 은 트랜잭션 관리자를 빼먹어도 조용히 ResourcelessTransactionManager(트랜잭션 없음)로 돈다 — 환불 · 전이가 청크와 함께
+        // 롤백되지 않는 사고를 막으려고 설정 자체를 고정한다 (계획 "버전 · API 확인 결과" 6 · 12). 필드 이름은 6.0.5 소스 기준
+        assertIs<JpaTransactionManager>(transactionManager)
+        val names = listOf(DailyRecon.VALIDATE_FILE, DailyRecon.LOAD_STATEMENT, DailyRecon.MATCH_TRANSFERS, DailyRecon.MATCH_BANK_LINES, DailyRecon.CHECK_LEDGER, DailyRecon.REPORT)
+        val steps = names.associateWith { name -> checkNotNull((job as SimpleJob).getStep(name)) { "step $name is missing" } }
+
+        steps.forEach { (name, step) -> assertSame(transactionManager, ReflectionTestUtils.getField(step, "transactionManager"), name) }
+        for (name in listOf(DailyRecon.MATCH_TRANSFERS, DailyRecon.MATCH_BANK_LINES)) {
+            val attribute = ReflectionTestUtils.getField(steps.getValue(name), "transactionAttribute") as TransactionAttribute
+            assertEquals(TransactionDefinition.ISOLATION_READ_COMMITTED, attribute.isolationLevel, name)
+        }
+    }
+
+    @Test
+    fun `④ - 거래번호가 T 도 V 도 아닌 은행 줄도 UNKNOWN_REFERENCE 로 기록 · 알린다 (은행이 낸 돈을 놓치지 않는다)`() {
+        val day = ReconTestDates.unique()
+        val odd = strangerRef('X')
+        writeBankFile(day, listOf(ReconDetail(odd, "090", "1002123456789", 7_000, LocalTime.of(12, 0))))
+
+        assertEquals(BatchStatus.COMPLETED, runJob(day).status)
+
+        assertEquals(mapOf("UNKNOWN_REFERENCE" to listOf<String?>(odd)), issueRefs(day))
+        val alert = recordedAlerts.about(day).single()
+        assertEquals(AlertLevel.CRITICAL, alert.level)
+        assertEquals("은행 줄 1건 (1원인증 0건은 대조하지 않음)", alert.lines[1])
+        assertTrue(alert.items.single().startsWith("UNKNOWN_REFERENCE $odd"))
+    }
+
+    @Test
+    fun `④ 여러 페이지 - 청크 크기보다 많은 줄도 거래번호마다 정확히 한 번 판정한다`() {
+        val day = ReconTestDates.unique()
+        val refs = List(props.chunkSize * 2 + 1) { strangerRef() }   // 세 페이지
+        // 첫 거래번호는 파일 끝에 한 줄 더 (이중 지급) — 다른 페이지에 있어도 첫 줄 하나만 읽는다
+        writeBankFile(day, (refs + refs.first()).map { ReconDetail(it, "090", "1002123456789", 1_000, LocalTime.of(12, 0)) })
+
+        val execution = runJob(day)
+
+        assertEquals(BatchStatus.COMPLETED, execution.status)
+        val step = execution.stepExecutions.single { it.stepName == DailyRecon.MATCH_BANK_LINES }
+        assertEquals(refs.size.toLong() to refs.size.toLong(), step.readCount to step.writeCount)
+        assertEquals(refs.size, VerdictCounts.from(step.executionContext)[ReconVerdict.UNKNOWN_REFERENCE])
+        assertEquals(refs.toSet(), issueRefs(day).getValue("UNKNOWN_REFERENCE").toSet())
+    }
 
     @Test
     fun `전 칸 - 설계 §6 의 각 경우를 심은 출금과 은행 파일로 잡을 돌리면 미확정만 확정하고 나머지는 기록 · 알린다`() {

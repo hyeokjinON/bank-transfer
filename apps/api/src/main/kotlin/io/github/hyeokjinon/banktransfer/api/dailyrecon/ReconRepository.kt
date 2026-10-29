@@ -80,11 +80,11 @@ class ReconRepository(private val jdbc: NamedParameterJdbcTemplate) {
             },
         )
 
-    /** 파일 [bankDate] 의 줄 수 — 출금(T) · 1원인증(V) 을 접두로 가른다. */
-    fun countLines(bankDate: LocalDate, referencePrefix: String): Int =
+    /** 파일 [bankDate] 의 1원인증(V) 줄 수, 또는 그 밖의 줄 수(출금 T · 낯선 거래번호 — ④ 의 대조 범위와 같은 가름). */
+    fun countLines(bankDate: LocalDate, verification: Boolean): Int =
         jdbc.queryForObject(
-            "SELECT COUNT(*) FROM bank_statement_line WHERE bank_date = :bankDate AND reference LIKE :pattern",
-            MapSqlParameterSource().addValue("bankDate", bankDate).addValue("pattern", "$referencePrefix%"),
+            "SELECT COUNT(*) FROM bank_statement_line WHERE bank_date = :bankDate AND reference ${if (verification) "" else "NOT "}LIKE 'V%'",
+            MapSqlParameterSource().addValue("bankDate", bankDate),
             Int::class.java,
         )!!
 

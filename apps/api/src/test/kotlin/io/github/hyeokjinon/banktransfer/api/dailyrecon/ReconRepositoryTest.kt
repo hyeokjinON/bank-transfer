@@ -36,8 +36,8 @@ class ReconRepositoryTest : ApiIntegrationTest() {
 
         assertEquals(listOf(day to 2, day.plusDays(1) to 2), repo.linesOf(ref).map { it.bankDate to it.lineNo })
         assertEquals(lines.first(), repo.linesOf(ref).first())
-        assertEquals(1, repo.countLines(day, "T"))
-        assertEquals(1, repo.countLines(day, "V"))
+        assertEquals(1, repo.countLines(day, verification = false))
+        assertEquals(1, repo.countLines(day, verification = true))
         assertEquals(
             "10:15:30",
             jdbc.queryForObject("SELECT DATE_FORMAT(processed_at, '%H:%i:%s') FROM bank_statement_line WHERE bank_date = ? AND line_no = 2", String::class.java, day),
