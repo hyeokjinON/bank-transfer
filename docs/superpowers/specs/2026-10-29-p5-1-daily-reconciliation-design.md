@@ -111,7 +111,7 @@ P5-1 은 하루치 출금을 **은행이 보내 준 대사 파일**과 맞춰 �
 ## 10. 테스트
 **단위**
 - `StatementMatcher`: §6 의 모든 줄을 표 그대로. 뮤테이션 확인(금액 비교를 지우면 실패하는지 등) 결과를 커밋 본문에.
-- `BankMaintenanceWindow`: 시작 포함 · 끝 제외, 자정 넘김, `remaining` 올림, 꺼짐.
+- `BankMaintenanceWindow`: 시작 포함 · 끝 제외, 자정 넘김, `remaining` 올림, 꺼짐. **시계는 UTC 로 주고 KST 로 판정하는지** (UTC 14:50 = KST 23:50 → 점검 중, UTC 23:50 = KST 08:50 → 점검 아님 — `LocalTime.now(clock)` 을 그대로 쓰는 실수를 잡는다).
 - 대사 파일 형식: 쓰기 → 읽기 왕복(EUC-KR), 트레일러 건수 · 합계 불일치 거부, 헤더 날짜 불일치 거부, 길이 틀린 줄 거부.
 - `TelegramNotifier`: 가짜 HTTP 서버로 경로 · 본문, 가림 · 자르기, 500 · 시간 초과에도 예외 없음.
 
