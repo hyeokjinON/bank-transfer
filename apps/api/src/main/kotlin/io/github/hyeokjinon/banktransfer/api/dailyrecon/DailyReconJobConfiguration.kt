@@ -199,8 +199,8 @@ class DailyReconJobConfiguration {
     }
 
     @Bean
-    fun dailyReconLauncher(jobOperator: JobOperator, job: Job, summaries: ReconSummaryReader, alerts: AlertNotifier) =
-        DailyReconLauncher(jobOperator, job, summaries, alerts)
+    fun dailyReconLauncher(jobOperator: JobOperator, job: Job, jobRepository: JobRepository, summaries: ReconSummaryReader, alerts: AlertNotifier) =
+        DailyReconLauncher(jobOperator, job, jobRepository, summaries, alerts)
 
     @Bean
     @ConditionalOnProperty(prefix = "daily-recon.schedule", name = ["enabled"], havingValue = "true", matchIfMissing = true)

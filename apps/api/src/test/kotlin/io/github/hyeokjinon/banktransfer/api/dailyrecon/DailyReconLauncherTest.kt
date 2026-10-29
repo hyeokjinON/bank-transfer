@@ -3,6 +3,7 @@ package io.github.hyeokjinon.banktransfer.api.dailyrecon
 import io.github.hyeokjinon.banktransfer.api.alert.AlertLevel
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus
 import org.springframework.batch.core.BatchStatus
+import org.springframework.batch.core.job.JobExecution
 import org.springframework.batch.infrastructure.item.ExecutionContext
 import org.springframework.beans.factory.annotation.Autowired
 import java.nio.file.Files
@@ -19,9 +20,31 @@ import kotlin.test.assertTrue
 class DailyReconLauncherTest : DailyReconTestSupport() {
 
     @Autowired private lateinit var launcher: DailyReconLauncher
+    @Autowired private lateinit var summaries: ReconSummaryReader
 
     private fun executions(day: LocalDate): Int =
         jobRepository.getJobInstance(DailyRecon.JOB_NAME, DailyRecon.parameters(day))?.let { jobRepository.getJobExecutions(it).size } ?: 0
+
+    /** [day] 의 잡 인스턴스만 (실행 없음) — 다른 곳이 처음 시작하며 인스턴스를 막 만든 순간, 또는 그러다 죽은 곳. */
+    private fun instanceOnly(day: LocalDate) = jobRepository.createJobInstance(DailyRecon.JOB_NAME, DailyRecon.parameters(day))
+
+    /** [day] 의 STARTED 실행 — 다른 곳이 돌고 있거나, 대사 도중 JVM 이 죽어 남은 실행. */
+    private fun startedExecution(day: LocalDate): JobExecution {
+        val params = DailyRecon.parameters(day)
+        val instance = jobRepository.getJobInstance(DailyRecon.JOB_NAME, params) ?: jobRepository.createJobInstance(DailyRecon.JOB_NAME, params)
+        return jobRepository.createJobExecution(instance, params, ExecutionContext()).also {
+            it.status = BatchStatus.STARTED
+            it.setStartTime(LocalDateTime.now())
+            jobRepository.update(it)
+        }
+    }
+
+    /** 이 날짜는 다시 쓰지 않지만 '돌고 있는 실행' 으로 남기지 않는다. */
+    private fun abandon(vararg executions: JobExecution) = executions.forEach {
+        it.status = BatchStatus.FAILED
+        it.setEndTime(LocalDateTime.now())   // 게터는 @Nullable, 세터는 non-null 이라 Kotlin 속성 대입이 안 된다
+        jobRepository.update(it)
+    }
 
     @Test
     fun `끝난 날짜를 다시 돌리면 AlreadyCompleted - 환불 · 이슈가 늘지 않는다`() {
@@ -106,12 +129,53 @@ class DailyReconLauncherTest : DailyReconTestSupport() {
             guard.beforeJob(earlier)                                                  // 먼저 만든 쪽은 계속한다
             assertFailsWith<ReconRunningException> { guard.beforeJob(later) }       // 나중 쪽은 멈춘다 → 실행기가 Running 으로 답한다
         } finally {
-            // 이 날짜는 다시 쓰지 않지만 '돌고 있는 실행' 으로 남기지 않는다
-            listOf(earlier, later).forEach {
-                it.status = BatchStatus.FAILED
-                it.setEndTime(LocalDateTime.now())   // 게터는 @Nullable, 세터는 non-null 이라 Kotlin 속성 대입이 안 된다
-                jobRepository.update(it)
-            }
+            abandon(earlier, later)
+        }
+    }
+
+    @Test
+    fun `처음 시작 경합 - 인스턴스만 보이면 잠깐 뒤 한 번 더 시도해 Running (그 사이 다른 곳이 실행을 만들었다)`() {
+        val day = ReconTestDates.unique()
+        instanceOnly(day)
+        var other: JobExecution? = null
+        // Batch 6 은 인스턴스와 실행을 다른 트랜잭션에서 만든다 — 그 사이에 온 쪽을 재현: 기다리는 동안 먼저 온 쪽이 실행을 만든다
+        val racing = DailyReconLauncher(jobOperator, job, jobRepository, summaries, recordedAlerts) { other = startedExecution(day) }
+        try {
+            assertIs<ReconRun.Running>(racing.run(day, ReconTrigger.SCHEDULE))
+            assertEquals(1, executions(day))                                     // 먼저 온 쪽의 실행 하나뿐
+            assertTrue(recordedAlerts.about(day).isEmpty())
+        } finally {
+            other?.let { abandon(it) }
+        }
+    }
+
+    @Test
+    fun `처음 시작 경합 - 다시 시도해도 실행이 없으면(만들던 쪽이 죽음) 예외 없이 Failed ERROR + 긴급 알림`() {
+        val day = ReconTestDates.unique()
+        instanceOnly(day)
+
+        val failure = assertIs<ReconRun.Failed>(launcher.run(day, ReconTrigger.SCHEDULE)).failure
+
+        assertEquals("ERROR" to IllegalStateException::class.java.name, failure.code to failure.message)
+        assertEquals(AlertLevel.CRITICAL, recordedAlerts.about(day).single().level)
+    }
+
+    @Test
+    fun `마지막 회차에 아직 돌고 있으면(STARTED 로 남은 실행) 대사 미완료 긴급 알림 - 그 전 회차의 Running 은 알리지 않는다`() {
+        val day = ReconTestDates.unique()
+        val stuck = startedExecution(day)
+        try {
+            assertIs<ReconRun.Running>(launcher.run(day, ReconTrigger.SCHEDULE))
+            assertTrue(recordedAlerts.about(day).isEmpty())
+
+            assertIs<ReconRun.Running>(launcher.run(day, ReconTrigger.SCHEDULE_FINAL))
+
+            val alert = recordedAlerts.about(day).single()
+            assertEquals(AlertLevel.CRITICAL, alert.level)
+            assertTrue("미완료" in alert.title)
+            assertTrue(alert.lines.any { "RUNNING" in it })
+        } finally {
+            abandon(stuck)
         }
     }
 

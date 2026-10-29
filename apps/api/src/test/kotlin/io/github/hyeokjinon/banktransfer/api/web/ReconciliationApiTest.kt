@@ -84,6 +84,17 @@ class ReconciliationApiTest : DailyReconTestSupport() {
     }
 
     @Test
+    fun `잡 인스턴스만 남아 있어도(처음 시작하다 죽은 곳) 500 이 아니라 200 FAILED + 이유 ERROR`() {
+        val day = reconDay()
+        jobRepository.createJobInstance(DailyRecon.JOB_NAME, DailyRecon.parameters(day))
+
+        val response = post(day.toString())
+
+        assertEquals(200 to "FAILED", response.status to response.body["status"])
+        assertEquals("ERROR", response.reason()["code"])
+    }
+
+    @Test
     fun `실행 중이면 409 RECON_RUNNING`() {
         val day = reconDay()
         writeBankFile(day, emptyList())
