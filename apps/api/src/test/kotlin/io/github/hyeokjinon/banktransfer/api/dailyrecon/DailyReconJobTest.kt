@@ -72,6 +72,33 @@ class DailyReconJobTest : DailyReconTestSupport() {
     }
 
     @Test
+    fun `④ - V 거래번호라도 1원이 아닌 줄은 1원인증이 아니다 - UNKNOWN_REFERENCE 로 기록 · 알리고 1원 줄만 건수로`() {
+        val day = ReconTestDates.unique()
+        val verification = strangerRef('V')
+        val bigV = strangerRef('V')
+        // 같은 V 거래번호에 1원 줄 뒤 1원이 아닌 줄이 오는 경우도 — 첫 줄(1원)만 보고 넘어가면 큰돈이 빠진다
+        val mixedV = strangerRef('V')
+        writeBankFile(
+            day,
+            listOf(
+                ReconDetail(verification, "090", "1002123456789", 1, LocalTime.of(9, 0)),
+                ReconDetail(bigV, "090", "1002123456789", 1_000_000, LocalTime.of(9, 1)),
+                ReconDetail(mixedV, "090", "1002123456789", 1, LocalTime.of(9, 2)),
+                ReconDetail(mixedV, "090", "1002123456789", 500_000, LocalTime.of(9, 3)),
+            ),
+        )
+
+        assertEquals(BatchStatus.COMPLETED, runJob(day).status)
+
+        assertEquals(mapOf("UNKNOWN_REFERENCE" to listOf<String?>(bigV, mixedV)), issueRefs(day))
+        val alert = recordedAlerts.about(day).single()
+        assertEquals(AlertLevel.CRITICAL, alert.level)
+        assertEquals("은행 줄 2건 (1원인증 2건은 대조하지 않음)", alert.lines[1])
+        assertEquals(2, alert.items.size)
+        assertTrue(alert.items.all { it.startsWith("UNKNOWN_REFERENCE V") })
+    }
+
+    @Test
     fun `④ 여러 페이지 - 청크 크기보다 많은 줄도 거래번호마다 정확히 한 번 판정한다`() {
         val day = ReconTestDates.unique()
         val refs = List(props.chunkSize * 2 + 1) { strangerRef() }   // 세 페이지

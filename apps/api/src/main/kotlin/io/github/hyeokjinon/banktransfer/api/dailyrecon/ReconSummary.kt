@@ -15,9 +15,9 @@ data class ReconSummary(
     val reconDate: LocalDate,
     /** ③ 대상: D일(KST)에 은행에 보낸 출금. */
     val transfers: Int,
-    /** 파일 D 의 1원인증(V)이 아닌 줄 — 출금(T)과 낯선 거래번호. ④ 가 대조하는 범위와 같다. */
+    /** 파일 D 의 1원인증(V 이면서 1원)이 아닌 줄 — 출금(T) · 낯선 거래번호 · 1원이 아닌 V. ④ 가 대조하는 범위와 같다. */
     val bankLines: Int,
-    /** 파일 D 의 1원인증 줄(V) — 대조하지 않고 건수만. */
+    /** 파일 D 의 1원인증 줄(V 이면서 1원) — 대조하지 않고 건수만. */
     val verificationLines: Int,
     val matched: Int,
     val retrying: Int,

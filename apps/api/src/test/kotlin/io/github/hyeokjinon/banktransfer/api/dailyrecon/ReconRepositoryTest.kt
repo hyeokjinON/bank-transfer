@@ -45,6 +45,16 @@ class ReconRepositoryTest : ApiIntegrationTest() {
     }
 
     @Test
+    fun `줄 수 - 1원인증은 V 이면서 1원인 줄만, 1원이 아닌 V 줄은 대조하는 쪽으로 센다`() {
+        val day = ReconTestDates.unique()
+        val v = "V" + UUID.randomUUID().toString().replace("-", "").take(19).uppercase()
+        repo.insertLines(listOf(line(day, 2, v, amount = 1), line(day, 3, v.dropLast(1) + "X", amount = 1_000_000), line(day, 4, "T" + v.drop(1))), Instant.now())
+
+        assertEquals(1, repo.countLines(day, verification = true))
+        assertEquals(2, repo.countLines(day, verification = false))
+    }
+
+    @Test
     fun `이슈 - 같은 날 · 종류 · 키는 한 번만, 지갑 이슈는 user_id 가 키`() {
         val day = ReconTestDates.unique()
         val ref = "T261028ISSUE" + UUID.randomUUID().toString().take(8).uppercase()

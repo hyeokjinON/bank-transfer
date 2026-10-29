@@ -162,9 +162,10 @@ class DailyReconJobConfiguration {
     }
 
     /**
-     * ④ 파일 D 의 1원인증(V)이 아닌 줄 중 ③ 이 다루지 않은 것: 우리에게 없는 거래번호, 다른 날 보낸(또는 보낸 적 없는) 출금.
-     * T 로 시작하지 않는 낯선 거래번호도 여기서 UNKNOWN_REFERENCE 가 된다 — 은행이 내보낸 돈을 접두 때문에 놓치지 않게.
-     * 같은 거래번호가 여러 줄이면(이중 지급) 첫 줄 하나만 읽는다 — 판정은 그 거래번호의 모든 줄로 한 번.
+     * ④ 파일 D 의 1원인증(V 이면서 1원)이 아닌 줄 중 ③ 이 다루지 않은 것: 우리에게 없는 거래번호, 다른 날 보낸(또는 보낸 적 없는) 출금.
+     * T 로 시작하지 않는 낯선 거래번호 · 1원이 아닌 V 줄도 여기서 UNKNOWN_REFERENCE 가 된다 — 은행이 내보낸 돈을 접두 때문에 놓치지 않게.
+     * 같은 거래번호가 여러 줄이면(이중 지급) 대조 대상 줄 중 첫 줄 하나만 읽는다 — 판정은 그 거래번호의 모든 줄로 한 번.
+     * (첫 줄도 같은 가름으로 고른다: V 거래번호의 1원 줄 뒤에 큰 금액 줄이 오면 1원 줄을 첫 줄로 골라 버려 큰 줄이 빠지므로.)
      */
     @Bean
     @StepScope
@@ -180,9 +181,10 @@ class DailyReconJobConfiguration {
             .selectClause("l.line_no, l.reference, t.id AS transfer_id")
             .fromClause("bank_statement_line l LEFT JOIN transfer t ON t.reference = l.reference")
             .whereClause(
-                "l.bank_date = :reconDate AND l.reference NOT LIKE 'V%' " +
+                "l.bank_date = :reconDate AND NOT (${ReconRepository.verificationLine("l")}) " +
                     "AND (t.id IS NULL OR t.sending_at IS NULL OR t.sending_at < :from OR t.sending_at >= :to) " +
-                    "AND l.line_no = (SELECT MIN(f.line_no) FROM bank_statement_line f WHERE f.bank_date = l.bank_date AND f.reference = l.reference)",
+                    "AND l.line_no = (SELECT MIN(f.line_no) FROM bank_statement_line f " +
+                    "WHERE f.bank_date = l.bank_date AND f.reference = l.reference AND NOT (${ReconRepository.verificationLine("f")}))",
             )
             .parameterValues(mapOf<String, Any>("reconDate" to reconDate, "from" to Timestamp.from(from), "to" to Timestamp.from(to)))
             .sortKeys(mapOf("line_no" to Order.ASCENDING))

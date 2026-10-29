@@ -72,7 +72,7 @@ enum class ReconVerdict(val issue: ReconIssueType?) {
      */
     RESENT_LATER(null),
 
-    /** 9 우리에게 없는 거래번호의 줄 (1원인증 V 줄은 대조하지 않는다 — T 가 아닌 낯선 접두도 여기). */
+    /** 9 우리에게 없는 거래번호의 줄 (1원인증 = V 이면서 1원인 줄은 대조하지 않는다 — T 가 아닌 낯선 접두 · 1원이 아닌 V 도 여기). */
     UNKNOWN_REFERENCE(ReconIssueType.UNKNOWN_REFERENCE),
 
     /** 11 같은 거래번호 2줄 이상 (긴급). */

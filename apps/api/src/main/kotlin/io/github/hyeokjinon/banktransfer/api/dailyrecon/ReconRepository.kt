@@ -80,10 +80,12 @@ class ReconRepository(private val jdbc: NamedParameterJdbcTemplate) {
             },
         )
 
-    /** 파일 [bankDate] 의 1원인증(V) 줄 수, 또는 그 밖의 줄 수(출금 T · 낯선 거래번호 — ④ 의 대조 범위와 같은 가름). */
+    /**
+     * 파일 [bankDate] 의 1원인증 줄 수, 또는 그 밖의 줄 수(출금 T · 낯선 거래번호 · 1원이 아닌 V — ④ 의 대조 범위와 같은 가름, [VERIFICATION_LINE]).
+     */
     fun countLines(bankDate: LocalDate, verification: Boolean): Int =
         jdbc.queryForObject(
-            "SELECT COUNT(*) FROM bank_statement_line WHERE bank_date = :bankDate AND reference ${if (verification) "" else "NOT "}LIKE 'V%'",
+            "SELECT COUNT(*) FROM bank_statement_line WHERE bank_date = :bankDate AND ${if (verification) "" else "NOT "}($VERIFICATION_LINE)",
             MapSqlParameterSource().addValue("bankDate", bankDate),
             Int::class.java,
         )!!
@@ -132,8 +134,20 @@ class ReconRepository(private val jdbc: NamedParameterJdbcTemplate) {
             RowMapper { rs, _ -> LedgerMismatch(rs.getString("user_id"), rs.getLong("balance"), rs.getLong("ledger_sum")) },
         )
 
-    private companion object {
+    companion object {
         /** our_value · bank_value 열 길이. */
-        const val VALUE_MAX = 200
+        private const val VALUE_MAX = 200
+
+        /**
+         * 1원인증 송금 줄 = 거래번호가 V 로 시작하고 **금액이 1원**. 대조하지 않고 건수만 센다 (설계 §6).
+         * V 여도 1원이 아니면 1원인증이 아니다 — ④ 가 우리에게 없는 거래번호로 대조해 UNKNOWN_REFERENCE 로 알린다 (V 거래번호로 큰돈이 나가도 조용히 빠지지 않게).
+         * [alias] = 은행 줄 표의 별칭 (빈 문자열이면 별칭 없이).
+         */
+        fun verificationLine(alias: String = ""): String {
+            val p = if (alias.isEmpty()) "" else "$alias."
+            return "${p}reference LIKE 'V%' AND ${p}amount = 1"
+        }
+
+        private val VERIFICATION_LINE = verificationLine()
     }
 }

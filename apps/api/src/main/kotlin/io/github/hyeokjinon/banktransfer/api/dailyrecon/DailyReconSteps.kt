@@ -90,7 +90,7 @@ internal fun ReconLine.toStatementLine(bankDate: LocalDate) = BankStatementLine(
     processedAt = bankDate.atTime(detail.processedAt).atZone(KST).toInstant(),
 )
 
-/** ④ 의 한 건: 파일 D 의 1원인증(V)이 아닌 줄 중 ③ 이 다루지 않은 거래번호 (거래번호마다 첫 줄 하나)와 그 거래번호의 우리 출금 id (없으면 null). */
+/** ④ 의 한 건: 파일 D 의 1원인증(V 이면서 1원)이 아닌 줄 중 ③ 이 다루지 않은 거래번호 (거래번호마다 첫 줄 하나)와 그 거래번호의 우리 출금 id (없으면 null). */
 data class BankLineRef(val reference: String, val transferId: UUID?)
 
 /** 판정별 건수. 단계의 ExecutionContext 에 `verdict.<판정>` 으로 저장한다 — 청크가 커밋될 때만 저장되므로 재시작해도 두 번 세지 않는다. */
