@@ -31,12 +31,21 @@ class AlertConfiguration {
     private val log = LoggerFactory.getLogger(javaClass)
 
     @Bean
-    fun alertNotifier(props: TelegramProperties): AlertNotifier =
-        if (props.enabled) {
-            log.info("alerts go to telegram chat {} (and the log)", props.chatId)
-            TelegramNotifier(props.baseUrl, props.botToken, props.chatId)
-        } else {
+    fun alertNotifier(props: TelegramProperties): AlertNotifier {
+        if (!props.enabled) {
             log.info("alerts go to the log only (alert.telegram.bot-token / chat-id not set)")
+            return LogNotifier()
+        }
+        // 비밀 파일 · 환경변수 끝의 줄바꿈 · 공백이 URL 을 깨뜨리지 않게 다듬는다
+        val chatId = props.chatId.trim()
+        return try {
+            TelegramNotifier(props.baseUrl.trim(), props.botToken.trim(), chatId).also {
+                log.info("alerts go to telegram chat {} (and the log)", chatId)
+            }
+        } catch (e: Exception) {
+            // 알림 설정 실수가 서비스 기동을 막지 않는다. 예외 메시지에는 URL(토큰)이 있을 수 있어 종류만 남긴다
+            log.error("telegram alert settings are unusable ({}) - alerts go to the log only", e.javaClass.name)
             LogNotifier()
         }
+    }
 }

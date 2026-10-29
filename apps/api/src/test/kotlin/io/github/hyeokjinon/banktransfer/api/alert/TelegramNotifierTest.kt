@@ -14,6 +14,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -114,6 +115,14 @@ class TelegramNotifierTest {
         val error = logs.single { it.level == Level.ERROR }
         assertFalse(TOKEN in error.formattedMessage)
         assertFalse(error.throwableProxy != null && TOKEN in error.throwableProxy.message.orEmpty())
+    }
+
+    @Test
+    fun `주소가 될 수 없는 토큰이면 생성이 실패하되 예외 메시지 · 원인에 토큰이 없다`() {
+        val e = assertFailsWith<IllegalArgumentException> { TelegramNotifier("https://api.telegram.org", "123:BAD TOKEN", "42") }
+
+        assertFalse("BAD" in e.message.orEmpty())
+        assertNull(e.cause)
     }
 
     @Test
