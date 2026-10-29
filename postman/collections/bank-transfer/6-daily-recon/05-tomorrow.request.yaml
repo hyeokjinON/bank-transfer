@@ -1,0 +1,17 @@
+$kind: http-request
+name: 6-5 내일 날짜 → 400 RECON_DATE_IN_FUTURE
+method: POST
+url: '{{baseUrl}}/admin/reconciliations?date={{tomorrow}}'
+order: 5000
+scripts:
+  - type: beforeRequest
+    language: text/javascript
+    code: |-
+      pm.collectionVariables.set("tomorrow", new Date(Date.now() + 33 * 3600 * 1000).toISOString().slice(0, 10));   // KST 내일
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("400 RECON_DATE_IN_FUTURE (오늘까지만)", () => {
+        pm.response.to.have.status(400);
+        pm.expect(pm.response.json().code).to.eql("RECON_DATE_IN_FUTURE");
+      });

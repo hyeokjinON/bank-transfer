@@ -1,0 +1,68 @@
+### IntelliJ HTTP Client 로 일마감 대사 · 점검 시간 확인 (P5-1)
+### 준비: infra up, 모의 은행은 "1. Mock Bank (9090)" (기록 · 대사 파일 = 저장소 루트 bank-files/).
+### 출금은 user-1 이 1원인증한 계좌로 — account-verification.http 1)·2), 충전은 transfer.http 0).
+
+### 대사 날짜 — 2) 에서 쓴다. 손 확인할 날짜(오늘, KST)로 직접 고친다 (Git Bash: date +%F). 2-3 의 --close-day 와 같은 날짜여야 한다.
+### (IntelliJ 의 동적 변수는 PC 시간대를 따르고 지원 여부도 환경마다 달라서 쓰지 않는다. PC 시간대가 KST 가 아니면 특히 KST 날짜를 확인할 것.)
+@reconDate = 2026-10-28
+
+### ============================================================
+### 1) 점검 시간 — 지금 시각을 포함하는 점검으로 API 를 띄운다 (예: 지금이 14:20 이면)
+###    ./gradlew :apps:api:bootRun --args="--bank.maintenance.start=14:00 --bank.maintenance.end=14:40"
+### 1-1) 출금 접수 → 503 BANK_MAINTENANCE, 응답 헤더 Retry-After = 점검 끝까지 남은 초
+POST http://localhost:8080/api/v1/transfers
+Content-Type: application/json
+X-User-Id: user-1
+Idempotency-Key: {{$random.uuid}}
+
+{
+  "bankCode": "090",
+  "accountNo": "1002123456789",
+  "amount": 1000,
+  "memo": "점검"
+}
+
+### 1-2) 잔고 조회는 그대로 200
+GET http://localhost:8080/api/v1/wallet
+X-User-Id: user-1
+
+### ============================================================
+### 2) 대사 — API 를 실행 구성 "6. API (대사 손 확인)" 으로 띄운다 (정리 작업이 꺼져 결과를 모르는 출금이 그대로 남는다)
+###    9990000000002(처리 후 무응답)도 user-1 이 1원인증해 둔다 (1원 이체는 정상 응답 — OPERATION §3)
+### 2-1) 정상 출금 → 몇 초 뒤 COMPLETED
+POST http://localhost:8080/api/v1/transfers
+Content-Type: application/json
+X-User-Id: user-1
+Idempotency-Key: {{$random.uuid}}
+
+{
+  "bankCode": "090",
+  "accountNo": "1002123456789",
+  "amount": 1000,
+  "memo": "대사정상"
+}
+
+### 2-2) 처리 후 무응답 계좌 → UNKNOWN 으로 남는다 (은행은 처리했다 → 대사가 자동 완료)
+POST http://localhost:8080/api/v1/transfers
+Content-Type: application/json
+X-User-Id: user-1
+Idempotency-Key: {{$random.uuid}}
+
+{
+  "bankCode": "090",
+  "accountNo": "9990000000002",
+  "amount": 2000,
+  "memo": "대사무응답"
+}
+
+### 2-3) 모의 은행에서 오늘 파일을 만든다 (Git Bash, 저장소 루트): ./gradlew :apps:mock-bank:run --args="--close-day=$(date +%Y%m%d)"
+###      → 콘솔 "Recon file for …: …\bank-files\recon\RECON_오늘.dat". 오늘을 미리 마감하는 것은 손 확인용이다 (그 뒤 출금은 이 파일에 없다 — OPERATION §9-7)
+### 2-4) 대사 실행 (date = 위 @reconDate) → 200 {"status":"COMPLETED", "summary":{…"autoCompleted":1…}}. 봇을 설정했으면 휴대폰으로 요약
+POST http://localhost:8080/admin/reconciliations?date={{reconDate}}
+
+### 2-5) 다시 보내면 409 RECON_ALREADY_COMPLETED
+POST http://localhost:8080/admin/reconciliations?date={{reconDate}}
+
+### 2-6) DB 확인 (MySQL): 2-2 의 출금이 COMPLETED(0000), 이슈 AUTO_COMPLETED 한 줄 (recon_date = @reconDate 의 날짜)
+###      SELECT status, bank_response_code FROM transfer WHERE memo = '대사무응답' ORDER BY created_at DESC LIMIT 1;
+###      SELECT type, reference, our_value, bank_value FROM recon_issue WHERE recon_date = '2026-10-28';

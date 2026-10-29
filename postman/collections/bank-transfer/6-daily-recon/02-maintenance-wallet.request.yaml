@@ -1,0 +1,15 @@
+$kind: http-request
+name: 6-2 점검 시간에도 잔고 조회는 200
+method: GET
+url: '{{baseUrl}}/api/v1/wallet'
+order: 2000
+headers:
+  - key: X-User-Id
+    value: '{{userId}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("200 (조회는 은행을 건드리지 않는다)", () => {
+        pm.response.to.have.status(200);
+      });

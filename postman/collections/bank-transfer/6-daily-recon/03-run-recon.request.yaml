@@ -1,0 +1,28 @@
+$kind: http-request
+name: 6-3 (수동) 오늘 대사 실행 → 200 COMPLETED + 요약
+method: POST
+url: '{{baseUrl}}/admin/reconciliations?date={{reconDate}}'
+order: 3000
+description: |-
+  수동 확인 전용 — manualRecon 이 true 일 때만 나간다. 준비: 실행 구성 "6. API (대사 손 확인)", 출금(정상 · 9990000000002) 뒤
+  ./gradlew :apps:mock-bank:run --args="--close-day=오늘(yyyyMMdd)" 로 오늘 파일을 만든다 (http/daily-recon.http 2).
+  reconDate 가 비어 있으면 오늘(KST)을 넣는다.
+scripts:
+  - type: beforeRequest
+    language: text/javascript
+    code: |-
+      if (pm.variables.get("manualRecon") !== "true") {
+        pm.execution.skipRequest();
+      }
+      if (!pm.collectionVariables.get("reconDate")) {
+        pm.collectionVariables.set("reconDate", new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10));
+      }
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      const body = pm.response.json();
+      pm.test("200 COMPLETED", () => {
+        pm.response.to.have.status(200);
+        pm.expect(body.status).to.eql("COMPLETED");
+      });
+      console.log("summary = " + JSON.stringify(body.summary));

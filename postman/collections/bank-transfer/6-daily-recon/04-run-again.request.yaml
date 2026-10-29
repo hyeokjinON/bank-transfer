@@ -1,0 +1,19 @@
+$kind: http-request
+name: 6-4 (수동) 같은 날짜 다시 → 409 RECON_ALREADY_COMPLETED
+method: POST
+url: '{{baseUrl}}/admin/reconciliations?date={{reconDate}}'
+order: 4000
+scripts:
+  - type: beforeRequest
+    language: text/javascript
+    code: |-
+      if (pm.variables.get("manualRecon") !== "true") {
+        pm.execution.skipRequest();
+      }
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("409 RECON_ALREADY_COMPLETED (끝난 날짜는 다시 돌리지 않는다)", () => {
+        pm.response.to.have.status(409);
+        pm.expect(pm.response.json().code).to.eql("RECON_ALREADY_COMPLETED");
+      });

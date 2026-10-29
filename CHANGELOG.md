@@ -9,6 +9,22 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
+## [P5-1] 일마감 대사 · 은행 점검 시간 · 알림 — 2026-10-29
+### Added
+- 대사 파일 형식 v0.3 (`ReconFileFormat`, 헤더 · 상세 · 트레일러, 59바이트 레코드), 모의 은행 거래 기록 · 재기동 복원 · 00:05 일마감 · `--close-day` · `--bank-files`.
+- `BankMaintenanceWindow` · `SendGate` (점검 시간에는 은행으로 보내지 않음), 웹 503 `BANK_MAINTENANCE` + `Retry-After`.
+- Spring Batch 6 잡 `dailyReconciliationJob`(6단계) · `StatementMatcher` · `StatementSettler` · 응답코드 `E002`, Flyway V4(Batch 메타 · `bank_statement_line` · `recon_issue`).
+- 스케줄 01 ~ 06시 매시 · `POST /admin/reconciliations`(200 / 409 `RECON_ALREADY_COMPLETED` · `RECON_RUNNING` / 400 `RECON_DATE_IN_FUTURE`), 마지막 회차의 "대사 미완료" 알림(실패 · 실행 중 모두).
+- `AlertNotifier` · `TelegramNotifier` · `LogNotifier`, 설정 `bank.maintenance.*` · `daily-recon.*` · `alert.telegram.*`.
+- 실행 구성 `6. API (대사 손 확인)`, `http/daily-recon.http`, Postman 6 폴더, ADR-0010, 전문 규격 v0.3, 테스트 240 → 354개.
+### Changed
+- `Clock.systemUTC()` 배선을 `Clock` 빈 하나로.
+- 기존 경고 3곳(`CONFLICT` · DLT · 결과조회 한도)에 WARN 알림.
+- Gradle `run` · `bootRun` 작업 디렉터리 = 저장소 루트.
+- 스케줄 풀 2 → 3.
+- `spring-boot-starter-batch-jdbc` 추가.
+- 부하 측정 실행 구성에 `--daily-recon.schedule.enabled=false`.
+
 ## [P4-2] 잔고 차감 락 전략 비교 — 2026-10-28 ([#13](https://github.com/hyeokjinON/bank-transfer/pull/13), 머지 후 정리 [#14](https://github.com/hyeokjinON/bank-transfer/pull/14))
 ### Added
 - `WalletDebit` 이음새와 전략 4종(`conditional` · `pessimistic` · `optimistic` · `redis`), 설정 `wallet.*` · `GET /actuator/info` 의 전략.
