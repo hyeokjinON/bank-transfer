@@ -1,6 +1,6 @@
 # ADR-0009 잔고 차감은 전략 인터페이스로 바꿔 끼운다 (조건부 · 비관적 · 낙관적 · Redis) — Redis 락은 DB 앞의 줄 세우기로만 쓰고 정확성은 DB 가 지킨다
 
-- 상태: 제안 (2026-10-27)
+- 상태: 채택 (2026-10-28, PR #13 머지)
 - 단계: P4-2 · 설계: [P4-2 설계](../superpowers/specs/2026-10-27-p4-2-lock-comparison-design.md) · [ADR-0008](0008-wallet-debit-on-intake-refund-on-failure.md) (차감 위치 · 원장은 그대로) · [database.md](../database.md) §6 · [측정 결과](../perf/p4-2-lock-comparison.md)
 
 ## 맥락

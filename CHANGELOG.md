@@ -9,7 +9,7 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
-## [P4-2] 잔고 차감 락 전략 비교 — 2026-10-27
+## [P4-2] 잔고 차감 락 전략 비교 — 2026-10-28 ([#13](https://github.com/hyeokjinON/bank-transfer/pull/13), 머지 후 정리 [#14](https://github.com/hyeokjinON/bank-transfer/pull/14))
 ### Added
 - `WalletDebit` 이음새와 전략 4종(`conditional` · `pessimistic` · `optimistic` · `redis`), 설정 `wallet.*` · `GET /actuator/info` 의 전략.
 - 오류 코드 `WALLET_BUSY`(503) · `CONCURRENT_UPDATE`(409) + `Retry-After: 1`.
