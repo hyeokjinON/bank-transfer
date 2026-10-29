@@ -1,5 +1,8 @@
 package io.github.hyeokjinon.banktransfer.api.messaging
 
+import io.github.hyeokjinon.banktransfer.api.alert.Alert
+import io.github.hyeokjinon.banktransfer.api.alert.AlertLevel
+import io.github.hyeokjinon.banktransfer.api.alert.AlertNotifier
 import io.github.hyeokjinon.banktransfer.api.support.captureLogs
 import io.github.hyeokjinon.banktransfer.transfer.ProcessResult
 import ch.qos.logback.classic.Level
@@ -20,6 +23,14 @@ class TransferRequestedListenerTest {
     private class CountingAck : Acknowledgment {
         var count = 0
         override fun acknowledge() { count++ }
+    }
+
+    /** 받은 알림을 모은다 (P5-1). */
+    private class RecordingNotifier : AlertNotifier {
+        val alerts = mutableListOf<Alert>()
+        override fun notify(alert: Alert) {
+            alerts += alert
+        }
     }
 
     private fun record(id: UUID) = ConsumerRecord(TransferTopics.REQUESTED, 0, 0L, id.toString(), """{"transferId":"$id"}""")
@@ -183,6 +194,46 @@ class TransferRequestedListenerTest {
         assertEquals("boom; retry later", rootMessage(realDltMessage("boom; retry later")))
         assertEquals("plain", rootMessage("plain"))
         assertNull(rootMessage(null))
+    }
+
+    // --- 알림 (P5-1): 사람이 봐야 하는 경고 3곳 중 두 곳이 여기다 ---
+
+    @Test
+    fun `CONFLICT 면 WARN 알림 하나 - 이체 id 만 싣는다`() {
+        val alerts = RecordingNotifier()
+        val id = UUID.randomUUID()
+
+        TransferRequestedListener(alerts) { ProcessResult.CONFLICT }.on(record(id), CountingAck())
+
+        val alert = alerts.alerts.single()
+        assertEquals(AlertLevel.WARN, alert.level)
+        assertTrue(alert.lines.any { id.toString() in it })
+    }
+
+    @Test
+    fun `알림이 예외를 던져도 ack 한다 - 알림 실패가 메시지 처리를 바꾸지 않는다`() {
+        val ack = CountingAck()
+
+        TransferRequestedListener({ error("telegram down") }) { ProcessResult.CONFLICT }.on(record(UUID.randomUUID()), ack)
+
+        assertEquals(1, ack.count)
+    }
+
+    @Test
+    fun `DLT - 은행 장애가 아닌 이유(DB 장애 등)만 WARN 알림, 은행 연결 없음 · 잘못된 key 는 알리지 않는다`() {
+        val alerts = RecordingNotifier()
+        val listener = TransferRequestedListener(alerts) { ProcessResult.COMPLETED }
+        val id = UUID.randomUUID().toString()
+
+        listener.onDlt(dltRecord(id, RetryLaterException::class.java.name), CountingAck())
+        listener.onDlt(dltRecord("not-a-uuid", InvalidTransferKeyException::class.java.name), CountingAck())
+        listener.onDlt(dltRecord(id, "org.springframework.dao.DataAccessResourceFailureException", realDltMessage("db down")), CountingAck())
+
+        val alert = alerts.alerts.single()
+        assertEquals(AlertLevel.WARN, alert.level)
+        assertTrue(alert.lines.any { id in it })
+        assertTrue(alert.lines.any { "DataAccessResourceFailureException" in it })
+        assertFalse(alert.lines.any { "1002123456789" in it })   // 레코드 값(계좌번호)은 싣지 않는다
     }
 
     /** spring-kafka 4.1.1 DeadLetterRecordManager 가 EXCEPTION_MESSAGE 헤더에 넣는 모양: 래퍼 메시지 + "; " + 원래 예외 메시지. */

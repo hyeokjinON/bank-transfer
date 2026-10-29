@@ -1,5 +1,6 @@
 package io.github.hyeokjinon.banktransfer.api.messaging
 
+import io.github.hyeokjinon.banktransfer.api.alert.AlertNotifier
 import io.github.hyeokjinon.banktransfer.api.config.BankTransferAdapter
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.transfer.TransferProcessor
@@ -75,7 +76,7 @@ class MessagingConfiguration {
         TransferProcessor(store, BankTransferAdapter(client), clock)
 
     @Bean
-    fun transferRequestedListener(processor: TransferProcessor) = TransferRequestedListener(processor::process)
+    fun transferRequestedListener(processor: TransferProcessor, alerts: AlertNotifier) = TransferRequestedListener(alerts, processor::process)
 
     /**
      * 재시도 토픽에서 "아직 때가 안 된" 파티션을 멈췄다가 다시 여는 스케줄러. Spring Kafka 는 이 빈을 TaskScheduler 보다 먼저 찾는다.

@@ -42,7 +42,7 @@ import kotlin.random.Random
         "transfer.retry.max-delay-ms=2000",
     ],
 )
-@Import(MySqlTestContainer::class, KafkaTestContainer::class, RedisTestContainer::class, TestClockConfiguration::class)
+@Import(MySqlTestContainer::class, KafkaTestContainer::class, RedisTestContainer::class, TestClockConfiguration::class, AlertTestConfiguration::class)
 abstract class ApiIntegrationTest {
 
     companion object {
@@ -70,6 +70,10 @@ abstract class ApiIntegrationTest {
 
     @Autowired
     protected lateinit var testClock: TestClock
+
+    /** 앱이 보낸 알림 (P5-1). 공유 컨텍스트라 다른 테스트의 알림도 섞인다 — 날짜 · 제목으로 걸러 본다. */
+    @Autowired
+    protected lateinit var recordedAlerts: RecordingAlertNotifier
 
     // 이름에 test 를 붙인다: 하위 클래스가 이미 private verifications · jdbc 를 갖고 있어 같은 이름이면 가려진다
     @Autowired
