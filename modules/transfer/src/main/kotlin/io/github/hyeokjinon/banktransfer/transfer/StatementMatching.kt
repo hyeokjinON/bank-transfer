@@ -66,6 +66,12 @@ enum class ReconVerdict(val issue: ReconIssueType?) {
     /** — RECEIVED + 없음: 재시도 중 (재발행 · E001 이 맡는다). */
     RETRYING(null),
 
+    /**
+     * — ③ 이 D일에 보낸 것으로 읽었는데 판정 · 확정 사이에 다시 보내져 sendingAt 이 D일 밖(뒤)으로 옮겨 감 — 확정하지 않는다 ([StatementSettler.settle] 만 낸다).
+     * 지금 은행이 처리 중일 수 있어 E002 로 환불하면 이중 지급이 된다. 그 날짜의 대사가 맡고, D일 파일의 줄은 ④ 가 본다.
+     */
+    RESENT_LATER(null),
+
     /** 9 우리에게 없는 거래번호의 줄 (1원인증 V 줄은 대조하지 않는다 — T 가 아닌 낯선 접두도 여기). */
     UNKNOWN_REFERENCE(ReconIssueType.UNKNOWN_REFERENCE),
 
@@ -121,14 +127,26 @@ class StatementSettler(
     private val maxAttempts: Int = 3,
 ) {
 
-    fun settle(transferId: UUID, linesOf: (String) -> List<BankStatementLine>): Settlement {
+    /**
+     * [sentWithin] = ③ 의 대상 범위(대사일 D 의 하루). 주면 확정 UPDATE 가 "sendingAt 이 아직 그 안" 을 상태와 함께 조건으로 건다 —
+     * 읽은 뒤 RECEIVED → SENDING 으로 다시 보내진 출금(sendingAt = 지금)은 상태만 보면 다시 SENDING 이라 E002 환불이 통과해 이중 지급이 된다.
+     * 다시 읽어 범위 밖이면 [ReconVerdict.RESENT_LATER] (확정 없음). ④ 는 범위 없이 부른다 — 줄이 있어 환불(AUTO_FAIL)이 나올 수 없다.
+     */
+    fun settle(
+        transferId: UUID,
+        sentWithin: OpenEndRange<Instant>? = null,
+        linesOf: (String) -> List<BankStatementLine>,
+    ): Settlement {
         var transfer = read(transferId)
         val lines = linesOf(transfer.reference)
         repeat(maxAttempts) {
+            if (sentWithin != null && transfer.sendingAt?.let { it in sentWithin } != true) {
+                return Settlement(ReconVerdict.RESENT_LATER, transfer, lines)
+            }
             val verdict = StatementMatcher.judge(transfer, lines)
             val settled = when (verdict) {
-                ReconVerdict.AUTO_COMPLETE -> store.transition(transfer.id, transfer.status, COMPLETED, clock.instant(), BANK_OK)
-                ReconVerdict.AUTO_FAIL -> store.fail(transfer.id, transfer.status, clock.instant(), NOT_AT_BANK)
+                ReconVerdict.AUTO_COMPLETE -> store.transition(transfer.id, transfer.status, COMPLETED, clock.instant(), BANK_OK, sentWithin)
+                ReconVerdict.AUTO_FAIL -> store.fail(transfer.id, transfer.status, clock.instant(), NOT_AT_BANK, sentWithin)
                 else -> true
             }
             if (settled) return Settlement(verdict, transfer, lines)

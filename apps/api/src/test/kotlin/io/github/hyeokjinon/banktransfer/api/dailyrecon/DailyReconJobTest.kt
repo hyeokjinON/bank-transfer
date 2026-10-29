@@ -204,6 +204,11 @@ class DailyReconJobTest : DailyReconTestSupport() {
         assertEquals(AlertLevel.INFO, info.level)
         assertTrue("완료 — 불일치 없음" in info.title)
         assertTrue(info.items.isEmpty())
+        // ③ 이 읽은 뒤 다시 보내져 확정하지 않은 건(RESENT_LATER)은 있을 때만 요약 줄에 붙인다
+        assertEquals(
+            "출금 3건 (D일 송신): 일치 3 · 자동 완료 0 · 자동 실패(E002, 환불) 0 · 재시도 중 0 · 다른 날 재송신(확정 안 함) 2",
+            summaries.completionAlert(summary.copy(resentLater = 2)).lines[0],
+        )
 
         val dirty = ReconTestDates.unique()
         repo.insertIssue(ReconIssue(dirty, ReconIssueType.COMPLETED_NOT_AT_BANK, reference = "T261028NOTATBANK0001"), Instant.now())

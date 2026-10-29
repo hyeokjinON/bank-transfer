@@ -109,9 +109,9 @@ class StatementMatcherTest {
     }
 
     @Test
-    fun `일치 · 재시도 중만 이슈가 없고, 자동 확정은 감사 기록(불일치 아님), 나머지는 불일치`() {
+    fun `일치 · 재시도 중 · 다른 날 재송신만 이슈가 없고, 자동 확정은 감사 기록(불일치 아님), 나머지는 불일치`() {
         val withoutIssue = ReconVerdict.entries.filter { it.issue == null }.toSet()
-        assertEquals(setOf(MATCHED, RETRYING), withoutIssue)
+        assertEquals(setOf(MATCHED, RETRYING, ReconVerdict.RESENT_LATER), withoutIssue)
         assertFalse(AUTO_COMPLETE.issue!!.mismatch)
         assertFalse(AUTO_FAIL.issue!!.mismatch)
         assertTrue(ReconVerdict.entries.filter { it.issue != null && it != AUTO_COMPLETE && it != AUTO_FAIL }.all { it.issue!!.mismatch })

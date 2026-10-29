@@ -145,7 +145,10 @@ class DailyReconJobConfiguration {
             .build()
     }
 
-    /** ③ 판정 · 확정. 거래번호로 적재된 모든 날짜의 줄을 찾는다. */
+    /**
+     * ③ 판정 · 확정. 거래번호로 적재된 모든 날짜의 줄을 찾는다.
+     * 확정은 "sending_at 이 아직 D일 안" 을 같은 UPDATE 의 조건으로 건다 — 리더가 읽은 뒤 다시 보내진 출금(sending_at = 지금)을 E002 로 환불하지 않게 (ADR-0010).
+     */
     @Bean
     @StepScope
     fun transferSettlingWriter(
@@ -153,7 +156,10 @@ class DailyReconJobConfiguration {
         repo: ReconRepository,
         clock: Clock,
         @Value("#{jobParameters['reconDate']}") reconDate: LocalDate,
-    ): ItemStreamWriter<UUID> = SettlingWriter(reconDate, repo, clock) { id: UUID -> settler.settle(id, repo::linesOf) }
+    ): ItemStreamWriter<UUID> {
+        val (from, to) = DailyRecon.dayRange(reconDate)
+        return SettlingWriter(reconDate, repo, clock) { id: UUID -> settler.settle(id, from..<to, repo::linesOf) }
+    }
 
     /**
      * ④ 파일 D 의 1원인증(V)이 아닌 줄 중 ③ 이 다루지 않은 것: 우리에게 없는 거래번호, 다른 날 보낸(또는 보낸 적 없는) 출금.

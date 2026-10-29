@@ -25,6 +25,8 @@ data class ReconSummary(
     val autoFailed: Int,
     /** 사람이 봐야 하는 어긋남, 종류별 (recon_issue 기준 — 재시작해도 늘지 않는다). */
     val mismatches: Map<ReconIssueType, Int>,
+    /** ③ 이 D일 송신으로 읽었지만 확정 전에 다시 보내져 sending_at 이 다른 날로 옮겨 간 출금 — 확정하지 않았다 (그 날짜의 대사가 맡는다). */
+    val resentLater: Int = 0,
 ) {
     val mismatchCount: Int get() = mismatches.values.sum()
 }
@@ -49,6 +51,7 @@ class ReconSummaryReader(private val jobRepository: JobRepository, private val r
             autoCompleted = issues[ReconIssueType.AUTO_COMPLETED] ?: 0,
             autoFailed = issues[ReconIssueType.AUTO_FAILED] ?: 0,
             mismatches = issues.filterKeys { it.mismatch },
+            resentLater = transfers[ReconVerdict.RESENT_LATER],
         )
     }
 
@@ -63,7 +66,8 @@ class ReconSummaryReader(private val jobRepository: JobRepository, private val r
         }
         val lines = listOf(
             "출금 ${summary.transfers}건 (D일 송신): 일치 ${summary.matched} · 자동 완료 ${summary.autoCompleted} · " +
-                "자동 실패(E002, 환불) ${summary.autoFailed} · 재시도 중 ${summary.retrying}",
+                "자동 실패(E002, 환불) ${summary.autoFailed} · 재시도 중 ${summary.retrying}" +
+                if (summary.resentLater > 0) " · 다른 날 재송신(확정 안 함) ${summary.resentLater}" else "",
             "은행 줄 ${summary.bankLines}건 (1원인증 ${summary.verificationLines}건은 대조하지 않음)",
         ) + if (summary.mismatches.isEmpty()) emptyList() else listOf("불일치: " + summary.mismatches.entries.joinToString(" · ") { "${it.key} ${it.value}" })
         return Alert(

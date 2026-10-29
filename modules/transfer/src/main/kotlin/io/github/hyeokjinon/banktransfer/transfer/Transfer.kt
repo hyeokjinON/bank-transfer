@@ -153,8 +153,13 @@ interface TransferStore {
      * 같은 메시지를 두 번 받아도 두 번째는 false 라서 은행에 다시 보내지 않는다 — 도메인 상태가 곧 멱등키다.
      * [to] 가 SENDING 이면 sendingAt 도 [at] 으로 기록한다. bankResponseCode 는 주어진 값으로 덮어쓴다.
      * [to] 가 FAILED 면 거부한다(IllegalArgumentException) — 실패 확정은 환불과 한 트랜잭션인 [fail] 로만 한다 (P4-1).
+     * [sentWithin] 을 주면 sendingAt 이 그 범위 안일 때만 바꾼다 — 상태와 **같은 UPDATE 의 조건**이라 읽은 뒤 다시 보내진 출금을 놓치지 않는다
+     * (P5-1 일마감 대사: D일에 보낸 것을 확정하려는데 그 사이 다시 보내져 sendingAt 이 D+1 이면 0건). [to] 가 SENDING 이면 함께 쓸 수 없다.
      */
-    fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String? = null): Boolean
+    fun transition(
+        id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String? = null,
+        sentWithin: OpenEndRange<Instant>? = null,
+    ): Boolean
 
     /** status = SENDING 이고 sendingAt 이 [cutoff] 보다 이른 건 (오래된 순, 최대 [limit]). */
     fun findSendingBefore(cutoff: Instant, limit: Int): List<Transfer>
@@ -188,8 +193,9 @@ interface TransferStore {
      * 실패 확정 (P4-1). 현재 상태가 [from] 일 때만 FAILED([bankResponseCode]) 로 바꾸고, 같은 트랜잭션에서 차감했던 금액을 지갑에 돌려주며
      * 원장에 REFUND 를 남긴다. 바꿨으면 true. 0건(다른 쪽이 먼저 확정)이면 환불도 하지 않는다 → 두 번 불러도 환불은 한 번.
      * 차감 기록(WITHDRAW)이 없는 P3 시절 출금은 상태만 바꾼다. FAILED 로 가는 길은 이것 하나다 — 새 실패 경로가 생겨도 환불을 빠뜨릴 수 없게.
+     * [sentWithin] 을 주면 sendingAt 이 그 범위 안일 때만 바꾼다 ([transition] 과 같다 — 다시 보내진 출금을 환불하면 이중 지급).
      */
-    fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String): Boolean
+    fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String, sentWithin: OpenEndRange<Instant>? = null): Boolean
 }
 
 /** 저장소가 UNIQUE 제약 위반을 도메인 말로 알려 줄 때 쓴다. */

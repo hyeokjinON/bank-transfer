@@ -158,6 +158,26 @@ interface TransferJpaRepository : JpaRepository<TransferEntity, String> {
         @Param("at") at: Instant,
         @Param("code") code: String?,
     ): Int
+
+    /**
+     * [transition] + sending_at 이 [sentFrom, sentUntil) 안일 때만 (P5-1 일마감 대사의 확정). 상태와 같은 문장의 조건이라
+     * 읽은 뒤 다시 보내져(RECEIVED → SENDING, sending_at = 지금) 상태가 다시 같아진 출금도 0건이 된다.
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(
+        "update TransferEntity t set t.status = :to, t.updatedAt = :at, " +
+            "t.bankResponseCode = :code, t.version = t.version + 1 where t.id = :id and t.status = :from " +
+            "and t.sendingAt >= :sentFrom and t.sendingAt < :sentUntil",
+    )
+    fun transitionIfSentWithin(
+        @Param("id") id: String,
+        @Param("from") from: TransferStatus,
+        @Param("to") to: TransferStatus,
+        @Param("at") at: Instant,
+        @Param("code") code: String?,
+        @Param("sentFrom") sentFrom: Instant,
+        @Param("sentUntil") sentUntil: Instant,
+    ): Int
 }
 
 interface OutboxEventJpaRepository : JpaRepository<OutboxEventEntity, Long> {
@@ -248,19 +268,25 @@ class JpaTransferStore(
      * 한 문장의 UPDATE 라 두 소비자가 동시에 와도 DB 가 한쪽만 1 건으로 통과시킨다.
      * 허용하는 전이는 도메인의 상태 표([TransferStatus.canMoveTo])를 따른다. 표에 없는 전이는 DB 에 가기 전에 거른다 (호출 쪽 버그).
      * FAILED 는 거부한다 — 환불과 한 트랜잭션인 [fail] 로만 간다 (P4-1).
+     * SENDING 으로 가는 전이는 sending_at 을 바꾸는 쪽이라 [sentWithin] 과 함께 쓰지 않는다.
      */
-    override fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?): Boolean {
+    override fun transition(
+        id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?, sentWithin: OpenEndRange<Instant>?,
+    ): Boolean {
         require(to != TransferStatus.FAILED) { "use fail() for FAILED so the refund is never skipped" }
         require(from.canMoveTo(to)) { "illegal transition $from -> $to" }
-        return tx.execute {
-            val dbAt = at.toDbPrecision()
-            val updated = if (to == TransferStatus.SENDING) {
-                transfers.transitionToSending(id.toString(), from, to, dbAt, bankResponseCode)
-            } else {
-                transfers.transition(id.toString(), from, to, dbAt, bankResponseCode)
-            }
-            updated == 1
-        }!!
+        require(sentWithin == null || to != TransferStatus.SENDING) { "a transition to SENDING rewrites sending_at, it cannot be bounded by it" }
+        return tx.execute { conditionalUpdate(id, from, to, at.toDbPrecision(), bankResponseCode, sentWithin) == 1 }!!
+    }
+
+    private fun conditionalUpdate(
+        id: UUID, from: TransferStatus, to: TransferStatus, dbAt: Instant, code: String?, sentWithin: OpenEndRange<Instant>?,
+    ): Int = when {
+        to == TransferStatus.SENDING -> transfers.transitionToSending(id.toString(), from, to, dbAt, code)
+        sentWithin == null -> transfers.transition(id.toString(), from, to, dbAt, code)
+        else -> transfers.transitionIfSentWithin(
+            id.toString(), from, to, dbAt, code, sentWithin.start.toDbPrecision(), sentWithin.endExclusive.toDbPrecision(),
+        )
     }
 
     /** idx_transfer_status(status, sending_at) 를 탄다. */
@@ -298,12 +324,13 @@ class JpaTransferStore(
      * 실패 확정과 환불을 한 트랜잭션에 쓴다 (P4-1). 조건부 전이가 1건일 때만 환불한다 → 컨슈머와 정리 작업이 겹쳐 두 번 불러도 환불은 한 번.
      * 환불 금액은 원장의 WITHDRAW 에서 읽는다 (없으면 = 차감한 적 없는 P3 시절 출금 → 상태만 바꾼다).
      * 환불이 실패하면(원장 UNIQUE 위반 등) 전이도 롤백된다 — "FAILED 인데 돈은 안 돌아온" 상태가 생기지 않는다.
+     * [sentWithin] 조건도 같은 UPDATE 에 들어간다 — 0건이면 환불하지 않는다.
      */
-    override fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String): Boolean {
+    override fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String, sentWithin: OpenEndRange<Instant>?): Boolean {
         require(from.canMoveTo(TransferStatus.FAILED)) { "illegal transition $from -> FAILED" }
         return tx.execute {
             val dbAt = at.toDbPrecision()
-            if (transfers.transition(id.toString(), from, TransferStatus.FAILED, dbAt, bankResponseCode) != 1) {
+            if (conditionalUpdate(id, from, TransferStatus.FAILED, dbAt, bankResponseCode, sentWithin) != 1) {
                 return@execute false
             }
             wallets.refund(id, dbAt)

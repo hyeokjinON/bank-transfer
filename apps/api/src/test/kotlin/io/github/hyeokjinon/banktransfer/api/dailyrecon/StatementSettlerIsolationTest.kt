@@ -31,13 +31,34 @@ class StatementSettlerIsolationTest : DailyReconTestSupport() {
     private fun racingStore(): TransferStore = object : TransferStore by store {
         private var raced = false
 
-        override fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?): Boolean {
+        override fun transition(
+            id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?, sentWithin: OpenEndRange<Instant>?,
+        ): Boolean {
             if (!raced) {
                 raced = true
                 CompletableFuture.runAsync { store.transition(id, TransferStatus.UNKNOWN, TransferStatus.COMPLETED, Instant.now(), "0000") }
                     .get(10, TimeUnit.SECONDS)
             }
-            return store.transition(id, from, to, at, bankResponseCode)
+            return store.transition(id, from, to, at, bankResponseCode, sentWithin)
+        }
+    }
+
+    /**
+     * 첫 실패 확정 직전에 다른 스레드 · 트랜잭션이 이 출금을 다시 보내고 커밋한다 (컨슈머의 SENDING → RECEIVED, 재발행 뒤 RECEIVED → SENDING).
+     * 상태는 다시 SENDING 이지만 sending_at 은 [resentAt] 이다.
+     */
+    private fun resendingStore(resentAt: Instant): TransferStore = object : TransferStore by store {
+        private var raced = false
+
+        override fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String, sentWithin: OpenEndRange<Instant>?): Boolean {
+            if (!raced) {
+                raced = true
+                CompletableFuture.runAsync {
+                    store.transition(id, TransferStatus.SENDING, TransferStatus.RECEIVED, resentAt)
+                    store.transition(id, TransferStatus.RECEIVED, TransferStatus.SENDING, resentAt)
+                }.get(10, TimeUnit.SECONDS)
+            }
+            return store.fail(id, from, at, bankResponseCode, sentWithin)
         }
     }
 
@@ -65,6 +86,28 @@ class StatementSettlerIsolationTest : DailyReconTestSupport() {
         assertEquals(ReconVerdict.MATCHED, settlement.verdict)
         assertEquals(TransferStatus.COMPLETED, settlement.transfer!!.status)
         assertEquals(TransferStatus.COMPLETED, store.findById(id)!!.status)
+    }
+
+    @Test
+    fun `③ 판정 뒤 확정 전에 다시 보내지면(sending_at D+1) E002 실패가 0건 - 환불하지 않고 RESENT_LATER (실제 MySQL)`() {
+        val day = ReconTestDates.unique()
+        val user = fundedUser()
+        val transfer = seed(user, TransferStatus.SENDING, at(day))
+        val balance = wallets.balanceOf(user)
+        val (from, to) = DailyRecon.dayRange(day)
+        val settler = StatementSettler(resendingStore(at(day.plusDays(1), 1)), Clock.systemUTC())
+
+        val settlement = TransactionTemplate(transactionManager).apply { isolationLevel = TransactionDefinition.ISOLATION_READ_COMMITTED }.execute {
+            store.findById(transfer.id)
+            settler.settle(transfer.id, from..<to) { emptyList() }
+        }!!
+
+        assertEquals(ReconVerdict.RESENT_LATER, settlement.verdict)
+        val after = store.findById(transfer.id)!!
+        assertEquals(TransferStatus.SENDING, after.status)                 // 은행이 지금 처리 중일 수 있는 출금을 실패로 확정하지 않았다
+        assertEquals(at(day.plusDays(1), 1), after.sendingAt)
+        assertEquals(listOf("WITHDRAW"), ledgerTypes(transfer.id))          // 환불 없음 — 이중 지급의 길이 막혔다
+        assertEquals(balance, wallets.balanceOf(user))
     }
 
     @Test
