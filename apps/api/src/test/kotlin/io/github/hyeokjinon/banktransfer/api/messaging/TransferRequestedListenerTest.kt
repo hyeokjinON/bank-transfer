@@ -1,12 +1,9 @@
 package io.github.hyeokjinon.banktransfer.api.messaging
 
+import io.github.hyeokjinon.banktransfer.api.support.captureLogs
 import io.github.hyeokjinon.banktransfer.transfer.ProcessResult
 import ch.qos.logback.classic.Level
-import ch.qos.logback.classic.Logger
-import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.read.ListAppender
 import org.apache.kafka.clients.consumer.ConsumerRecord
-import org.slf4j.LoggerFactory
 import org.springframework.kafka.support.Acknowledgment
 import org.springframework.kafka.support.KafkaHeaders
 import java.nio.ByteBuffer
@@ -93,25 +90,12 @@ class TransferRequestedListenerTest {
             message?.let { headers().add(KafkaHeaders.EXCEPTION_MESSAGE, it.toByteArray()) }
         }
 
-    /** 리스너가 남기는 로그를 모아 본다 (logback). */
-    private fun captureLogs(block: () -> Unit): List<ILoggingEvent> {
-        val logger = LoggerFactory.getLogger(TransferRequestedListener::class.java) as Logger
-        val appender = ListAppender<ILoggingEvent>().also { it.start() }
-        logger.addAppender(appender)
-        try {
-            block()
-        } finally {
-            logger.detachAppender(appender)
-        }
-        return appender.list
-    }
-
     @Test
     fun `DLT - 은행 연결 없음이면 WARN, 이체는 RECEIVED 로 남아 정리 작업이 재발행한다 - ack 한다`() {
         val ack = CountingAck()
         val id = UUID.randomUUID().toString()
 
-        val logs = captureLogs { listener.onDlt(dltRecord(id, RetryLaterException::class.java.name), ack) }
+        val logs = captureLogs(TransferRequestedListener::class.java) { listener.onDlt(dltRecord(id, RetryLaterException::class.java.name), ack) }
 
         assertEquals(1, ack.count)
         val log = logs.single()
@@ -126,7 +110,7 @@ class TransferRequestedListenerTest {
         val ack = CountingAck()
         val badKey = "evil\r\nFAKE LOG LINE " + "x".repeat(200)
 
-        val logs = captureLogs {
+        val logs = captureLogs(TransferRequestedListener::class.java) {
             listener.onDlt(dltRecord(badKey, InvalidTransferKeyException::class.java.name, "Listener method threw exception"), ack)
         }
 
@@ -147,7 +131,7 @@ class TransferRequestedListenerTest {
         val dbError = "org.springframework.dao.DataAccessResourceFailureException"
         val message = realDltMessage("could not\nconnect " + "y".repeat(500))
 
-        val logs = captureLogs { listener.onDlt(dltRecord(id, dbError, message), ack) }
+        val logs = captureLogs(TransferRequestedListener::class.java) { listener.onDlt(dltRecord(id, dbError, message), ack) }
 
         assertEquals(1, ack.count)
         val log = logs.single()
@@ -173,7 +157,7 @@ class TransferRequestedListenerTest {
         }
         val none = ConsumerRecord(TransferTopics.DLT, 0, 1L, UUID.randomUUID().toString(), "{}")
 
-        val logs = captureLogs { listener.onDlt(record, ack); listener.onDlt(none, ack) }
+        val logs = captureLogs(TransferRequestedListener::class.java) { listener.onDlt(record, ack); listener.onDlt(none, ack) }
 
         assertEquals(2, ack.count)
         assertEquals(listOf(Level.WARN, Level.ERROR), logs.map { it.level })
