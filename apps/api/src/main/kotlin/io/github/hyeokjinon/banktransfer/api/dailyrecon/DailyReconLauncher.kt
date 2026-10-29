@@ -39,7 +39,9 @@ class ReconRunningException(date: LocalDate) : RuntimeException("daily reconcili
 
 class ReconAlreadyCompletedException(date: LocalDate) : RuntimeException("daily reconciliation for $date is already completed")
 
-class ReconDateInFutureException(date: LocalDate, today: LocalDate) : RuntimeException("recon date $date is after today ($today, KST)")
+/** 아직 마감되지 않은 날(오늘 이후, KST)의 수동 대사 — 지난 날만 대사할 수 있다 ([DailyRecon.requireClosed]). */
+class ReconDateNotClosedException(date: LocalDate, today: LocalDate) :
+    RuntimeException("recon date $date is not closed yet (today is $today, KST) - only past days can be reconciled")
 
 /**
  * 대사일 하나의 잡을 이 스레드에서 끝까지 돌린다 (P5-1). Spring Batch 6 의 JobOperator 는 기본이 동기 실행(SyncTaskExecutor)이다.

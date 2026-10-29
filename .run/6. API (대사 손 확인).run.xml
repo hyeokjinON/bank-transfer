@@ -4,7 +4,7 @@
       <option name="executionName" />
       <option name="externalProjectPath" value="$PROJECT_DIR$" />
       <option name="externalSystemIdString" value="GRADLE" />
-      <option name="scriptParameters" value="--args=&quot;--transfer.reconcile.enabled=false&quot;" />
+      <option name="scriptParameters" value="--args=&quot;--transfer.reconcile.enabled=false --daily-recon.allow-today=true&quot;" />
       <option name="taskDescriptions">
         <list />
       </option>

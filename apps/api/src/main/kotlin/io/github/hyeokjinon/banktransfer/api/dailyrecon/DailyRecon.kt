@@ -37,6 +37,17 @@ object DailyRecon {
     /** 대사일 D 의 KST 하루 [시작, 끝). 점검 시간에는 아무것도 은행에 가지 않으므로 이 범위에 보낸 출금 = 파일 D 의 범위다. */
     fun dayRange(date: LocalDate): Pair<Instant, Instant> =
         date.atStartOfDay(KST).toInstant() to date.plusDays(1).atStartOfDay(KST).toInstant()
+
+    /**
+     * 수동 대사가 받는 날짜: 마감된 날(어제 이전, KST)만. 오늘을 대사하면 방금 보내 아직 은행 파일에 없는 출금을 "은행이 처리하지 않았다" 로
+     * 보고 AUTO_FAIL(E002 + 환불)하는데, 은행은 그 출금을 아직 처리할 수 있다 → 이중 지급 (ADR-0010).
+     * [allowToday] = daily-recon.allow-today, 로컬 손 확인용(실행 구성 6) — 오늘도 받는다. 내일 이후는 언제나 거부. 스케줄은 늘 전날이라 무관하다.
+     */
+    fun requireClosed(date: LocalDate, now: Instant, allowToday: Boolean) {
+        val today = LocalDate.ofInstant(now, KST)
+        val lastAllowed = if (allowToday) today else today.minusDays(1)
+        if (date.isAfter(lastAllowed)) throw ReconDateNotClosedException(date, today)
+    }
 }
 
 /** 일마감 대사 설정 (P5-1, 설계 §9). */
@@ -46,6 +57,8 @@ data class DailyReconProperties(
     val fileDir: String = "./bank-files",
     /** ③ · ④ 청크 크기. ② 적재는 500 고정. */
     val chunkSize: Int = 100,
+    /** 수동 대사에 오늘(KST)을 허용 — 로컬 손 확인 전용(실행 구성 6). 운영에서 켜면 이중 지급 위험 ([DailyRecon.requireClosed]). */
+    val allowToday: Boolean = false,
     val schedule: Schedule = Schedule(),
 ) {
     data class Schedule(

@@ -3,7 +3,7 @@ package io.github.hyeokjinon.banktransfer.api.web
 import io.github.hyeokjinon.banktransfer.account.AccountVerificationException
 import io.github.hyeokjinon.banktransfer.api.config.BankRejectedException
 import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconAlreadyCompletedException
-import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconDateInFutureException
+import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconDateNotClosedException
 import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconRunningException
 import io.github.hyeokjinon.banktransfer.gateway.BankTimeoutException
 import io.github.hyeokjinon.banktransfer.gateway.BankUnavailableException
@@ -69,7 +69,7 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
         UserIdRequiredException::class,
         ReconAlreadyCompletedException::class,
         ReconRunningException::class,
-        ReconDateInFutureException::class,
+        ReconDateNotClosedException::class,
     )
     fun handle(e: Exception): ResponseEntity<ProblemDetail> {
         val cause = if (e is CompletionException && e.cause != null) e.cause!! else e
@@ -102,7 +102,7 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
             // P5-1 일마감 대사 관리 API. 같은 날짜는 잡 인스턴스 하나 — 끝났으면 다시 돌리지 않고, 돌고 있으면 기다리지 않는다
             is ReconAlreadyCompletedException -> HttpStatus.CONFLICT to "RECON_ALREADY_COMPLETED"
             is ReconRunningException -> HttpStatus.CONFLICT to "RECON_RUNNING"
-            is ReconDateInFutureException -> HttpStatus.BAD_REQUEST to "RECON_DATE_IN_FUTURE"
+            is ReconDateNotClosedException -> HttpStatus.BAD_REQUEST to "RECON_DATE_NOT_CLOSED"
             else -> {
                 log.error("unexpected error", cause)
                 HttpStatus.INTERNAL_SERVER_ERROR to "INTERNAL_ERROR"
