@@ -11,6 +11,7 @@ import io.github.hyeokjinon.banktransfer.api.persistence.OutboxEventJpaRepositor
 import io.github.hyeokjinon.banktransfer.api.persistence.TransferJpaRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletDebit
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletLedger
+import io.github.hyeokjinon.banktransfer.api.web.BankMaintenanceGuard
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
 import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceWindow
@@ -105,6 +106,9 @@ class AppConfiguration {
 
     @Bean
     fun bankMaintenanceWindow(props: BankMaintenanceProperties): BankMaintenanceWindow = props.toWindow()
+
+    @Bean
+    fun bankMaintenanceGuard(window: BankMaintenanceWindow, clock: Clock) = BankMaintenanceGuard(window, clock)
 
     @Bean(destroyMethod = "close")
     fun bankGatewayClient(props: BankGatewayProperties, maintenance: BankMaintenanceWindow, clock: Clock): BankGatewayClient =

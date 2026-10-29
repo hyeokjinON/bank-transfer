@@ -47,19 +47,23 @@ data class VerificationResponse(
 
 @RestController
 @RequestMapping("/api/v1/account-verifications")
-class AccountVerificationController(private val service: AccountVerificationService) {
+class AccountVerificationController(private val service: AccountVerificationService, private val maintenance: BankMaintenanceGuard) {
 
     /**
      * CompletableFuture 를 돌려주면 Spring MVC 가 서블릿 비동기 모드로 처리한다.
      * 은행 응답을 기다리는 동안 Tomcat 요청 스레드는 풀로 돌아간다. 인증 건에는 요청자(X-User-Id)를 남긴다 (P4-1).
      */
     @PostMapping
-    fun request(user: RequestUser, @Valid @RequestBody body: VerificationRequest): CompletableFuture<ResponseEntity<VerificationResponse>> =
-        service.request(RequestVerification(user.id, body.bankCode, body.accountNo, body.holderName))
+    fun request(user: RequestUser, @Valid @RequestBody body: VerificationRequest): CompletableFuture<ResponseEntity<VerificationResponse>> {
+        maintenance.ensureOpen()   // 점검 중에는 성명조회 · 1원 이체를 보내지 않는다 (P5-1) — 비동기로 넘기기 전에 거절한다
+        return service.request(RequestVerification(user.id, body.bankCode, body.accountNo, body.holderName))
             .thenApply { ResponseEntity.status(HttpStatus.CREATED).body(VerificationResponse.from(it)) }
+    }
 
-    /** 남의 인증 건이면 404 VERIFICATION_NOT_FOUND (실패 횟수도 늘지 않는다, P4-1). */
+    /** 남의 인증 건이면 404 VERIFICATION_NOT_FOUND (실패 횟수도 늘지 않는다, P4-1). 점검 중이면 503 (P5-1 — 스펙 §4: 요청 · 확인 모두). */
     @PostMapping("/{id}/confirm")
-    fun confirm(user: RequestUser, @PathVariable id: UUID, @Valid @RequestBody body: ConfirmRequest): VerificationResponse =
-        VerificationResponse.from(service.confirm(user.id, id, body.code))
+    fun confirm(user: RequestUser, @PathVariable id: UUID, @Valid @RequestBody body: ConfirmRequest): VerificationResponse {
+        maintenance.ensureOpen()
+        return VerificationResponse.from(service.confirm(user.id, id, body.code))
+    }
 }

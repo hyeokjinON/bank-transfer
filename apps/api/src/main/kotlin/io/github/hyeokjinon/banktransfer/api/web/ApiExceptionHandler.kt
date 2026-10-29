@@ -61,6 +61,7 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
         BankTimeoutException::class,
         BankUnavailableException::class,
         BankRejectedException::class,
+        BankMaintenanceException::class,
         TransferException::class,
         UserIdRequiredException::class,
     )
@@ -76,6 +77,8 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
             is BankTimeoutException -> HttpStatus.GATEWAY_TIMEOUT to "BANK_TIMEOUT"
             is BankUnavailableException -> HttpStatus.SERVICE_UNAVAILABLE to "BANK_UNAVAILABLE"
             is BankRejectedException -> HttpStatus.BAD_GATEWAY to "BANK_REJECTED"
+            // P5-1: 은행 점검 시간. 연결 장애(BANK_UNAVAILABLE)와 달리 언제 끝나는지 안다 → Retry-After 에 남은 초
+            is BankMaintenanceException -> HttpStatus.SERVICE_UNAVAILABLE to "BANK_MAINTENANCE"
             is UserIdRequiredException -> HttpStatus.BAD_REQUEST to "USER_ID_REQUIRED"
             is TransferException.IdempotencyKeyRequired -> HttpStatus.BAD_REQUEST to "IDEMPOTENCY_KEY_REQUIRED"
             is TransferException.InvalidAmount -> HttpStatus.BAD_REQUEST to "INVALID_AMOUNT"
@@ -103,15 +106,20 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
         }
         // 헤더를 붙이려고 ResponseEntity 로 감싼다. 본문 · 상태 · problem+json 처리는 ProblemDetail 을 바로 돌려줄 때와 같다
         return ResponseEntity.status(status)
-            .headers { headers -> if (cause.isRetryable()) headers.set(HttpHeaders.RETRY_AFTER, RETRY_AFTER_SECONDS) }
+            .headers { headers -> cause.retryAfter()?.let { headers.set(HttpHeaders.RETRY_AFTER, it) } }
             .body(problem)
     }
 
     /**
-     * 같은 요청을 잠시 뒤 다시 보내면 될 수 있는 오류 (P4-2). 클라이언트에게 언제 다시 해도 되는지 알린다.
-     * Redis 장애와 락 경합을 구분하지 않는다 — 클라이언트가 할 일(잠시 뒤 다시)이 같다. 운영자는 로그 수준으로 구분한다.
+     * 같은 요청을 잠시 뒤 다시 보내면 될 수 있는 오류의 `Retry-After` 초. 다시 보내도 같은 결과인 오류는 null (헤더 없음).
+     * - 잔고를 지금 못 잡음 · 동시 변경으로 포기 (P4-2): 1초. Redis 장애와 락 경합을 구분하지 않는다 — 클라이언트가 할 일이 같다
+     * - 은행 점검 (P5-1): 점검이 끝날 때까지 남은 초 (올림). 그 전에 다시 보내도 같은 503 이다
      */
-    private fun Throwable.isRetryable() = this is TransferException.WalletBusy || this is TransferException.ConcurrentUpdate
+    private fun Throwable.retryAfter(): String? = when (this) {
+        is BankMaintenanceException -> retryAfterSeconds.toString()
+        is TransferException.WalletBusy, is TransferException.ConcurrentUpdate -> RETRY_AFTER_SECONDS
+        else -> null
+    }
 
     private companion object {
         /** 초 단위. 바로 다시 부딪히지 않을 만큼만 — 락 대기(5초) · 분산락 대기(3초)보다 짧다. */

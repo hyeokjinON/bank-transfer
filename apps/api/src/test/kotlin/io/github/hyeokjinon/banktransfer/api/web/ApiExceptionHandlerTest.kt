@@ -72,4 +72,13 @@ class ApiExceptionHandlerTest {
         assertEquals(503, response.statusCode.value())
         assertEquals("1", response.headers.getFirst(HttpHeaders.RETRY_AFTER))
     }
+
+    @Test
+    fun `점검 시간이면 503 BANK_MAINTENANCE + Retry-After 는 점검이 끝날 때까지 남은 초`() {
+        val response = handler.handle(BankMaintenanceException(900))
+
+        assertEquals(503, response.statusCode.value())
+        assertEquals("BANK_MAINTENANCE", response.body!!.properties?.get("code"))
+        assertEquals("900", response.headers.getFirst(HttpHeaders.RETRY_AFTER))
+    }
 }
