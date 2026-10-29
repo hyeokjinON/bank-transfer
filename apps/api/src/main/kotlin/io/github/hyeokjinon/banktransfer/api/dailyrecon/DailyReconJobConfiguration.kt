@@ -17,6 +17,7 @@ import org.springframework.batch.core.configuration.annotation.StepScope
 import org.springframework.batch.core.job.Job
 import org.springframework.batch.core.job.builder.JobBuilder
 import org.springframework.batch.core.job.parameters.DefaultJobParametersValidator
+import org.springframework.batch.core.launch.JobOperator
 import org.springframework.batch.core.repository.JobRepository
 import org.springframework.batch.core.step.builder.StepBuilder
 import org.springframework.batch.infrastructure.item.ItemStreamReader
@@ -25,6 +26,7 @@ import org.springframework.batch.infrastructure.item.database.Order
 import org.springframework.batch.infrastructure.item.database.builder.JdbcPagingItemReaderBuilder
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -102,6 +104,7 @@ class DailyReconJobConfiguration {
 
         return JobBuilder(JOB_NAME, jobRepository)
             .validator(DefaultJobParametersValidator(arrayOf(RECON_DATE), emptyArray()))
+            .listener(SingleRunGuard(jobRepository))   // 실패한 날짜의 동시 재시작 — Spring Batch 6 의 시작 확인 사이의 틈을 막는다
             .start(validateFile)
             .next(loadStatement)
             .next(matchTransfers)
@@ -193,4 +196,13 @@ class DailyReconJobConfiguration {
         val lines = repo.linesOf(ref.reference)
         ref.transferId?.let { id -> settler.settle(id) { lines } } ?: settler.unknownReference(lines)
     }
+
+    @Bean
+    fun dailyReconLauncher(jobOperator: JobOperator, job: Job, summaries: ReconSummaryReader, alerts: AlertNotifier) =
+        DailyReconLauncher(jobOperator, job, summaries, alerts)
+
+    @Bean
+    @ConditionalOnProperty(prefix = "daily-recon.schedule", name = ["enabled"], havingValue = "true", matchIfMissing = true)
+    fun dailyReconScheduler(launcher: DailyReconLauncher, clock: Clock, props: DailyReconProperties, alerts: AlertNotifier) =
+        DailyReconScheduler(launcher::run, clock, props.schedule.cron, props.schedule.zone, alerts)
 }

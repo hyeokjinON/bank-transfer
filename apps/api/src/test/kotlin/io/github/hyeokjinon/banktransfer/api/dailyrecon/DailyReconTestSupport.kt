@@ -19,6 +19,9 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * 대사 테스트 공용 (P5-1, 공유 DB). 테스트마다 [ReconTestDates.unique] 로 다른 대사일을 쓰고, 그날 보낸 출금을 심고, 은행 파일을 쓴다.
@@ -74,6 +77,26 @@ abstract class DailyReconTestSupport : ApiIntegrationTest() {
     protected fun runJob(date: LocalDate): JobExecution = jobOperator.start(job, DailyRecon.parameters(date))
 
     protected fun status(transfer: Transfer): TransferStatus = store.findById(transfer.id)!!.status
+
+    /**
+     * [date] 의 잡을 [start] 로 다른 스레드에서 시작해 ⑥ 보고(완료 알림)에서 붙잡아 둔 채 [whileRunning] 을 부르고, 끝나면 놓아준다
+     * — 잡이 돌고 있는 동안 두 번째 실행이 오는 경우. 돌려주는 값 = (붙잡았던 실행의 결과, whileRunning 의 결과).
+     */
+    protected fun <S, T> whileReportHeld(date: LocalDate, start: () -> S, whileRunning: () -> T): Pair<S, T> {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        recordedAlerts.onNotify = { if (date.toString() in it.title) { entered.countDown(); release.await(20, TimeUnit.SECONDS) } }
+        try {
+            val held = CompletableFuture.supplyAsync(start)
+            check(entered.await(20, TimeUnit.SECONDS)) { "the job for $date did not reach its report step" }
+            val result = whileRunning()
+            release.countDown()
+            return held.get(20, TimeUnit.SECONDS) to result
+        } finally {
+            release.countDown()
+            recordedAlerts.onNotify = null
+        }
+    }
 
     /** 이슈 종류 → 거래번호 목록 (지갑 이슈는 null). */
     protected fun issueRefs(date: LocalDate): Map<String, List<String?>> =

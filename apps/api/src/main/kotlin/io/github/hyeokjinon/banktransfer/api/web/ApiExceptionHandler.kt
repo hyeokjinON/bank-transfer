@@ -2,6 +2,9 @@ package io.github.hyeokjinon.banktransfer.api.web
 
 import io.github.hyeokjinon.banktransfer.account.AccountVerificationException
 import io.github.hyeokjinon.banktransfer.api.config.BankRejectedException
+import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconAlreadyCompletedException
+import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconDateInFutureException
+import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconRunningException
 import io.github.hyeokjinon.banktransfer.gateway.BankTimeoutException
 import io.github.hyeokjinon.banktransfer.gateway.BankUnavailableException
 import io.github.hyeokjinon.banktransfer.transfer.TransferException
@@ -64,6 +67,9 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
         BankMaintenanceException::class,
         TransferException::class,
         UserIdRequiredException::class,
+        ReconAlreadyCompletedException::class,
+        ReconRunningException::class,
+        ReconDateInFutureException::class,
     )
     fun handle(e: Exception): ResponseEntity<ProblemDetail> {
         val cause = if (e is CompletionException && e.cause != null) e.cause!! else e
@@ -93,6 +99,10 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
             is TransferException.IdempotencyKeyReused -> HttpStatus.UNPROCESSABLE_CONTENT to "IDEMPOTENCY_KEY_REUSED"
             is TransferException.TransferNotFound -> HttpStatus.NOT_FOUND to "TRANSFER_NOT_FOUND"
             is TransferException.IllegalTransition -> HttpStatus.CONFLICT to "ILLEGAL_TRANSITION"
+            // P5-1 일마감 대사 관리 API. 같은 날짜는 잡 인스턴스 하나 — 끝났으면 다시 돌리지 않고, 돌고 있으면 기다리지 않는다
+            is ReconAlreadyCompletedException -> HttpStatus.CONFLICT to "RECON_ALREADY_COMPLETED"
+            is ReconRunningException -> HttpStatus.CONFLICT to "RECON_RUNNING"
+            is ReconDateInFutureException -> HttpStatus.BAD_REQUEST to "RECON_DATE_IN_FUTURE"
             else -> {
                 log.error("unexpected error", cause)
                 HttpStatus.INTERNAL_SERVER_ERROR to "INTERNAL_ERROR"

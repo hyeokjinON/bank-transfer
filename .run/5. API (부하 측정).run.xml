@@ -2,7 +2,7 @@
   <configuration default="false" name="5. API (부하 측정)" type="JarApplication">
     <option name="JAR_PATH" value="$PROJECT_DIR$/apps/api/build/libs/api-0.1.0-SNAPSHOT.jar" />
     <option name="VM_PARAMETERS" value="-Xms1g -Xmx1g -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8" />
-    <option name="PROGRAM_PARAMETERS" value="--wallet.debit-strategy=conditional --transfer.outbox.relay.enabled=false --transfer.reconcile.enabled=false --spring.kafka.listener.auto-startup=false --server.tomcat.threads.max=200 --logging.level.io.github.hyeokjinon.banktransfer=WARN" />
+    <option name="PROGRAM_PARAMETERS" value="--wallet.debit-strategy=conditional --transfer.outbox.relay.enabled=false --transfer.reconcile.enabled=false --spring.kafka.listener.auto-startup=false --server.tomcat.threads.max=200 --logging.level.io.github.hyeokjinon.banktransfer=WARN --daily-recon.schedule.enabled=false" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
     <option name="ALTERNATIVE_JRE_PATH" />
     <method v="2">

@@ -4,7 +4,7 @@ spring:
   task:
     scheduling:
       pool:
-        size: 2   # 발행기(0.5초)와 정리 작업(10초)이 한 스레드를 나눠 쓰면 서로 막는다
+        size: 3   # 발행기(0.5초) · 정리 작업(10초) · 일마감 대사(01 ~ 06시, 동기로 수 초)가 서로 막지 않게 (P5-1 에서 2 → 3)
   mvc:
     problemdetails:
       enabled: true   # ApiExceptionHandler 가 ResponseEntityExceptionHandler 를 상속하므로 표준 오류도 ProblemDetail + code 로 응답한다 (Boot 기본 핸들러는 물러난다. 설정은 명시용으로 유지)
@@ -108,6 +108,10 @@ wallet:
 daily-recon:                   # 일마감 대사 (P5-1, ADR-0010)
   file-dir: ./bank-files       # 은행 대사 파일 디렉터리 (recon/RECON_yyyyMMdd.dat). 작업 디렉터리 = 저장소 루트 (git 제외)
   chunk-size: 100              # ③ 출금 대조 · ④ 은행 줄 대조 청크. ② 적재는 500 고정
+  schedule:
+    enabled: true              # 부하 측정 실행 구성 · 테스트는 false
+    cron: "0 0 1-6 * * *"      # 01:00 ~ 06:00 매시 정각에 전날 대사. 파일이 없으면 다음 정각에 다시, 마지막 회차(06시)에도 못 끝내면 긴급 알림
+    zone: Asia/Seoul
 
 alert:
   telegram:

@@ -1,5 +1,8 @@
 package io.github.hyeokjinon.banktransfer.api.web
 
+import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconAlreadyCompletedException
+import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconDateInFutureException
+import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconRunningException
 import io.github.hyeokjinon.banktransfer.transfer.TransferException
 import org.springframework.http.HttpHeaders
 import org.springframework.http.ProblemDetail
@@ -8,6 +11,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.web.context.request.ServletWebRequest
 import org.springframework.web.context.request.async.AsyncRequestTimeoutException
 import org.springframework.web.bind.MissingServletRequestParameterException
+import java.time.LocalDate
 import java.util.concurrent.CompletionException
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -80,5 +84,19 @@ class ApiExceptionHandlerTest {
         assertEquals(503, response.statusCode.value())
         assertEquals("BANK_MAINTENANCE", response.body!!.properties?.get("code"))
         assertEquals("900", response.headers.getFirst(HttpHeaders.RETRY_AFTER))
+    }
+
+    @Test
+    fun `대사 - 이미 완료 409 RECON_ALREADY_COMPLETED, 실행 중 409 RECON_RUNNING, 내일 이후 400 RECON_DATE_IN_FUTURE`() {
+        val day = LocalDate.of(2026, 10, 28)
+
+        val completed = handler.handle(ReconAlreadyCompletedException(day))
+        val running = handler.handle(ReconRunningException(day))
+        val future = handler.handle(ReconDateInFutureException(day.plusDays(2), day))
+
+        assertEquals(409 to "RECON_ALREADY_COMPLETED", completed.statusCode.value() to completed.body!!.properties?.get("code"))
+        assertEquals(409 to "RECON_RUNNING", running.statusCode.value() to running.body!!.properties?.get("code"))
+        assertEquals(400 to "RECON_DATE_IN_FUTURE", future.statusCode.value() to future.body!!.properties?.get("code"))
+        assertNull(running.headers.getFirst(HttpHeaders.RETRY_AFTER))
     }
 }
