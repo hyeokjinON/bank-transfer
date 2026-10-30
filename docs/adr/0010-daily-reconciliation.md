@@ -1,6 +1,6 @@
 # ADR-0010 일마감 대사는 은행 대사 파일과 맞추고 결과를 모르는 출금만 자동 확정한다 — 점검 시간으로 날짜 경계를 맞추고 API 앱 안의 Spring Batch 로 돌린다
 
-- 상태: 제안 (2026-10-29) — 머지 때 채택
+- 상태: 채택 (2026-10-30, PR #15 머지)
 - 단계: P5-1 · 설계: [P5-1 설계](../superpowers/specs/2026-10-29-p5-1-daily-reconciliation-design.md) · [ADR-0006](0006-inquire-instead-of-resend.md) (결과조회) · [ADR-0008](0008-wallet-debit-on-intake-refund-on-failure.md) (`fail()` 환불) · [database.md](../database.md) §4-6 ~ §4-8 · [protocol.md](../protocol.md) "대사 파일"
 
 ## 맥락
