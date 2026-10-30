@@ -9,7 +9,7 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
-## [P5-1] 일마감 대사 · 은행 점검 시간 · 알림 — 2026-10-29
+## [P5-1] 일마감 대사 · 은행 점검 시간 · 알림 — 2026-10-30 ([#15](https://github.com/hyeokjinON/bank-transfer/pull/15), 머지 후 정리 [#16](https://github.com/hyeokjinON/bank-transfer/pull/16))
 ### Added
 - 대사 파일 형식 v0.3 (`ReconFileFormat`, 헤더 · 상세 · 트레일러, 59바이트 레코드), 모의 은행 거래 기록 · 재기동 복원 · 00:05 일마감 · `--close-day` · `--bank-files`.
 - `BankMaintenanceWindow` · `SendGate` (점검 시간에는 은행으로 보내지 않음), 웹 503 `BANK_MAINTENANCE` + `Retry-After`.
