@@ -53,10 +53,10 @@ class TransferServiceTest {
         override fun findByIdempotencyKey(userId: String, key: String) =
             transfers.values.firstOrNull { it.userId == userId && it.idempotencyKey == key }
 
-        override fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?) =
+        override fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?, sentWithin: OpenEndRange<Instant>?) =
             throw UnsupportedOperationException("접수 테스트에서는 쓰지 않는다")
 
-        override fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String): Boolean = throw UnsupportedOperationException()
+        override fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String, sentWithin: OpenEndRange<Instant>?): Boolean = throw UnsupportedOperationException()
         override fun findSendingBefore(cutoff: Instant, limit: Int): List<Transfer> = throw UnsupportedOperationException()
         override fun findUnknownForInquiry(maxAttempts: Int, sendingBefore: Instant, limit: Int): List<Transfer> = throw UnsupportedOperationException()
         override fun recordInquiryAttempt(id: UUID, at: Instant): Boolean = throw UnsupportedOperationException()

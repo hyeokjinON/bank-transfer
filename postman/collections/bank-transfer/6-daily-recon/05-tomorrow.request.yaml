@@ -1,0 +1,20 @@
+$kind: http-request
+name: 6-5 내일 날짜 → 400 RECON_DATE_NOT_CLOSED
+method: POST
+url: '{{baseUrl}}/admin/reconciliations?date={{tomorrow}}'
+order: 5000
+description: |-
+  마감되지 않은 날(오늘 이후, KST)은 400 RECON_DATE_NOT_CLOSED. 내일은 실행 구성 6(allow-today=true)이어도 거부되므로 언제나 안전하다.
+  오늘은 기본 구성이면 같은 400, 실행 구성 6 이면 실행된다 — 오늘 대사는 이중 지급 위험이 있어 손 확인에서만 (OPERATION §9-2).
+scripts:
+  - type: beforeRequest
+    language: text/javascript
+    code: |-
+      pm.collectionVariables.set("tomorrow", new Date(Date.now() + 33 * 3600 * 1000).toISOString().slice(0, 10));   // KST 내일
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("400 RECON_DATE_NOT_CLOSED (지난 날만)", () => {
+        pm.response.to.have.status(400);
+        pm.expect(pm.response.json().code).to.eql("RECON_DATE_NOT_CLOSED");
+      });

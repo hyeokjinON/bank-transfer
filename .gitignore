@@ -26,6 +26,7 @@ bin/
 .DS_Store
 *.log
 .env
+bank-files/
 
 ### Postman 앱 로컬 설정 (개인 작업 공간 id) — 공유할 컬렉션은 postman/collections/ 에 커밋 ###
 .postman/

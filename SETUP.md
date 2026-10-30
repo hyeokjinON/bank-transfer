@@ -23,7 +23,7 @@ cd bank-transfer
 
 ### 2-2. 빌드 · 테스트
 ```bash
-./gradlew build      # 첫 실행은 의존성 다운로드로 몇 분 걸린다. 테스트 240개 통과해야 정상
+./gradlew build      # 첫 실행은 의존성 다운로드로 몇 분 걸린다. 테스트 370개 통과해야 정상
 ```
 테스트는 Testcontainers 로 MySQL · Kafka · Redis 를 띄우므로 Docker Desktop 이 켜져 있어야 한다 (설치는 2-4).
 
@@ -53,6 +53,25 @@ cd bank-transfer
 - 실행은 [OPERATION §8](OPERATION.md#8-부하-측정-p4-2-k6).
 - Windows: `load/run.sh` 는 Git Bash 로 실행한다 (PowerShell 의 `bash` 는 WSL 실행기다). Git Bash 의 경로 변환을 막는 `MSYS_NO_PATHCONV=1` 은 스크립트가 알아서 설정한다.
 
+### 2-6. 텔레그램 알림 (선택, P5-1)
+없어도 된다 — 토큰 · chat id 가 없으면 알림은 로그(`ALERT` 로거)로만 남는다. 휴대폰으로 받고 싶을 때만 한다.
+**토큰은 비밀번호다. 저장소 · `.run/*.xml` · `application.yml` · 셸 기록 · 채팅 · 스크린샷 어디에도 남기지 않는다.**
+
+1. 텔레그램에서 `@BotFather` 와 대화 → `/newbot` → 이름 · 사용자명(`…_bot`)을 정하면 토큰(`123456789:AA…`)을 준다. 이 화면 밖으로 옮기지 않는다.
+2. 만든 봇과 대화를 열고 아무 메시지(`hi`)를 보낸다 — 봇은 먼저 말을 걸 수 없다.
+3. chat id 찾기 (Git Bash, 토큰이 셸 기록에 남지 않게 `read -s` 로 받는다):
+   ```bash
+   read -rs TG_TOKEN && echo   # 토큰을 붙여 넣고 Enter (화면에 보이지 않는다)
+   curl -s "https://api.telegram.org/bot${TG_TOKEN}/getUpdates" | grep -o '"chat":{"id":[-0-9]*'
+   unset TG_TOKEN
+   ```
+   `"chat":{"id":123456789` 의 숫자가 chat id 다 (비어 있으면 2번을 다시).
+4. Windows **사용자 환경 변수**에 넣는다: 시작 → "계정의 환경 변수 편집" → 새로 만들기 → `ALERT_TELEGRAM_BOT_TOKEN` = 토큰, `ALERT_TELEGRAM_CHAT_ID` = chat id. (파일이 아니라 사용자 프로필에 저장된다. `setx` 는 명령 기록에 토큰이 남으니 쓰지 않는다.)
+5. IntelliJ · 터미널을 다시 열고 API 를 띄운다 → 로그 `alerts go to telegram chat 123456789 (and the log)`. 실행 구성(`.run/*.xml`)의 환경 변수 칸에는 넣지 않는다 — 그 파일은 커밋된다.
+6. 확인: [`http/daily-recon.http`](http/daily-recon.http) 의 2) 대사를 돌리면 휴대폰에 요약이 온다 (API 는 실행 구성 `6. API (대사 손 확인)` 으로 — 오늘 날짜 대사는 그 구성의 `daily-recon.allow-today=true` 일 때만 받는다).
+
+토큰이 새었다면 `@BotFather` → `/revoke` 로 바로 폐기하고 새 토큰으로 4번을 다시 한다. 끄려면 두 환경 변수를 지운다.
+
 ## 3. Windows 에서 알아둘 것
 | 상황 | 해결 |
 |---|---|
@@ -61,6 +80,7 @@ cd bank-transfer
 | 콘솔 한글 깨짐 | 실행 구성·Gradle 태스크에 `-Dstdout.encoding=UTF-8` 이 이미 들어 있다. 직접 실행할 때도 같은 옵션 |
 | `curl` 로 한글 JSON 이 깨짐 | 본문을 파일로 만들고 `--data-binary @req.json` |
 | 포트 3306·6379 사용 중 | `infra/.env` 에서 `MYSQL_PORT=3307` 처럼 변경 |
+| 대사 파일 · 거래 기록이 `apps/mock-bank/bank-files` 처럼 모듈 폴더에 생김 | Gradle 태스크가 아닌 다른 방법(직접 `java -jar` 등)으로 띄웠다. 저장소 루트에서 실행하거나 `--bank-files=` / `--daily-recon.file-dir=` 로 같은 경로를 준다 |
 
 ## 4. 다 됐는지 확인
 - [ ] `./gradlew build` 통과

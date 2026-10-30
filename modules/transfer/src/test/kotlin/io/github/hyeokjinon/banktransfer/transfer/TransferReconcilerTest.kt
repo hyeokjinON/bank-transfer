@@ -25,7 +25,7 @@ class TransferReconcilerTest {
         override fun findByIdempotencyKey(userId: String, key: String) =
             transfers.values.firstOrNull { it.userId == userId && it.idempotencyKey == key }
 
-        override fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?): Boolean {
+        override fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?, sentWithin: OpenEndRange<Instant>?): Boolean {
             require(to != FAILED) { "FAILED 는 fail() 로만 간다 (환불을 빠뜨리지 않게)" }
             val current = transfers[id] ?: return false
             if (current.status != from) return false
@@ -43,7 +43,7 @@ class TransferReconcilerTest {
         val failThrowsFor = mutableSetOf<UUID>()
         val republishThrowsFor = mutableSetOf<UUID>()
 
-        override fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String): Boolean {
+        override fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String, sentWithin: OpenEndRange<Instant>?): Boolean {
             if (id in failThrowsFor) throw IllegalStateException("corrupted row $id")
             val current = transfers[id] ?: return false
             if (current.status != from) return false

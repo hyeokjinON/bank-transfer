@@ -49,13 +49,14 @@ data class TransferResponse(
 
 @RestController
 @RequestMapping("/api/v1/transfers")
-class TransferController(private val service: TransferService) {
+class TransferController(private val service: TransferService, private val maintenance: BankMaintenanceGuard) {
 
     /**
      * 접수만 하고 바로 돌려준다(202 Accepted). 은행 처리는 P3-2 의 Kafka 컨슈머가 한다.
      * 같은 Idempotency-Key 로 같은 내용을 다시 보내면 새로 만들지 않고 기존 건을 200 으로 돌려준다.
      * 헤더가 없으면 빈 문자열로 넘겨 도메인이 IDEMPOTENCY_KEY_REQUIRED 로 거절하게 한다 (규칙은 한 곳에).
      * 출금은 요청자(X-User-Id)의 지갑에서 빠진다. 잔고가 모자라면 422 INSUFFICIENT_BALANCE (P4-1).
+     * 은행 점검 시간에는 받지 않는다 — 503 BANK_MAINTENANCE + Retry-After (P5-1).
      */
     @PostMapping
     fun request(
@@ -63,6 +64,7 @@ class TransferController(private val service: TransferService) {
         @RequestHeader("Idempotency-Key", required = false) idempotencyKey: String?,
         @Valid @RequestBody body: TransferRequestBody,
     ): ResponseEntity<TransferResponse> {
+        maintenance.ensureOpen()
         val result = service.request(
             RequestTransfer(user.id, idempotencyKey.orEmpty(), body.bankCode, body.accountNo, body.amount, body.memo),
         )

@@ -1,6 +1,6 @@
 # ARCHITECTURE — 구조와 흐름
 
-> 기준: P4-2 잔고 차감 락 전략 완료 (2026-10-28, PR #13 머지). P4-1 원화 잔고 완료 (2026-10-26, PR #11 머지). P3 완료(P3-3b PR #9 머지). P3 · P4 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p4)에 적는다.
+> 기준: P5-1 일마감 대사 · 점검 시간 · 알림 (2026-10-29, 리뷰 중). P4-2 잔고 차감 락 전략 완료 (2026-10-28, PR #13 머지). P4-1 원화 잔고 완료 (2026-10-26, PR #11 머지). P3 완료(P3-3b PR #9 머지). P3 ~ P5 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p5)에 적는다.
 
 ## 1. 한눈에 보기
 
@@ -24,6 +24,7 @@ flowchart LR
         PROC -- "BankTransferPort" --> TADP[BankTransferAdapter]
         REC[TransferReconciler<br/>api/reconcile 스케줄, 10초] -- "TransferStore" --> REPO
         REC -- "BankInquiryPort" --> IADP[BankInquiryAdapter]
+        RECON["일마감 대사 잡<br/>api/dailyrecon, 01~06시"] -- "TransferStore (미확정만 확정)" --> REPO
     end
 
     RELAY -- "transfer.requested" --> KF
@@ -33,6 +34,9 @@ flowchart LR
     TADP --> GW
     IADP --> GW
     GW -- "TCP 고정길이 전문<br/>4B ASCII 길이 + EUC-KR" --> BANK["apps/mock-bank<br/>모의 은행 FEP"]
+    RECON -- "RECON_yyyyMMdd.dat" --> FILES[(bank-files)]
+    BANK -- "00:05 일마감" --> FILES
+    RECON -. "알림" .-> TG[텔레그램 / 로그]
 
     subgraph infra ["infra/ (Docker Compose)"]
         MY[(MySQL 8.4)]
@@ -45,6 +49,7 @@ flowchart LR
 - **포트/어댑터**: 도메인은 인터페이스(포트)만 알고, Netty·DB 를 붙이는 구현(어댑터)은 `apps/api` 에서 조립한다.
 - **사용자 식별**: `X-User-Id` 를 `RequestUserResolver` 한 곳에서 꺼낸다 (인증은 범위 밖, P4-1).
 - **잔고 차감 방식**은 기동 설정 `wallet.debit-strategy` 로 하나를 고른다 (ADR-0009).
+- **은행 점검 시간**(23:50 ~ 00:10 KST)에는 은행을 건드리는 웹 요청이 503 이고 게이트웨이가 송신을 보류한다 — 날짜 경계를 은행 파일과 맞춘다 (ADR-0010).
 
 ## 2. 모듈
 
@@ -93,8 +98,21 @@ apps/api/src/main/kotlin/.../api/
   messaging/OutboxRelay.kt                # 폴링 퍼블리셔 (SKIP LOCKED, 발행 확인 후 published_at)
   messaging/TransferRequestedListener.kt  # transfer.requested 컨슈머 (수동 ack, @RetryableTopic 재시도 토픽 · @DltHandler)
   reconcile/ReconcileConfiguration.kt     # 정리 작업 조립 + 10초 스케줄러 (TransferReconcilerScheduler), transfer.reconcile.* 설정
+  dailyrecon/                             # 일마감 대사 (P5-1, Spring Batch 6)
+    DailyRecon.kt                         #   이름 · 상수 · 설정(daily-recon.*)
+    DailyReconJobConfiguration.kt         #   잡 · 6단계 · 스텝 범위 리더 · 쓰기
+    DailyReconSteps.kt                    #   태스클릿(① ⑤ ⑥) · 파일 리더(②) · 판정 쓰기(③ ④) · 파일 예외
+    ReconRepository.kt                    #   대사 SQL (은행 줄 · 이슈 · 잔고 검증)
+    ReconSummary.kt                       #   요약 · 완료 알림
+    DailyReconLauncher.kt                 #   실행 · 동시 실행 가드(SingleRunGuard) · 실패 알림
+    DailyReconScheduler.kt                #   01 ~ 06시 매시 회차
+  alert/                                  # 알림 (P5-1)
+    Alert.kt                              #   포트 AlertNotifier · 본문(가림 · 20건 · 4,096자)
+    TelegramNotifier.kt · LogNotifier.kt · AlertConfiguration.kt   # 구현 선택: 토큰 · chat id 가 둘 다 있으면 텔레그램, 아니면 로그
+  web/BankMaintenanceGuard.kt             # 점검 시간 503 BANK_MAINTENANCE + Retry-After (P5-1)
+  web/ReconciliationController.kt         # POST /admin/reconciliations (P5-1)
 apps/api/src/main/resources/db/migration/
-  V1__init.sql · V2__transfer_republish.sql · V3__wallet.sql   # V2: republish_count · republished_at (P3-3b), V3: wallet · wallet_ledger · user_id (P4-1)
+  V1__init.sql · V2__transfer_republish.sql · V3__wallet.sql · V4__daily_reconciliation.sql   # V2: republish_count · republished_at (P3-3b), V3: wallet · wallet_ledger · user_id (P4-1), V4: Batch 메타 · bank_statement_line · recon_issue (P5-1)
 modules/account/.../account/
   AccountVerification.kt            # 엔티티, 포트, 예외 (sealed class)
   AccountVerificationService.kt     # 성명조회 → 1원 이체 → 코드 확인, 해시 저장 (InMemory 저장소는 테스트용)
@@ -103,11 +121,15 @@ modules/transfer/.../transfer/
   TransferService.kt                # 접수 규칙(검증 · 사용자 범위 멱등 · 내가 인증한 계좌 · 거래번호 재시도 · 잔고 부족 422), 거래번호 생성기
   TransferProcessor.kt              # 처리 규칙(조건부 SENDING → 은행 호출 → 결과 4분류 기록, 정리 작업과 경합 시 확정 결과 우선)
   TransferReconciler.kt             # 정리 작업(은행에 못 보낸 RECEIVED 재발행 · 포기, 멈춘 SENDING → UNKNOWN, UNKNOWN → 결과조회 → 확정). 은행에 묻기만 한다
-modules/bank-gateway/.../gateway/BankGatewayClient.kt
+  StatementMatching.kt              # 일마감 대사 판정 StatementMatcher(순수 함수) · 확정 StatementSettler (P5-1)
+modules/bank-gateway/.../gateway/BankGatewayClient.kt   # SendGate: 점검 시간에는 보내지 않고 "연결 없음" 과 같은 길 (P5-1)
+modules/bank-gateway/.../gateway/BankMaintenanceWindow.kt   # 점검 시간 순수 객체 (P5-1)
 modules/bank-protocol/.../protocol/
   BankMessage.kt · Header.kt · FixedLength.kt · BankMessageSerializer.kt
+  ReconFile.kt                      # 대사 파일(H · D · T) 형식: 쓰기 · 읽기 · 검증 (P5-1)
   netty/AsciiLengthFieldFrameDecoder.kt · netty/BankCodec.kt
 apps/mock-bank/.../mockbank/MockBankServer.kt
+apps/mock-bank/.../mockbank/BankJournal.kt · MockBankOptions.kt   # 일자별 거래 기록 · 00:05 일마감 · --bank-files / --close-day (P5-1)
 load/                               # k6 부하 측정 (시나리오 · 시드 · 정리 · 검증 · run.sh), docs/perf/ 결과
 ```
 
@@ -152,8 +174,8 @@ sequenceDiagram
 Docker Compose 한 파일로 MySQL 8.4 · Kafka 4.1(KRaft 단일 노드) · Redis 7.4. 리스너는 컨테이너용 `kafka:29092` / PC 용 `localhost:9092` 로 분리, 토픽 자동 생성 끔, 데이터는 이름 있는 볼륨.
 CI `infra-smoke` 잡이 같은 파일을 띄워 `verify.sh` 로 읽기/쓰기를 확인한다. → [ADR-0003](docs/adr/0003-local-infra-docker-compose.md), [infra/README.md](infra/README.md)
 
-## 6. 진행 상황 (P3 · P4)
-- P3-1 접수 ✅ (ADR-0004). P3-2 처리 ✅ (ADR-0005). P3-3a 결과조회 · 정리 작업 ✅ (ADR-0006). P3-3b 재시도 토픽 · DLT · 제한 재발행 ✅ (ADR-0007). P4-1 원화 잔고 ✅ (ADR-0008). P4-2 잔고 차감 락 전략 ✅ (ADR-0009).
+## 6. 진행 상황 (P3 ~ P5)
+- P3-1 접수 ✅ (ADR-0004). P3-2 처리 ✅ (ADR-0005). P3-3a 결과조회 · 정리 작업 ✅ (ADR-0006). P3-3b 재시도 토픽 · DLT · 제한 재발행 ✅ (ADR-0007). P4-1 원화 잔고 ✅ (ADR-0008). P4-2 잔고 차감 락 전략 ✅ (ADR-0009). P5-1 일마감 대사 · 점검 시간 · 알림 🟡 리뷰 중 (ADR-0010).
 
 ### P3-2 처리 흐름
 ```mermaid
@@ -220,7 +242,7 @@ sequenceDiagram
 
 - 정리 작업은 은행에 **다시 보내지 않고 묻기만 한다** (`BankTransferPort` 를 쓰지 않는다). 상태 변경은 모두 조건부라 컨슈머와 겹쳐도 한쪽만 반영된다.
 - 컨슈머가 은행의 확정 결과(완료 · 거절)를 늦게 받으면 `UNKNOWN → COMPLETED/FAILED` 로 기록한다. 이미 반대 결과로 확정돼 있으면 `CONFLICT` 경고만 남긴다.
-- 스케줄러 스레드 2개: 발행기(0.5초)와 정리 작업(10초)이 서로 막지 않는다.
+- 스케줄러 스레드 3개: 발행기(0.5초) · 정리 작업(10초) · 일마감 대사(01 ~ 06시)가 서로 막지 않는다 (P5-1 에서 2 → 3).
 - 근거와 한계: [ADR-0006](docs/adr/0006-inquire-instead-of-resend.md) · 전문 [protocol.md](docs/protocol.md) v0.2
 
 ### P3-3b 재시도 · 재발행 흐름
@@ -287,7 +309,7 @@ sequenceDiagram
     D->>W: INSERT wallet_ledger (REFUND)
 ```
 
-- 잔고는 상태에 따라 움직인다: `RECEIVED` · `SENDING` · `UNKNOWN` = 빠진 채(보류, `GET /wallet` 의 `pending`), `COMPLETED` = 빠진 채(확정), `FAILED` = 복원. `CONFLICT` 는 잔고를 건드리지 않고 경고만 남긴다 (수동 확인, P5 대사).
+- 잔고는 상태에 따라 움직인다: `RECEIVED` · `SENDING` · `UNKNOWN` = 빠진 채(보류, `GET /wallet` 의 `pending`), `COMPLETED` = 빠진 채(확정), `FAILED` = 복원. `CONFLICT` 는 잔고를 건드리지 않고 경고만 남긴다 (수동 확인. 일마감 대사가 다음 날 기록 · 알림, P5-1).
 - 별도 락 없이 조건부 UPDATE 한 문장의 행 락과 `CHECK (balance >= 0)` 으로 음수를 막는다. 출금 INSERT 를 차감보다 먼저 두어 같은 키 경합의 진 쪽이 지갑을 건드리지 않는다.
 - 차감 SQL 은 P4-2 에서 `WalletDebit` 전략으로 옮겼다 (아래).
 - 근거와 한계: [ADR-0008](docs/adr/0008-wallet-debit-on-intake-refund-on-failure.md)
@@ -312,6 +334,29 @@ flowchart TB
 - Redis 락은 같은 사용자 요청을 DB 앞에서 줄 세울 뿐이고 정확성은 DB(조건부 UPDATE + `CHECK`)가 지킨다.
 - 네 전략의 비용 비교: [docs/perf/p4-2-lock-comparison.md](docs/perf/p4-2-lock-comparison.md). 근거: [ADR-0009](docs/adr/0009-wallet-debit-strategies-and-lock-comparison.md)
 
+### P5-1 일마감 대사 흐름
+```mermaid
+flowchart TB
+    MB["모의 은행: 처리할 때마다 journal/yyyyMMdd.log"] -- "00:05 (KST)" --> F["recon/RECON_D.dat<br/>H · D… · T"]
+    S["스케줄 01~06시 매시 / POST /admin/reconciliations"] --> L["DailyReconLauncher<br/>날짜마다 잡 인스턴스 하나"]
+    L --> V["① validateFile<br/>없으면 FILE_NOT_READY · 틀리면 FILE_INVALID"]
+    F --> V
+    V --> LD["② loadStatement (500)<br/>bank_statement_line"]
+    LD --> M3["③ matchTransfers (100, READ COMMITTED)<br/>sending_at = D 인 출금"]
+    M3 --> M4["④ matchBankLines (100, READ COMMITTED)<br/>파일 D 의 1원인증(V · 1원) 아닌 줄 중 ③ 밖"]
+    M4 --> C5["⑤ checkLedger<br/>잔고 ≠ 원장 합"]
+    C5 --> R6["⑥ report → AlertNotifier"]
+    M3 -- "UNKNOWN · SENDING 만" --> X["COMPLETED(0000) / fail(E002) + 환불"]
+    M3 -- "그 밖 어긋남" --> I[("recon_issue")]
+    M4 --> I
+    C5 --> I
+```
+
+- 판정은 `StatementMatcher`(순수 함수), 확정은 `StatementSettler`(기존 조건부 전이 · `fail`). 조건부 전이가 0건이면 다시 읽어 판정(최대 3회) — 그래서 ③ ④ 는 `READ COMMITTED` 다.
+- ③ 의 확정 UPDATE 는 "`sending_at` 이 아직 D일 안" 도 조건으로 건다 — 읽은 뒤 다시 보내진 출금을 환불하지 않게(이중 지급). 그런 건은 `RESENT_LATER`(확정 · 이슈 없음, 그 날짜의 대사가 맡는다).
+- 실패하면 멈춘 단계 · 청크부터 다시 한다 (결과 같음, 이중 환불 없음). 날짜마다 잡 인스턴스 하나라 끝난 날짜는 거부하고 동시 실행은 하나만 돈다 (`SingleRunGuard` 가 Spring Batch 6 시작 경로의 틈을 막는다).
+- 점검 시간(23:50 ~ 00:10) 덕분에 "D일 송신" = "파일 D" 다. 근거: [ADR-0010](docs/adr/0010-daily-reconciliation.md)
+
 ## 7. 관련 문서
 - 데이터베이스 모델 · 테이블 정의: [docs/database.md](docs/database.md)
 - 전문 규격: [docs/protocol.md](docs/protocol.md)
@@ -328,3 +373,4 @@ flowchart TB
 | [0007](docs/adr/0007-retry-topic-and-bounded-republish.md) | 은행에 못 보낸 출금은 논블로킹 재시도 토픽 + 은행 시도 흔적 기준의 제한 재발행, 포기는 FAILED E001 |
 | [0008](docs/adr/0008-wallet-debit-on-intake-refund-on-failure.md) | 원화 잔고는 접수 트랜잭션에서 조건부 UPDATE 로 차감, 실패 확정 시 같은 트랜잭션에서 환불, 원장은 append-only |
 | [0009](docs/adr/0009-wallet-debit-strategies-and-lock-comparison.md) | 잔고 차감은 전략 인터페이스로 바꿔 끼우고(조건부 · 비관적 · 낙관적 · Redis), Redis 락은 DB 앞의 줄 세우기로만 |
+| [0010](docs/adr/0010-daily-reconciliation.md) | 일마감 대사는 은행 대사 파일과 맞추고 결과를 모르는 출금만 자동 확정, 점검 시간으로 날짜 경계, API 앱 안의 Spring Batch |

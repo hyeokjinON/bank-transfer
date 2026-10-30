@@ -1,5 +1,9 @@
 package io.github.hyeokjinon.banktransfer.api.messaging
 
+import io.github.hyeokjinon.banktransfer.api.alert.Alert
+import io.github.hyeokjinon.banktransfer.api.alert.AlertLevel
+import io.github.hyeokjinon.banktransfer.api.alert.AlertNotifier
+import io.github.hyeokjinon.banktransfer.api.alert.notifySafely
 import io.github.hyeokjinon.banktransfer.transfer.ProcessResult
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.slf4j.LoggerFactory
@@ -28,8 +32,13 @@ class InvalidTransferKeyException : RuntimeException("message key is not a trans
  * 원래 토픽의 같은 파티션 뒤 메시지는 기다리지 않는다. 간격 5s → 30s → 60s 뒤에도 안 되면 DLT 로 가고,
  * 이체는 RECEIVED 로 남아 정리 작업의 재발행이 이어받는다. 넘긴 레코드의 오프셋은 프레임워크가 커밋한다(commitRecovered).
  * 그룹 · 동시성은 application.yml 한 곳에서 정한다 (groupId 는 그 값을 가리킬 뿐이다 — 재시도 · DLT 그룹이 접미사로 나뉘게).
+ * 사람이 봐야 하는 두 경우(CONFLICT, 은행 장애가 아닌 이유의 DLT)는 로그와 함께 WARN 알림을 보낸다 (P5-1). 알림 실패는 처리 결과를 바꾸지 않는다.
  */
-class TransferRequestedListener(private val process: (UUID) -> ProcessResult) {
+class TransferRequestedListener(
+    /** 사람이 봐야 하는 경고를 알린다 (P5-1). 기본은 아무것도 하지 않는다 — 테스트 · 조립 전 기본값. 앞에 두어 `TransferRequestedListener { … }` 가 그대로 컴파일된다. */
+    private val alerts: AlertNotifier = AlertNotifier { },
+    private val process: (UUID) -> ProcessResult,
+) {
     private val log = LoggerFactory.getLogger(javaClass)
 
     @RetryableTopic(
@@ -56,6 +65,12 @@ class TransferRequestedListener(private val process: (UUID) -> ProcessResult) {
             // 재시도로 풀 수 없다: 은행이 확정한 결과가 이미 기록된 최종 상태와 다르다. 오프셋은 넘기고 사람이 확인하게 경고만 남긴다.
             // 잔고도 자동으로 고치지 않는다 (P4-1): 예컨대 FAILED 로 확정 · 환불한 뒤 은행이 완료라고 답했다면 환불된 돈이 실제로 나간 상태다 → 수동 확인 · P5 대사
             log.warn("transfer {} conflict: bank result differs from the recorded final status — wallet balance left as is, needs manual check", transferId)
+            alerts.notifySafely(
+                Alert(
+                    AlertLevel.WARN, "출금 확정과 은행 결과가 어긋남 (CONFLICT)",
+                    listOf("transferId=$transferId", "잔고는 그대로 — 수동 확인, 일마감 대사가 다음 날 다시 맞춘다"),
+                ),
+            )
         }
         log.info("transfer {} processed: {} ({} partition {}, offset {})", transferId, result, record.topic(), record.partition(), record.offset())
         ack.acknowledge()
@@ -67,7 +82,7 @@ class TransferRequestedListener(private val process: (UUID) -> ProcessResult) {
      * - 은행 연결 없음: 은행에 보내려 한 흔적(sending_at)이 있어 5분 뒤 정리 작업이 아웃박스로 다시 발행한다 → WARN
      * - 잘못된 key: 이체가 없다. 보낸 쪽 버그 → WARN
      * - 그 밖(DB 장애 등): 재발행 대상이 아니다 (sending_at 이 NULL 이면 정리 작업이 건드리지 않는다) → ERROR, 사람이 확인
-     * 한 줄로만 남긴다: 예외 헤더는 줄바꿈이 섞일 수 있어 정리하고 길이를 자른다. 메시지 값 · 계좌번호는 남기지 않는다. 알림 채널은 P5.
+     * 한 줄로만 남긴다: 예외 헤더는 줄바꿈이 섞일 수 있어 정리하고 길이를 자른다. 메시지 값 · 계좌번호는 남기지 않는다. 은행 장애가 아닌 이유는 WARN 알림도 보낸다 (P5-1).
      */
     @DltHandler
     fun onDlt(record: ConsumerRecord<String, String>, ack: Acknowledgment) {
@@ -83,11 +98,20 @@ class TransferRequestedListener(private val process: (UUID) -> ProcessResult) {
                 "message moved to DLT: key is not a transfer id (UUID), no transfer is affected. key={} original={}",
                 logSafe(record.key(), KEY_LOG_MAX), original,
             )
-            DltKind.OTHER -> log.error(
-                "transfer {} moved to DLT and is not retried automatically - check transfer status. " +
-                    "republish covers only bank-not-connected: a RECEIVED transfer with sending_at NULL is skipped. exception={} cause={} original={}",
-                record.key(), causeFqcn, logSafe(rootMessage(record.headerText(KafkaHeaders.EXCEPTION_MESSAGE)), MESSAGE_LOG_MAX), original,
-            )
+            DltKind.OTHER -> {
+                log.error(
+                    "transfer {} moved to DLT and is not retried automatically - check transfer status. " +
+                        "republish covers only bank-not-connected: a RECEIVED transfer with sending_at NULL is skipped. exception={} cause={} original={}",
+                    record.key(), causeFqcn, logSafe(rootMessage(record.headerText(KafkaHeaders.EXCEPTION_MESSAGE)), MESSAGE_LOG_MAX), original,
+                )
+                // 자동으로 다시 하지 않는 유일한 DLT 경우라 사람에게 알린다 (P5-1). 메시지 값 · 계좌번호는 싣지 않는다
+                alerts.notifySafely(
+                    Alert(
+                        AlertLevel.WARN, "DLT: 자동으로 다시 처리하지 않는 출금",
+                        listOf("transferId=${logSafe(record.key(), KEY_LOG_MAX)}", "exception=$causeFqcn", "출금 상태를 확인하고 손으로 다시 처리한다 (OPERATION §6)"),
+                    ),
+                )
+            }
         }
         ack.acknowledge()
     }

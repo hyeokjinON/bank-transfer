@@ -16,6 +16,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Duration
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
@@ -419,6 +420,52 @@ class JpaTransferStoreTest : ApiIntegrationTest() {
             assertEquals(balanceBefore, wallets.balanceOf(user))                   // 잔고 += 도 같이 롤백됐다
         } finally {
             // 이 RECEIVED 는 일부러 깨진 상태(가짜 REFUND)라 다시 처리되면 안 된다: 발행된 것으로 표시해 발행기 · 정리 작업이 건드리지 않게
+            jdbc.update("UPDATE outbox_event SET published_at = NOW(6) WHERE aggregate_id = ?", t.id.toString())
+        }
+    }
+
+    @Test
+    fun `fail · transition - sentWithin 을 주면 sending_at 이 그 범위 안일 때만 바뀐다 (같은 UPDATE 의 조건, P5-1)`() {
+        val before = wallets.balanceOf(user)
+        // 지금 보낸 것으로 — 오래된 SENDING · UNKNOWN 이면 공유 컨텍스트의 정리 작업이 먼저 집어 간다. DB 정밀도(마이크로초)로 맞춰 경계를 정확히 본다
+        val sentAt = Instant.now().truncatedTo(ChronoUnit.MICROS)
+        val day = sentAt.minus(Duration.ofHours(1))..<sentAt.plus(Duration.ofHours(1))
+        val nextDay = day.endExclusive..<day.endExclusive.plus(Duration.ofDays(1))
+        fun sent() = newTransfer().also {
+            store.saveWithEvent(it, requested(it))
+            store.transition(it.id, TransferStatus.RECEIVED, TransferStatus.SENDING, sentAt)
+        }
+        val toFail = sent()
+        val toComplete = sent().also { store.transition(it.id, TransferStatus.SENDING, TransferStatus.UNKNOWN, sentAt) }
+
+        // 범위 밖 = "다시 보내져 sending_at 이 다른 날" — 상태는 맞아도 0건, 환불 없음
+        assertFalse(store.fail(toFail.id, TransferStatus.SENDING, Instant.now(), "E002", sentWithin = nextDay))
+        assertFalse(store.transition(toComplete.id, TransferStatus.UNKNOWN, TransferStatus.COMPLETED, Instant.now(), "0000", sentWithin = nextDay))
+        assertEquals(TransferStatus.SENDING, store.findById(toFail.id)!!.status)
+        assertEquals(TransferStatus.UNKNOWN, store.findById(toComplete.id)!!.status)
+        assertEquals(listOf("WITHDRAW"), ledgerTypes(toFail.id))
+
+        // 범위 안 — 그대로 확정 (경계: 시작 포함)
+        assertTrue(store.fail(toFail.id, TransferStatus.SENDING, Instant.now(), "E002", sentWithin = day))
+        assertTrue(store.transition(toComplete.id, TransferStatus.UNKNOWN, TransferStatus.COMPLETED, Instant.now(), "0000", sentWithin = sentAt..<day.endExclusive))
+        assertEquals(TransferStatus.FAILED, store.findById(toFail.id)!!.status)
+        assertEquals(TransferStatus.COMPLETED, store.findById(toComplete.id)!!.status)
+        assertEquals(listOf("WITHDRAW", "REFUND"), ledgerTypes(toFail.id))
+        assertEquals(before - 50_000, wallets.balanceOf(user))   // toComplete 만 빠져 있다
+    }
+
+    @Test
+    fun `transition - SENDING 으로 가는 전이에는 sentWithin 을 쓸 수 없다 (sending_at 을 바꾸는 쪽이다)`() {
+        val t = newTransfer().also { store.saveWithEvent(it, requested(it)) }
+        val any = Instant.EPOCH..<Instant.now()
+
+        assertFailsWith<IllegalArgumentException> {
+            store.transition(t.id, TransferStatus.RECEIVED, TransferStatus.SENDING, Instant.now(), sentWithin = any)
+        }
+        try {
+            assertEquals(TransferStatus.RECEIVED, store.findById(t.id)!!.status)
+        } finally {
+            // 이 RECEIVED 는 발행된 것으로 표시한다 — 다른 테스트의 발행기가 은행으로 보내지 않게
             jdbc.update("UPDATE outbox_event SET published_at = NOW(6) WHERE aggregate_id = ?", t.id.toString())
         }
     }

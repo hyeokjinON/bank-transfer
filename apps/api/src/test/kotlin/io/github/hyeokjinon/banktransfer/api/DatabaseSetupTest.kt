@@ -1,8 +1,12 @@
 package io.github.hyeokjinon.banktransfer.api
 
 import io.github.hyeokjinon.banktransfer.api.support.ApiIntegrationTest
+import org.springframework.batch.core.job.parameters.JobParametersBuilder
+import org.springframework.batch.core.repository.JobRepository
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.jdbc.core.JdbcTemplate
+import java.time.LocalDate
+import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -81,5 +85,45 @@ class DatabaseSetupTest : ApiIntegrationTest() {
             )
             assertEquals("ascii_bin", collation, "$table.user_id")
         }
+    }
+
+    @Autowired
+    private lateinit var jobRepository: JobRepository
+
+    @Test
+    fun `V4 가 Spring Batch 메타 표 · bank_statement_line · recon_issue 를 만들었다`() {
+        val tables = jdbc.queryForList(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()",
+            String::class.java,
+        ).toSet()
+        val expected = setOf(
+            "BATCH_JOB_INSTANCE", "BATCH_JOB_EXECUTION", "BATCH_JOB_EXECUTION_PARAMS", "BATCH_STEP_EXECUTION",
+            "BATCH_STEP_EXECUTION_CONTEXT", "BATCH_JOB_EXECUTION_CONTEXT", "BATCH_STEP_EXECUTION_SEQ", "BATCH_JOB_EXECUTION_SEQ",
+            "BATCH_JOB_INSTANCE_SEQ", "bank_statement_line", "recon_issue",
+        )
+        assertEquals(expected, tables.intersect(expected))
+
+        fun indexColumns(table: String, index: String) = jdbc.queryForList(
+            "SELECT column_name FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? ORDER BY seq_in_index",
+            String::class.java, table, index,
+        )
+        assertEquals(listOf("bank_date", "line_no"), indexColumns("bank_statement_line", "PRIMARY"))
+        assertEquals(listOf("recon_date", "type", "ref_key"), indexColumns("recon_issue", "uk_recon_issue"))
+        for (table in listOf("bank_statement_line", "recon_issue")) {
+            val collation = jdbc.queryForObject(
+                "SELECT collation_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = 'reference'",
+                String::class.java, table,
+            )
+            assertEquals("ascii_bin", collation, "$table.reference")
+        }
+    }
+
+    @Test
+    fun `잡 저장소는 JDBC 다 - 잡 인스턴스가 BATCH_JOB_INSTANCE 에 남는다 (starter-batch 만이면 메모리 저장소)`() {
+        val name = "p5-1-probe-${UUID.randomUUID()}"
+
+        jobRepository.createJobInstance(name, JobParametersBuilder().addLocalDate("reconDate", LocalDate.of(2100, 1, 1)).toJobParameters())
+
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM BATCH_JOB_INSTANCE WHERE JOB_NAME = ?", Int::class.java, name))
     }
 }

@@ -1,8 +1,8 @@
 # 데이터베이스 — 모델 정의와 구조
 
-> 기준: P4-2 (Flyway `V1` · `V2` · `V3` 적용, 스키마 변경 없음). 1원인증 · 이체 · 아웃박스 · 지갑 · 원장 테이블이 MySQL 에 있다.
+> 기준: P5-1 (Flyway `V1` ~ `V4` 적용). 1원인증 · 이체 · 아웃박스 · 지갑 · 원장 · 대사(은행 줄 · 이슈) 테이블과 Spring Batch 메타 표가 MySQL 에 있다.
 > 이 문서가 스키마의 기준이다. 마이그레이션을 추가할 때 이 문서도 같은 PR 에서 고친다.
-> 설계 배경: [P3 설계 문서](superpowers/specs/2026-10-19-p3-transfer-design.md) §2~§6 · [P4-1 설계](superpowers/specs/2026-10-26-p4-1-wallet-balance-design.md) · [P4-2 설계](superpowers/specs/2026-10-27-p4-2-lock-comparison-design.md)
+> 설계 배경: [P3 설계 문서](superpowers/specs/2026-10-19-p3-transfer-design.md) §2~§6 · [P4-1 설계](superpowers/specs/2026-10-26-p4-1-wallet-balance-design.md) · [P4-2 설계](superpowers/specs/2026-10-27-p4-2-lock-comparison-design.md) · [P5-1 설계](superpowers/specs/2026-10-29-p5-1-daily-reconciliation-design.md)
 
 ## 1. 개요
 
@@ -29,6 +29,8 @@
 | Hibernate | `spring.jpa.properties.hibernate.jdbc.time_zone` · `hibernate.type.preferred_instant_jdbc_type` | `Asia/Seoul` + `hibernate.type.preferred_instant_jdbc_type: TIMESTAMP` |
 | 도메인 코드 | `Instant` + 주입한 `Clock` | 시간대를 모른다 (테스트에서 시간 고정) |
 | JVM 기본 시간대 | 건드리지 않는다 (`TimeZone.setDefault` 금지) | 서버 OS 설정에 따라 결과가 바뀌지 않게 |
+
+**예외**: Spring Batch 메타 표(`BATCH_*`)의 시각은 Spring Batch 가 `LocalDateTime.now()` 로 쓴다 = JVM 기본 시간대. `TimeZone.setDefault` 를 쓰지 않으므로 바꾸지 않는다 — 대사 결과의 기준은 업무 표(`recon_issue` 등, KST)다.
 
 `forceConnectionTimeZoneToSession=true` + `Asia/Seoul` 은 MySQL 의 시간대 테이블이 있어야 동작한다. 공식 이미지와 RDS 에는 들어 있고, 직접 설치한 MySQL 은 `mysql_tzinfo_to_sql` 로 채워야 한다.
 
@@ -84,16 +86,39 @@ erDiagram
         BIGINT balance_after
         CHAR36 transfer_id "NULL = 충전"
     }
+    bank_statement_line {
+        DATE bank_date PK "파일의 처리일 (KST)"
+        INT line_no PK "물리 줄 번호 (헤더 = 1)"
+        CHAR20 reference "IDX"
+        VARCHAR bank_code
+        VARCHAR account_no
+        BIGINT amount
+        DATETIME processed_at
+    }
+    recon_issue {
+        BIGINT id PK
+        DATE recon_date
+        VARCHAR type "AUTO_COMPLETED/AUTO_FAILED/PAID_TWICE/..."
+        CHAR20 reference "NULL = 지갑 이슈"
+        CHAR36 transfer_id
+        VARCHAR36 user_id
+        VARCHAR ref_key "UK(recon_date, type, ref_key)"
+        DATETIME resolved_at "NULL = 미처리"
+    }
     account_verification ||..o{ transfer : "(user_id, bank_code, account_no) 가 VERIFIED 여야 접수"
     transfer ||..|{ outbox_event : "aggregate_id = transfer.id"
     wallet ||..o{ wallet_ledger : "user_id"
     transfer ||..o{ wallet_ledger : "transfer_id (WITHDRAW 1 · REFUND 0..1)"
+    recon_issue }o..o| transfer : "transfer_id"
+    recon_issue }o..o| wallet : "user_id (지갑 이슈)"
+    bank_statement_line }o..o{ transfer : "reference (거래번호)"
 ```
 
 점선 관계는 **논리적 관계**이고 **외래키(FK)를 걸지 않는다**.
 - `account_verification` 과 `transfer` 는 다른 모듈(account / transfer)의 데이터다. P8 에서 서비스를 나누면 DB 도 나뉠 수 있으므로 모듈 경계를 넘는 FK 를 만들지 않는다 ([ADR-0001](adr/0001-modular-monolith-ports.md)). 검증은 코드(`VerifiedAccounts` 포트)가 한다.
 - `outbox_event` 는 여러 종류의 집합(aggregate)을 담을 수 있는 범용 테이블이라 특정 테이블에 FK 를 걸지 않는다.
-- `wallet_ledger` 는 append-only 기록이라 이체 행 삭제 · 보존 정책(P5)과 묶지 않는다. `wallet` 도 마찬가지로 FK 없이 `user_id` 로만 잇는다.
+- `wallet_ledger` 는 append-only 기록이라 이체 행 삭제 · 보존 정책(P5-2)과 묶지 않는다. `wallet` 도 마찬가지로 FK 없이 `user_id` 로만 잇는다.
+- `bank_statement_line` · `recon_issue` 도 FK 없이 거래번호(`reference`) · `transfer_id` · `user_id` 로만 잇는다 — 은행 쪽 기록은 우리에게 없는 거래번호를 담을 수 있고, 이슈는 이체 행과 수명이 다르다.
 
 ## 4. 테이블 정의
 
@@ -129,7 +154,7 @@ erDiagram
 | `amount` | `BIGINT` | N | 금액, 원 단위. 1 ~ 10,000,000 |
 | `memo` | `VARCHAR(20)` | N | 적요 (EUC-KR 20바이트 이내) |
 | `status` | `VARCHAR(10)` | N | `RECEIVED` · `SENDING` · `COMPLETED` · `FAILED` · `UNKNOWN` |
-| `bank_response_code` | `VARCHAR(4)` | Y | 은행 응답코드 (`0000`, `1001` …). `E001` 은 은행 코드가 아니라 자체 코드: 은행에 보내지 못하고 포기(`RECEIVED → FAILED`, 돈은 움직이지 않음) |
+| `bank_response_code` | `VARCHAR(4)` | Y | 은행 응답코드 (`0000`, `1001` …). `E001` · `E002` 는 은행 코드가 아니라 자체 코드: `E001` = 은행에 보내지 못하고 포기(`RECEIVED → FAILED`, 돈은 움직이지 않음), `E002` = 일마감 대사로 은행 미처리 확정(`UNKNOWN`/`SENDING → FAILED`, 돈은 움직이지 않았고 환불됨, P5-1). `E001` 과 구분한다. 일마감 대사의 자동 완료는 결과조회 확정과 같은 `0000` |
 | `sending_at` | `DATETIME(6)` | Y | `SENDING` 으로 바뀐 시각. 멈춘 건 탐지 기준. 미전송으로 `RECEIVED` 에 되돌려도 남으므로 대상은 `status = SENDING` 과 함께 고른다 |
 | `inquiry_attempts` | `INT` | N | 결과조회에도 답이 없던 횟수 (정리 작업이 10에서 멈춘다), 기본 0 |
 | `republish_count` | `INT` | N | 정리 작업이 아웃박스로 다시 발행한 횟수 (3에서 멈추고 FAILED E001), 기본 0. V2 (P3-3b) |
@@ -183,7 +208,61 @@ erDiagram
 - `uk_ledger_transfer_type (transfer_id, type)` — 같은 이체에 출금 · 환불이 두 번 기록될 수 없다 (이중 환불 2차 방어, NULL 은 여러 개 허용)
 - `idx_ledger_user (user_id, id)` — 사용자별 원장 · 합계
 
-수정 · 삭제하지 않는다. 불일치를 찾는 쿼리는 §9, 보정 방법은 P5 대사에서 정한다.
+수정 · 삭제하지 않는다. 불일치를 찾는 쿼리는 §9. 일마감 대사(P5-1)가 매일 "잔고 ≠ 원장 합" 을 `BALANCE_LEDGER_MISMATCH` 이슈로 남기고(§4-8), 보정은 원장을 고치지 않고 원인을 찾아 사람이 한다.
+
+### 4-6. Spring Batch 메타 표 (P5-1)
+일마감 대사 잡의 실행 기록을 Spring Batch 6 의 JDBC 잡 저장소가 담는다. 날짜마다 잡 인스턴스 하나, 실행마다 한 줄이다.
+
+| 표 | 역할 |
+|---|---|
+| `BATCH_JOB_INSTANCE` | 잡 이름 + 식별 파라미터 해시 `JOB_KEY` **유니크** = 날짜마다 인스턴스 하나. 처음 시작 경합의 진 쪽이 여기서 `DuplicateKeyException` |
+| `BATCH_JOB_EXECUTION` | 실행마다 한 줄 (`STATUS` · `EXIT_CODE` · 시작 · 끝). 실패한 날짜를 다시 돌리면 새 실행이 생긴다 |
+| `BATCH_JOB_EXECUTION_PARAMS` | 파라미터 `reconDate` |
+| `BATCH_STEP_EXECUTION` | 단계마다 한 줄 (읽기 · 쓰기 · 커밋 · 롤백 수) |
+| `BATCH_JOB_EXECUTION_CONTEXT` · `BATCH_STEP_EXECUTION_CONTEXT` | 재시작 지점, ③ ④ 의 판정별 건수 `verdict.*` |
+| `BATCH_JOB_INSTANCE_SEQ` · `BATCH_JOB_EXECUTION_SEQ` · `BATCH_STEP_EXECUTION_SEQ` | id 시퀀스 3개 (표 + 초기 행) |
+
+V4 가 `spring-batch-core` 6.0.5 의 `schema-mysql.sql` 을 그대로 만든다(`spring.batch.jdbc.initialize-schema=never`). 직접 고치지 않는다 (Spring Batch 가 쓴다). 시각은 JVM 기본 시간대다 (§2 예외).
+
+### 4-7. `bank_statement_line` — 은행 대사 파일의 상세 줄 (P5-1)
+| 컬럼 | 타입 | NULL | 설명 |
+|---|---|---|---|
+| `bank_date` | `DATE` | N | PK. 파일의 처리일 (KST) |
+| `line_no` | `INT` | N | PK. 파일 안의 **물리 줄 번호** (헤더 = 1) — 운영자가 파일에서 바로 찾는다 |
+| `reference` | `CHAR(20)` ascii_bin | N | 이용기관 거래번호 (`T…` 출금, `V…` 1원인증) |
+| `bank_code` | `VARCHAR(3)` | N | 은행코드 |
+| `account_no` | `VARCHAR(16)` | N | 계좌번호 |
+| `amount` | `BIGINT` | N | 금액 (원) |
+| `processed_at` | `DATETIME(6)` | N | 은행 처리 시각 (KST) |
+| `loaded_at` | `DATETIME(6)` | N | 적재 시각 |
+
+인덱스:
+- PK `(bank_date, line_no)` — 같은 파일을 다시 넣으면 중복 INSERT 가 무시된다 (`ON DUPLICATE KEY UPDATE` no-op). 은행 파일은 한 번 보내면 바뀌지 않는다는 가정이다 ([ADR-0010](adr/0010-daily-reconciliation.md)).
+- `idx_statement_reference (reference)` — 거래번호로 **모든 날짜의** 줄을 찾는다 (이중 지급 · 늦은 처리).
+
+append-only. 대사가 읽기만 하고 고치지 않는다.
+
+### 4-8. `recon_issue` — 대사가 찾은 어긋남 · 자동 확정 기록 (P5-1)
+| 컬럼 | 타입 | NULL | 설명 |
+|---|---|---|---|
+| `id` | `BIGINT AUTO_INCREMENT` | N | PK |
+| `recon_date` | `DATE` | N | 대사일 (KST) |
+| `type` | `VARCHAR(40)` | N | `AUTO_COMPLETED` · `AUTO_FAILED` (자동 확정의 감사 기록) · `AMOUNT_OR_ACCOUNT_MISMATCH` · `COMPLETED_NOT_AT_BANK` · `REFUNDED_BUT_PAID` · `PAID_BUT_RECEIVED`(**긴급**) · `UNKNOWN_REFERENCE` · `BALANCE_LEDGER_MISMATCH` · `PAID_TWICE`(**긴급**) |
+| `reference` | `CHAR(20)` ascii_bin | Y | 거래번호. 지갑 이슈(`BALANCE_LEDGER_MISMATCH`)는 NULL |
+| `transfer_id` | `CHAR(36)` | Y | 우리 출금 id (없는 거래번호면 NULL) |
+| `user_id` | `VARCHAR(36)` ascii_bin | Y | 출금한 사용자 · 지갑 이슈의 사용자 |
+| `our_value` | `VARCHAR(200)` | Y | 판정 시점의 우리 쪽: 상태 · 금액 · 계좌 (예 `UNKNOWN 2000 090-9990000000002`). 지갑 이슈는 `balance=…` |
+| `bank_value` | `VARCHAR(200)` | Y | 은행 줄들: `금액 은행-계좌 날짜#줄` (여러 줄이면 `; `). 지갑 이슈는 `ledgerSum=…` |
+| `ref_key` | `VARCHAR(36)` ascii_bin | N | `COALESCE(reference, user_id)` **STORED 생성 컬럼**. 둘 다 없으면 INSERT 가 실패한다 |
+| `created_at` | `DATETIME(6)` | N | 기록 시각 |
+| `resolved_at` | `DATETIME(6)` | Y | 사람이 처리한 시각. `NULL` = 미처리 |
+| `resolution_note` | `VARCHAR(500)` | Y | 처리 내용 |
+
+인덱스:
+- `uk_recon_issue (recon_date, type, ref_key)` — 같은 날 · 같은 종류 · 같은 키는 한 번만: 잡을 어디서 다시 시작해도 이슈가 늘지 않는다
+- `idx_recon_issue_open (resolved_at, recon_date)` — 아직 처리하지 않은 이슈 조회 (§9)
+
+append-only — 사람이 `resolved_at` · `resolution_note` 만 채운다. DB 에는 계좌 원문이 있다 — 알림으로 나갈 때만 가린다.
 
 ## 5. 상태 값
 상태는 MySQL `ENUM` 이 아니라 `VARCHAR` + Kotlin `enum` 으로 둔다. 값을 추가할 때 `ALTER TABLE ... MODIFY ENUM` (테이블 재작성 위험) 없이 코드만 바꾸면 되고, 허용 전이는 도메인이 검증한다.
@@ -203,7 +282,7 @@ erDiagram
 | `RECEIVED` · `SENDING` · `UNKNOWN` | 빠진 채 (보류 — `GET /wallet` 의 `pending`) |
 | `COMPLETED` | 빠진 채 (확정) |
 | `FAILED` | 복원 (같은 트랜잭션에서 `REFUND`) |
-| `CONFLICT` 발생 | 손대지 않음 + 경고 (수동 확인, P5 대사) |
+| `CONFLICT` 발생 | 손대지 않음 + 경고 (수동 확인. 일마감 대사가 다음 날 `REFUNDED_BUT_PAID` 등으로 기록 · 알림, P5-1) |
 
 ## 6. 동시성 · 잠금
 | 상황 | 방법 | SQL 모양 |
@@ -222,6 +301,8 @@ erDiagram
 | 락 대기 한도 (모든 트랜잭션) | `innodb_lock_wait_timeout = 5` (Hikari `connection-init-sql`) | 넘으면 1205, 데드락은 1213 → 둘 다 503 `WALLET_BUSY` (`JpaTransferStore` 한 곳). 기본 50초는 커넥션 · 톰캣 스레드를 오래 붙잡는다 |
 | 환불 (컨슈머 · 정리 작업 겹침) | 조건부 전이 1건일 때만 + 원장 UNIQUE | `UPDATE transfer SET status = 'FAILED' … WHERE id = ? AND status = ?` → 1건이면 `SELECT amount FROM wallet_ledger WHERE transfer_id = ? AND type = 'WITHDRAW'` → `UPDATE wallet SET balance = balance + ?` → `INSERT wallet_ledger`(REFUND). 한 트랜잭션 |
 | 충전 | `INSERT … ON DUPLICATE KEY UPDATE` | 지갑이 없으면 만들고 있으면 더한다 + `INSERT wallet_ledger`(DEPOSIT) |
+| 일마감 대사 ③ ④ (P5-1) | READ COMMITTED 청크 + 조건부 전이 | 0건이면 다시 읽어 판정(최대 3회). REPEATABLE READ 면 청크 첫 읽기의 스냅숏이라 바뀐 상태를 못 본다 |
+| 같은 날짜 대사 동시 실행 (P5-1) | 잡 인스턴스 UNIQUE + 실행 중 확인 + SingleRunGuard | 처음 시작 경합은 UNIQUE 에서 진 쪽이 DuplicateKeyException → 409 RECON_RUNNING. 실패한 날짜의 동시 재시작은 가드가 나중 실행을 멈춘다 |
 
 네 전략의 처리량 · 지연 비교(k6)는 [docs/perf/p4-2-lock-comparison.md](perf/p4-2-lock-comparison.md), 결정은 [ADR-0009](adr/0009-wallet-debit-strategies-and-lock-comparison.md).
 
@@ -234,7 +315,7 @@ erDiagram
 - 개인정보 원문(인증코드)은 저장하지 않는다. 계좌번호 마스킹: `Transfer.toString()` 은 뒤 4자리만 남겨 로그에 원문이 찍히지 않는다. API 응답 마스킹은 인증 도입 때 적용한다.
 
 ## 8. 마이그레이션 규칙 (Flyway)
-- 파일명: `V<번호>__<설명>.sql` (예 `V1__init.sql`, `V2__transfer_republish.sql`, `V3__wallet.sql`).
+- 파일명: `V<번호>__<설명>.sql` (예 `V1__init.sql`, `V2__transfer_republish.sql`, `V3__wallet.sql`, `V4__daily_reconciliation.sql`).
 - **이미 적용된 파일은 고치지 않는다.** 바꿀 게 있으면 새 버전을 추가한다 (체크섬 불일치로 기동 실패).
 - 앱 기동 시 자동 적용. 테스트(Testcontainers)도 같은 파일로 스키마를 만든다.
 - 큰 테이블 변경(인덱스 추가 등)은 운영 반영 방법(온라인 DDL)을 PR 에 적는다.
@@ -307,11 +388,32 @@ SELECT id, type, amount, balance_after, transfer_id, created_at FROM wallet_ledg
  WHERE user_id = 'user-1' ORDER BY id DESC LIMIT 20;
 ```
 
+### 일마감 대사 (P5-1)
+```sql
+-- 아직 처리하지 않은 이슈 (긴급 먼저)
+SELECT id, recon_date, type, reference, our_value, bank_value, created_at
+FROM recon_issue WHERE resolved_at IS NULL
+ORDER BY FIELD(type, 'PAID_TWICE', 'PAID_BUT_RECEIVED') DESC, recon_date, id;
+
+-- 처리 기록 (append-only — 이 두 열만 바꾼다)
+UPDATE recon_issue SET resolved_at = NOW(6), resolution_note = '은행 확인: 이중 지급 회수 요청 #123' WHERE id = ? AND resolved_at IS NULL;
+
+-- 대사 잡 실행 이력 (날짜별 상태 · 실패 이유)
+SELECT p.PARAMETER_VALUE AS recon_date, e.JOB_EXECUTION_ID, e.STATUS, e.EXIT_CODE, LEFT(e.EXIT_MESSAGE, 200) AS exit_message, e.START_TIME, e.END_TIME
+FROM BATCH_JOB_INSTANCE i
+JOIN BATCH_JOB_EXECUTION e ON e.JOB_INSTANCE_ID = i.JOB_INSTANCE_ID
+JOIN BATCH_JOB_EXECUTION_PARAMS p ON p.JOB_EXECUTION_ID = e.JOB_EXECUTION_ID AND p.PARAMETER_NAME = 'reconDate'
+WHERE i.JOB_NAME = 'dailyReconciliationJob' ORDER BY e.JOB_EXECUTION_ID DESC LIMIT 20;
+```
+`BATCH_*` 의 시각(`START_TIME` · `END_TIME`)은 KST 가 아니라 JVM 기본 시간대다 (§2). 이 PC 의 JVM 이 UTC 면 업무 표와 9시간 차이가 난다 — 실행 이력을 읽을 때 유의한다.
+
 ## 10. 검토 중 · 다음 단계
 - **PK 타입**: 지금은 읽기 쉬운 `CHAR(36)` 무작위 UUID. InnoDB 는 PK 순서로 데이터를 저장하므로 무작위 값은 삽입 시 페이지 분할이 생기고 보조 인덱스도 커진다. 부하 측정 도구(`load/`, P4-2)로 `BINARY(16)` · 시간순 UUID(v7) · `BIGINT` 와 삽입 성능을 비교해 결정한다.
-- **데이터 보존**: 발행된 `outbox_event`, 만료된 `account_verification` 정리는 P5 배치.
-- **잔고 락 전략**: P4-2 에서 네 전략을 바꿔 끼울 수 있게 했고 k6 로 비교했다 (ADR-0009, 결과 [docs/perf](perf/p4-2-lock-comparison.md) — 핫스팟은 조건부가 가장 빠르고 낙관적은 409 77%). 원장 보존(파티셔닝 · 보관)은 P5.
+- **데이터 보존**: 발행된 `outbox_event`, 만료된 `account_verification` 정리는 P5-2 보존 배치.
+- **잔고 락 전략**: P4-2 에서 네 전략을 바꿔 끼울 수 있게 했고 k6 로 비교했다 (ADR-0009, 결과 [docs/perf](perf/p4-2-lock-comparison.md) — 핫스팟은 조건부가 가장 빠르고 낙관적은 409 77%). 원장 보존(파티셔닝 · 보관)은 P5-2.
 - **읽기 성능**: 조회 API 가 늘면 실행계획(`EXPLAIN ANALYZE`) 결과를 이 문서에 남긴다.
+- **`transfer.sending_at` 단독 인덱스**: 대사 ③ 이 하루 범위를 훑는다 (지금은 전체 훑기, 하루 한 번이라 추가하지 않았다).
+- **대사 보존 · 파티셔닝**: `bank_statement_line` · `recon_issue` 는 매일 늘어난다 (P5-2 보존 배치).
 
 ## 변경 이력
 | 날짜 | 변경 | 관련 |
@@ -324,3 +426,4 @@ SELECT id, type, amount, balance_after, transfer_id, created_at FROM wallet_ledg
 | 2026-10-22 | V2: republish_count · republished_at (제한 재발행), RECEIVED → FAILED(E001), 재발행 동시성 · 운영 쿼리 | [PR #9](https://github.com/hyeokjinON/bank-transfer/pull/9) (P3-3b) |
 | 2026-10-26 | V3: wallet · wallet_ledger, transfer · account_verification 의 user_id, 멱등 UNIQUE 를 (user_id, idempotency_key) 로, 잔고 동시성 · 운영 쿼리(잔고 = 원장 합) | [PR #11](https://github.com/hyeokjinON/bank-transfer/pull/11) (P4-1) |
 | 2026-10-27 | 스키마 변경 없음. 동시성 표에 차감 전략 4종 · 락 대기 5초, `wallet.version` 의 낙관적 락 사용 | P4-2 (ADR-0009) |
+| 2026-10-29 | V4: Spring Batch 6 메타 표 · bank_statement_line · recon_issue, E002, 대사 동시성 · 운영 쿼리 | P5-1 (ADR-0010) |

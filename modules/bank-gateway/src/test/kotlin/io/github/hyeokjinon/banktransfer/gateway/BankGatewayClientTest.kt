@@ -177,5 +177,26 @@ class BankGatewayClientTest {
         assertEquals(ResponseCodes.ORIGINAL_NOT_FOUND, client.inquire("T2610220000000000001").get(5, TimeUnit.SECONDS).result)
     }
 
+    @Test
+    fun `보내기 문이 닫혀 있으면(점검 시간) 연결이 있어도 쓰지 않고 BankNotSentException - 폴링은 계속된다`() {
+        val bank = MockBankServer().start().closeLater()
+        var closed = true
+        val client = BankGatewayClient(
+            BankGatewayConfig(host = "127.0.0.1", port = bank.boundPort, pollInterval = Duration.ofMillis(200)),
+            sendGate = { if (closed) "bank maintenance window" else null },
+        ).closeLater().start()
+        waitUntil { client.isConnected }
+
+        val error = client.transfer("090", "1002123456789", 1_000, "점검", "T261028MAINTENANCE01").awaitFailure()
+
+        assertIs<BankNotSentException>(error)
+        assertEquals("bank maintenance window", error.message)
+        assertFalse(bank.hasProcessed("T261028MAINTENANCE01"))
+        val polls = bank.pollCount
+        waitUntil { bank.pollCount > polls }   // 링크 체크는 막지 않는다 — 점검이 끝나면 바로 보낼 수 있다
+        closed = false
+        assertEquals(ResponseCodes.ORIGINAL_NOT_FOUND, client.inquire("T261028MAINTENANCE01").get(3, TimeUnit.SECONDS).result)
+    }
+
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }
 }

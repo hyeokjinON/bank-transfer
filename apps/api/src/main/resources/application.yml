@@ -4,7 +4,7 @@ spring:
   task:
     scheduling:
       pool:
-        size: 2   # 발행기(0.5초)와 정리 작업(10초)이 한 스레드를 나눠 쓰면 서로 막는다
+        size: 3   # 발행기(0.5초) · 정리 작업(10초) · 일마감 대사(01 ~ 06시, 동기로 수 초)가 서로 막지 않게 (P5-1 에서 2 → 3)
   mvc:
     problemdetails:
       enabled: true   # ApiExceptionHandler 가 ResponseEntityExceptionHandler 를 상속하므로 표준 오류도 ProblemDetail + code 로 응답한다 (Boot 기본 핸들러는 물러난다. 설정은 명시용으로 유지)
@@ -43,6 +43,11 @@ spring:
       hibernate.jdbc.time_zone: Asia/Seoul
       # Hibernate 7 은 Instant 를 기본으로 UTC 로 쓴다. 위 time_zone 을 따르게 하려면 이 설정이 필요하다
       hibernate.type.preferred_instant_jdbc_type: TIMESTAMP
+  batch:
+    job:
+      enabled: false           # 기동 때 잡을 자동 실행하지 않는다 (기본 true). 대사는 스케줄 · 관리 API 가 날짜를 주어 돌린다 (P5-1)
+    jdbc:
+      initialize-schema: never # BATCH_* 표는 Flyway V4 가 만든다 (스키마는 Flyway 로만)
 
 bank:
   gateway:
@@ -50,6 +55,10 @@ bank:
     port: 9090
     response-timeout: 3s
     poll-interval: 30s
+  maintenance:                 # 은행 점검 시간 (P5-1, KST). 점검 중에는 출금 접수 · 1원인증 503, 은행 송신 보류
+    enabled: true
+    start: "23:50"             # 따옴표 필수 — YAML 은 23:50 을 60진수 정수로 읽는다. 시작 포함 · 끝 제외, 자정을 넘어도 된다
+    end: "00:10"               # 점검 길이는 재발행 포기(E001)까지의 약 26분보다 짧게 (OPERATION §9)
 
 account:
   verification:
@@ -95,6 +104,25 @@ wallet:
   lock:
     wait-time: 3s          # redis 전략: 사용자 락을 기다리는 최대 시간. 넘으면 503 WALLET_BUSY
     redis-address: "redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}"   # redis 전략일 때만 클라이언트를 만든다
+
+daily-recon:                   # 일마감 대사 (P5-1, ADR-0010)
+  file-dir: ./bank-files       # 은행 대사 파일 디렉터리 (recon/RECON_yyyyMMdd.dat). 작업 디렉터리 = 저장소 루트 (git 제외)
+  chunk-size: 100              # ③ 출금 대조 · ④ 은행 줄 대조 청크. ② 적재는 500 고정
+  # 수동 대사(POST /admin/reconciliations)에 오늘(KST)을 허용할지. 로컬 손 확인 전용 — 실행 구성 "6. API (대사 손 확인)" 만 켠다.
+  # 운영에서는 절대 켜지 않는다: 오늘을 대사하면 아직 은행 파일에 없는 방금 보낸 출금을 E002 환불 → 은행이 그 뒤 처리하면 이중 지급 (ADR-0010).
+  # false 면 어제 이전만 받는다 (오늘 이후 400 RECON_DATE_NOT_CLOSED). 스케줄은 늘 전날이라 영향 없음
+  allow-today: false
+  schedule:
+    enabled: true              # 부하 측정 실행 구성 · 테스트는 false
+    cron: "0 0 1-6 * * *"      # 01:00 ~ 06:00 매시 정각에 전날 대사. 파일이 없으면 다음 정각에 다시, 마지막 회차(06시)에도 못 끝내면 긴급 알림
+    zone: Asia/Seoul
+
+alert:
+  telegram:
+    # 둘 다 있을 때만 텔레그램으로 보낸다 (없으면 로그만). 값은 환경변수로만 — 저장소 · 로그에 남기지 않는다 (SETUP 2-6)
+    bot-token: ${ALERT_TELEGRAM_BOT_TOKEN:}
+    chat-id: ${ALERT_TELEGRAM_CHAT_ID:}
+    base-url: https://api.telegram.org
 
 info:
   wallet:

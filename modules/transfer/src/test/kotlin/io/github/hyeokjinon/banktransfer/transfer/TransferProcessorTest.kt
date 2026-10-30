@@ -24,7 +24,7 @@ class TransferProcessorTest {
         override fun findByIdempotencyKey(userId: String, key: String) =
             transfers.values.firstOrNull { it.userId == userId && it.idempotencyKey == key }
 
-        override fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?): Boolean {
+        override fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?, sentWithin: OpenEndRange<Instant>?): Boolean {
             require(to != TransferStatus.FAILED) { "FAILED 는 fail() 로만 간다 (환불을 빠뜨리지 않게)" }
             val current = transfers[id] ?: return false
             if (current.status != from) return false
@@ -37,7 +37,7 @@ class TransferProcessorTest {
             return true
         }
 
-        override fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String): Boolean {
+        override fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String, sentWithin: OpenEndRange<Instant>?): Boolean {
             val current = transfers[id] ?: return false
             if (current.status != from) return false
             transfers[id] = current.copy(status = TransferStatus.FAILED, updatedAt = at, bankResponseCode = bankResponseCode)
