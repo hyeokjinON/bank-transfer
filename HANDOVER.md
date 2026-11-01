@@ -14,7 +14,7 @@
 | P3-3b 재시도 | ✅ 완료 (2026-10-26, [#9](https://github.com/hyeokjinON/bank-transfer/pull/9)) | ADR-0007 채택, 테스트 161개. CI `build` · `infra-smoke` 통과. 재시도 토픽 · DLT · 제한 재발행 · `FAILED E001`. 손 확인: 은행을 내린 채 접수한 2건이 재시도 토픽 경로로 은행 복구 뒤 `COMPLETED 0000` (재발행 0회, `sending_at` 은 접수 약 95초 뒤 = 5s·30s·60s 마지막 재시도). 재발행 경로(DLT → 재발행 → `COMPLETED` / 3회 뒤 `E001`)는 자동 흐름 테스트로만 증명 — 손으로 보려면 실행 구성 `4. API (재발행 손 확인)` 으로 은행을 15초 넘게 내려 둔다 |
 | P4-1 원화 잔고 | ✅ 완료 (2026-10-26, [#11](https://github.com/hyeokjinON/bank-transfer/pull/11)) | ADR-0008 채택, 테스트 206개. CI `build` · `infra-smoke` 통과. 손 확인: Postman 5 폴더로 `user-p41` 출금 19건(COMPLETED 6 · 은행 거절 FAILED 1001 13) — 환불 13건이 거절 건수와 정확히 같고, 잔고 1,500,000 = 원장 합 |
 | P4-2 락 전략 비교 | ✅ 완료 (2026-10-28, [#13](https://github.com/hyeokjinON/bank-transfer/pull/13)) | ADR-0009 채택, 테스트 240개. CI `build` · `infra-smoke` 통과. 차감 전략 4종 · 409/503 · k6 도구. 측정 24회 ([docs/perf](docs/perf/p4-2-lock-comparison.md)): 핫스팟 접수 조건부 106/s > 비관적 99 > Redis 81 > 낙관적 45(409 77%), 분산은 차이 없음. 손 확인: `redis` 전략 + Redis 정지 상태에서 API 기동 → 출금 접수 503 `WALLET_BUSY` + `Retry-After: 1`, 남은 출금 없음 (Postman 5-8 · curl, 인증 사용자 `user-p41`). `manualWalletBusy` 를 켜지 않고 Send 하면 5-8 이 나가지 않음(응답 없음)도 확인 |
-| P5-1 일마감 대사 | 🟡 리뷰 중 | ADR-0010 제안, 테스트 370개. 대사 파일 v0.3 · 점검 시간 · Spring Batch 잡 · 알림 |
+| P5-1 일마감 대사 | ✅ 완료 (2026-10-30, [#15](https://github.com/hyeokjinON/bank-transfer/pull/15)) | ADR-0010 채택, 테스트 370개. CI `build` · `infra-smoke` 통과. 대사 파일 v0.3 · 점검 시간 · Spring Batch 잡 · 알림. 손 확인 (`http/daily-recon.http` 순서를 curl 로, `user-1`): 정상 출금 `COMPLETED` · 무응답 계좌 출금 `UNKNOWN` → `--close-day=20261030` → 실행 구성 6 으로 오늘 대사 200 `COMPLETED` (출금 2 · 일치 1 · 자동 완료 1 · 불일치 0, 0.8초), `recon_issue` 에 `AUTO_COMPLETED` 한 줄, 무응답 건 `COMPLETED 0000`, 잔고 97,000 = 원장(충전 100,000 − 출금 3,000). 다시 보내면 409 `RECON_ALREADY_COMPLETED`, 2099-12-31 은 400 `RECON_DATE_NOT_CLOSED`. 기본 구성 + 지금을 포함한 점검(09:50 ~ 10:40)으로 다시 띄우면 오늘 날짜 대사도 400 `RECON_DATE_NOT_CLOSED`, 출금 · 1원인증 503 `BANK_MAINTENANCE` + `Retry-After: 2339` (10:40 까지 남은 초), 잔고 조회 200. 알림은 처음엔 로그(`ALERT … [INFO] 일마감 대사 2026-10-30 완료 — 불일치 없음`), 봇 설정 뒤에는 텔레그램: 출금 없는 지난 날(10-01 curl · 10-02 Postman 6-3)의 완료 요약이 휴대폰으로 왔다. 겪은 함정 두 가지 — 환경 변수를 넣기 전에 켜 둔 IntelliJ 에서 띄운 API 는 값을 못 받아 로그 알림으로 떨어진다(완전히 종료 후 다시 켜기, SETUP 2-6). Postman 6-3 이 `reconDate` 를 비운 채 한 번 나가면 스크립트가 오늘을 Current value 에 넣어, 나중에 바꾼 값 대신 오늘이 나가 400 `RECON_DATE_NOT_CLOSED` (Current value 를 고친다) |
 | P5-2 ~ P9 | ⬜ 예정 | README 로드맵 |
 
 ## 2. P3 설계 (합의된 것)
@@ -80,9 +80,8 @@ P3-1 (PR #3) · P3-2 (PR #5) · P3-3a (PR #7) · P3-3b (PR #9) 모두 머지됐�
 | 이름 | 일마감 대사 = `dailyrecon` (잡 `dailyReconciliationJob`) — 10초 주기 "정리 작업"(`reconcile`)과 구분 |
 
 ## 3. 다음 할 일 (순서대로)
-1. P5-1 리뷰 · 손 확인(`http/daily-recon.http` 1 · 2, 봇이 있으면 휴대폰 요약) · ADR-0010 채택.
-2. velog `#2` ~ `#8` 은 비공개로 올라가 있다 (`#8` = P4-2 락 전략 비교). 시리즈 지정 · 글마다 "핵심 3줄" 직접 작성 후 공개. `#9` (P5-1: 대사는 왜 미확정만 고치나 · 점검 시간으로 날짜 경계 맞추기).
-3. P5-2 설계 (보존 배치). 부하를 다시 잴 때는 다른 API 인스턴스(IntelliJ 등)를 모두 끄고, 끝나면 `bash load/run.sh cleanup` ([OPERATION §8](OPERATION.md#8-부하-측정-p4-2-k6)).
+1. velog `#2` ~ `#9` 는 비공개로 올라가 있다 (`#9` = P5-1 일마감 대사). 시리즈 지정 · 글마다 "핵심 3줄" 직접 작성 후 공개.
+2. P5-2 설계 (보존 배치). 부하를 다시 잴 때는 다른 API 인스턴스(IntelliJ 등)를 모두 끄고, 끝나면 `bash load/run.sh cleanup` ([OPERATION §8](OPERATION.md#8-부하-측정-p4-2-k6)).
 
 ### P5-1 범위 밖으로 남긴 것
 - 보존 배치 (발행된 `outbox_event`, 만료된 `account_verification`) → P5-2.
@@ -105,9 +104,9 @@ P3-1 (PR #3) · P3-2 (PR #5) · P3-3a (PR #7) · P3-3b (PR #9) 모두 머지됐�
 - 인증: `X-User-Id` 는 값을 그대로 믿는다 ("원래는 인증 토큰에서 꺼내는 값").
 - 은행 입금 통지로 잔고를 채우기, 충전 멱등 (지금은 관리 · 테스트용 충전).
 - 락 비교 · 부하 테스트 (P4-2).
-- `CONFLICT` 자동 보정 없음 — 경고만, 수동 확인 · 일마감 대사 (P5).
+- `CONFLICT` 자동 보정 없음 — 경고만, 수동 확인 · 일마감 대사가 다음 날 기록 · 알림 (P5-1).
 - P3 시절 출금(`user_id` NULL)은 아무도 조회할 수 없다 (소유자가 없다). 차감한 적이 없어 환불도 없다.
-- 원장 보존 정책(파티셔닝 · 보관)은 P5.
+- 원장 보존 정책(파티셔닝 · 보관)은 P5-2 이후.
 - (P4-1 리뷰) 정리 작업은 ⓪ 재발행 · 포기와 ② 결과조회 확정을 건마다 예외 격리한다: 환불이 예외를 던지는 깨진 행(지갑 행 없음, REFUND 중복 등)은 건너뛰고 `onItemError` 로 ERROR 로그(`reconcile skipped transfer …`)를 남긴 채 나머지를 계속 처리한다. 그 행은 상태가 그대로라 손으로 고칠 때까지 매 주기 다시 시도되고 다시 ERROR 가 찍힌다 (`ReconcileResult.errors` 로 센다).
 - (P4-1 리뷰) 충전 API 는 인증 없이 항상 켜져 있다 → 운영이라면 설정 플래그(`wallet.deposit-api.enabled`)나 관리자 인증 뒤로.
 - (P4-1 리뷰) `fail()` 은 `refund() = false`(`WITHDRAW` 원장 없음)를 조용히 넘긴다: `user_id` 가 있는데 원장이 없는 비정상 행도 P3 시절 출금과 같이 상태만 바뀐다 (경고 로그 후보).
