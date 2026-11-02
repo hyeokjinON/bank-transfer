@@ -1,7 +1,10 @@
 ### IntelliJ HTTP Client 로 보존 배치 확인 (P5-2). 머지 전 손 확인 — 로컬 infra MySQL 에 행을 심고, 1) 의 실행은 시드가 아닌 이 DB 의 오래된 행도 지운다.
 ### !! 주의: 보존 배치는 'retention-hand' 시드만 지우지 않는다. 정책에 맞는 이 DB 의 모든 행을 영구히 지운다 (되돌릴 수 없다). 아래 1) 앞의 경고를 먼저 읽는다.
-### 준비: infra up, 모의 은행 "1. Mock Bank (9090)". API 는 미발행 행이 발행되지 않게 발행기를 끄고, 06:30 스케줄도 끈 채로:
-###   ./gradlew :apps:api:bootRun --args="--transfer.outbox.relay.enabled=false --data-retention.schedule.enabled=false"
+### 준비: infra up, 모의 은행 "1. Mock Bank (9090)". API 는 아래 세 가지를 꺼서 띄운다:
+###   ./gradlew :apps:api:bootRun --args="--transfer.outbox.relay.enabled=false --transfer.reconcile.enabled=false --data-retention.schedule.enabled=false"
+###   - 발행기(relay): 꺼야 한다. 켜면 미발행 시드 'retention-hand-pending' 의 `{}` 페이로드가 이체 토픽으로 발행되어 컨슈머가 처리할 수 없는 메시지를 받는다 또 2) 의 출금이 처리되어 아래 'RECEIVED 로 남는다' 가 깨진다.
+###   - 정리 작업(reconcile): 꺼야 한다. 켜면 2) 의 출금이 약 5분 뒤 재발행되기 시작하고, 반복되면 FAILED E001 + 환불로 끝난다.
+###   - 06:30 스케줄: 끈다. 켜면 기다리지 않고 06:30 에 1) 과 같은 영구 삭제를 한다.
 
 ### 날짜 — 1) · 2) 에서 쓴다. 오늘(KST)로 직접 고친다 (Git Bash: TZ=Asia/Seoul date +%F).
 @retentionDate = 2026-11-02
@@ -20,7 +23,7 @@
 ###      ('retention-hand-locked', 'user-retention', '090', '5500000000099', '홍길동', REPEAT('0', 64), 'LOCKED', 5, NOW(6) - INTERVAL 31 DAY, NOW(6)),
 ###      ('retention-hand-fresh', 'user-retention', '090', '5500000000099', '홍길동', REPEAT('0', 64), 'SENT', 0, NOW(6) - INTERVAL 29 DAY, NOW(6)),
 ###      ('retention-hand-verified', 'user-retention', '090', '1002123456789', '홍길동', REPEAT('0', 64), 'VERIFIED', 0, NOW(6) - INTERVAL 31 DAY, NOW(6));
-###    -- 실행 계획 (database.md §9 의 EXPLAIN 두 줄, 기준 날짜를 고쳐서). 결과를 HANDOVER 손 확인에 적는다
+###    -- 실행 계획은 아래 0-2) 에서 본다 (이 5행 시드로는 의미가 없다).
 
 ### 0-1) 시드 사용자 충전 → 200
 POST http://localhost:8080/api/v1/wallet/deposits
@@ -30,6 +33,43 @@ X-User-Id: user-retention
 {
   "amount": 100000
 }
+
+### ============================================================
+### 0-2) 대표 데이터 EXPLAIN — MySQL 클라이언트로. 5행 시드는 옵티마이저가 인덱스를 쓰든 전체를 훑든 같게 고르므로 실행 계획을 보여 주지 못한다.
+###      'retention-hand-bulk-' 접두어로 각 표에 1만 행을 만들고, 두 삭제 문장을 EXPLAIN 한 뒤, 그 접두어의 행만 지운다 (이 DB 의 다른 행은 건드리지 않는다.
+###      EXPLAIN 은 삭제를 실행하지 않는다). 1) 보다 먼저, 정리까지 끝내 둔다 — 남기면 1) 이 그 오래된 행을 지운다.
+###      분포: 아웃박스는 4% 가 10일 전 발행(지움 대상), 2% 미발행, 나머지는 0 ~ 5일 전 발행. 인증은 60% VERIFIED, 나머지 SENT · EXPIRED · LOCKED, expires_at 은 0 ~ 39일 전.
+###      (운영 분포가 아니라 이 DB 크기에서의 모양이다.)
+###
+###    SET SESSION cte_max_recursion_depth = 20000;
+###    INSERT INTO outbox_event (aggregate_id, event_type, payload, created_at, published_at)
+###    WITH RECURSIVE seq (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 10000)
+###    SELECT CONCAT('retention-hand-bulk-', n), 'TransferRequested', '{}', NOW(6) - INTERVAL 12 DAY,
+###           CASE WHEN n MOD 50 = 0 THEN NULL
+###                WHEN n MOD 20 = 0 THEN NOW(6) - INTERVAL 10 DAY
+###                ELSE NOW(6) - INTERVAL (n MOD 6) DAY END
+###    FROM seq;
+###    INSERT INTO account_verification (id, user_id, bank_code, account_no, holder_name, code_hash, status, failed_attempts, expires_at, created_at)
+###    WITH RECURSIVE seq (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 10000)
+###    SELECT CONCAT('retention-hand-bulk-', n), 'retention-hand-bulk', '090', '5500000000098', '홍길동', REPEAT('0', 64),
+###           ELT(n MOD 10 + 1, 'VERIFIED', 'VERIFIED', 'VERIFIED', 'VERIFIED', 'VERIFIED', 'VERIFIED', 'SENT', 'EXPIRED', 'LOCKED', 'SENT'),
+###           0, NOW(6) - INTERVAL (n MOD 40) DAY, NOW(6)
+###    FROM seq;
+###    ANALYZE TABLE outbox_event, account_verification;
+###    SET @d = '2026-11-02';   -- 위 retentionDate 와 같게
+###    EXPLAIN DELETE FROM outbox_event WHERE published_at < DATE_SUB(@d, INTERVAL 7 DAY) LIMIT 1000;
+###    EXPLAIN DELETE FROM account_verification WHERE status IN ('SENT','EXPIRED','LOCKED') AND expires_at < DATE_SUB(@d, INTERVAL 30 DAY) LIMIT 1000;
+###    -- 정리: 이 접두어의 행만. 둘 다 0 이어야 한다
+###    DELETE FROM outbox_event WHERE aggregate_id LIKE 'retention-hand-bulk-%';
+###    DELETE FROM account_verification WHERE id LIKE 'retention-hand-bulk-%';
+###    SELECT (SELECT COUNT(*) FROM outbox_event WHERE aggregate_id LIKE 'retention-hand-bulk-%') AS outbox_left,
+###           (SELECT COUNT(*) FROM account_verification WHERE id LIKE 'retention-hand-bulk-%') AS verification_left;
+###    ANALYZE TABLE outbox_event, account_verification;
+###
+###      기록할 것 (HANDOVER 손 확인 · database.md §9): 두 EXPLAIN 각각의 type · key · key_len · rows · Extra 와 이 DB 의 두 표 전체 행 수(시드 포함).
+###      기대(설계 의도): 아웃박스 type=range · key=idx_outbox_unpublished, 인증 type=range · key=idx_verification_purge.
+###      type=ALL 이 나오면 그대로 적는다 — 그 크기에서는 묶음마다 표 전체를 훑는다는 뜻이다. 인덱스를 탄다는 문장(database.md · V5)은 이 결과가 나온 뒤에 사실로 고친다.
+###      한 번의 1만 행 결과이고 운영 크기·분포의 계획은 아니다.
 
 ### ============================================================
 ### !! 1) · 1-1) 은 이 DB 의 오래된 행을 실제로 영구 삭제한다 (되돌릴 수 없다). 'retention-hand' 접두어는 위 시드와 정리 SQL 만 가리키고, 잡은 접두어를 보지 않는다.
@@ -74,3 +114,4 @@ Idempotency-Key: {{$random.uuid}}
 ### 3) 정리 (MySQL): DELETE FROM outbox_event WHERE aggregate_id LIKE 'retention-hand%';
 ###                 DELETE FROM account_verification WHERE id LIKE 'retention-hand%';
 ###    2) 의 출금은 RECEIVED + 미발행으로 남는다 — 발행기를 켠 구성으로 다시 띄우면 평소처럼 처리된다
+###    user-retention 의 지갑 · 원장 · 이체 행(0-1 의 충전, 2) 의 출금)은 그대로 남는다 — 보존 배치는 그 표들을 지우지 않는다.

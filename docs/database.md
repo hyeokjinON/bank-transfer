@@ -142,7 +142,7 @@ erDiagram
 인덱스:
 - `idx_verification_account (bank_code, account_no, status)` — "이 계좌가 VERIFIED 인가?" 조회 (P3)
 - `idx_verification_user_account (user_id, bank_code, account_no, status)` — 출금 계좌 확인 ("이 사용자가 이 계좌를 인증했는가?", V3)
-- `idx_verification_purge (status, expires_at)` — 보존 배치의 삭제 조건 (V5, P5-2). 없으면 묶음마다 표 전체를 훑는다
+- `idx_verification_purge (status, expires_at)` — 보존 배치의 삭제 조건 (V5, P5-2). 이 인덱스로 범위를 좁히려는 설계다 — 실행 계획으로 확인하기 전이다(§9 의 대표 데이터 `EXPLAIN`)
 
 ### 4-2. `transfer` — 출금이체 (transfer 모듈, P3-1)
 | 컬럼 | 타입 | NULL | 설명 |
@@ -183,7 +183,7 @@ erDiagram
 | `published_at` | `DATETIME(6)` | Y | Kafka 발행 완료 시각. `NULL` = 미발행. 브로커가 받았다고 확인한 뒤 `NOW(6)`로 기록한다. `NOW(6)` 은 세션 시간대를 따르고, 세션 시간대는 JDBC `forceConnectionTimeZoneToSession=true` + `connectionTimeZone=Asia/Seoul` 이 KST 로 맞춘다 (서버 시간대만의 결과가 아니다, §2) |
 
 인덱스: `idx_outbox_unpublished (published_at, id)` — `WHERE published_at IS NULL ORDER BY id LIMIT 100` 를 인덱스만으로 처리.
-발행 뒤 7일이 지난 행은 보존 배치가 지운다 (§4-9). 범위 삭제가 이 인덱스를 탄다. 미발행은 NULL 이라 비교에 걸리지 않는다.
+발행 뒤 7일이 지난 행은 보존 배치가 지운다 (§4-9). 범위 삭제가 이 인덱스를 타도록 한 설계다 (실행 계획은 아직 확인하지 않았다, §9). 미발행은 NULL 이라 비교에 걸리지 않는다.
 
 발행 메시지 모양 (`transfer.requested`, [ADR-0005](adr/0005-kafka-delivery-and-consumer-idempotency.md)): key = `aggregate_id`(이체 id), value = `{"transferId", "occurredAt", "eventId"}`. 같은 이체의 메시지는 같은 파티션으로 간다.
 
@@ -321,7 +321,7 @@ append-only — 사람이 `resolved_at` · `resolution_note` 만 채운다. DB �
 | 충전 | `INSERT … ON DUPLICATE KEY UPDATE` | 지갑이 없으면 만들고 있으면 더한다 + `INSERT wallet_ledger`(DEPOSIT) |
 | 일마감 대사 ③ ④ (P5-1) | READ COMMITTED 청크 + 조건부 전이 | 0건이면 다시 읽어 판정(최대 3회). REPEATABLE READ 면 청크 첫 읽기의 스냅숏이라 바뀐 상태를 못 본다 |
 | 같은 날짜 대사 동시 실행 (P5-1) | 잡 인스턴스 UNIQUE + 실행 중 확인 + SingleRunGuard | 처음 시작 경합은 UNIQUE 에서 진 쪽이 DuplicateKeyException → 409 RECON_RUNNING. 실패한 날짜의 동시 재시작은 가드가 나중 실행을 멈춘다 |
-| 보존 배치 삭제 (P5-2) | READ COMMITTED + 트랜잭션마다 DELETE … LIMIT n 한 문장 | 짧은 트랜잭션, gap 락 없음. REPEATABLE READ 와 비교한 재현은 RetentionLockTest · ADR-0011 |
+| 보존 배치 삭제 (P5-2) | READ COMMITTED + 트랜잭션마다 DELETE … LIMIT n 한 문장 | 삭제 트랜잭션이 열려 있어도 아웃박스 INSERT 가 들어가는 것을 RetentionLockTest 로 확인했다 (REPEATABLE READ 는 락 대기). 트랜잭션 길이는 재지 않았다 — ADR-0011 |
 | 같은 날짜 보존 배치 동시 실행 (P5-2) | 대사와 같은 코드 (DatedJobLauncher · DatedJobSingleRunGuard) | 진 쪽은 409 RETENTION_RUNNING |
 
 네 전략의 처리량 · 지연 비교(k6)는 [docs/perf/p4-2-lock-comparison.md](perf/p4-2-lock-comparison.md), 결정은 [ADR-0009](adr/0009-wallet-debit-strategies-and-lock-comparison.md).
@@ -442,7 +442,7 @@ JOIN BATCH_JOB_EXECUTION_PARAMS p ON p.JOB_EXECUTION_ID = e.JOB_EXECUTION_ID AND
 LEFT JOIN BATCH_STEP_EXECUTION s ON s.JOB_EXECUTION_ID = e.JOB_EXECUTION_ID
 WHERE i.JOB_NAME = 'dataRetentionJob' ORDER BY e.JOB_EXECUTION_ID DESC, s.STEP_EXECUTION_ID LIMIT 40;
 
--- 실행 계획 (행이 적으면 옵티마이저가 전체 훑기를 고를 수 있다 — 시드 데이터로 본다)
+-- 실행 계획 (행이 적으면 옵티마이저가 전체 훑기를 고를 수 있다 — 5행 시드가 아니라 대표 데이터 1만 행으로 본다, http/data-retention.http 0-2)
 EXPLAIN DELETE FROM outbox_event WHERE published_at < '2026-10-26 00:00:00' LIMIT 1000;
 EXPLAIN DELETE FROM account_verification WHERE status IN ('SENT','EXPIRED','LOCKED') AND expires_at < '2026-10-03 00:00:00' LIMIT 1000;
 ```

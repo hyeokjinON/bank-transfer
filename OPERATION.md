@@ -358,7 +358,11 @@ WHERE i.JOB_NAME = 'dailyReconciliationJob' AND e.JOB_EXECUTION_ID IS NULL;
 DELETE FROM BATCH_JOB_INSTANCE WHERE JOB_INSTANCE_ID = ? AND NOT EXISTS (SELECT 1 FROM BATCH_JOB_EXECUTION e WHERE e.JOB_INSTANCE_ID = ?);
 ```
 
-**`RESTART_REFUSED`** — 지난 실행이 `UNKNOWN`(롤백할 수 없는 실패)으로 끝나 Spring Batch 가 재시작을 거부한 것이다. `BATCH_JOB_EXECUTION` 의 `STATUS` 를 확인하고, 원인을 확인한 뒤 위 STARTED 와 같은 방법으로 `FAILED` 로 바꿔 다시 실행한다.
+**`RESTART_REFUSED`** — 지난 실행이 `UNKNOWN`(롤백할 수 없는 실패)으로 끝나 Spring Batch 가 재시작을 거부한 것이다. `BATCH_JOB_EXECUTION` 의 `STATUS` 를 확인하고, 원인을 확인한 뒤 `FAILED` 로 바꿔 다시 실행한다. 위 STARTED 의 SQL 을 그대로 쓰면 안 된다 — 그 스텝 UPDATE 는 `STARTING` · `STARTED` 만 바꿔서 `UNKNOWN` 스텝이 그대로 남고, 재시작이 `JobRestartException`("Cannot restart step … from UNKNOWN status") 으로 다시 거부된다. 스텝 조건에 `'UNKNOWN'` 을 넣는다:
+   ```sql
+   UPDATE BATCH_STEP_EXECUTION SET STATUS='FAILED', EXIT_CODE='FAILED', END_TIME=NOW(6) WHERE JOB_EXECUTION_ID=? AND STATUS IN ('STARTING','STARTED','UNKNOWN');
+   UPDATE BATCH_JOB_EXECUTION SET STATUS='FAILED', EXIT_CODE='FAILED', END_TIME=NOW(6) WHERE JOB_EXECUTION_ID=?;
+   ```
 
 **동시 시작 때 ERROR 스택은 정상이다** — 실패한 날짜를 두 곳이 동시에 다시 돌리면 나중 실행을 `SingleRunGuard` 가 거부하는데, 이때 Spring Batch 가 "Encountered fatal error executing job" 이라는 **ERROR 로그와 예외 스택**(`ReconRunningException`)을 남긴다. 요청자는 409 `RECON_RUNNING` 을 받고, 먼저 시작한 실행은 계속 돈다. 동시 시작이 의도된 상황이면 무시한다.
 
@@ -379,6 +383,8 @@ DELETE FROM BATCH_JOB_INSTANCE WHERE JOB_INSTANCE_ID = ? AND NOT EXISTS (SELECT 
 기준 = 실행 날짜 00:00(KST) − 보관 기간. 금융 기록(`transfer` · `wallet_ledger` · `wallet` · `bank_statement_line` · `recon_issue`)은 지우지 않는다.
 
 **삭제는 되돌릴 수 없다. 첫 운영 실행 전에는 같은 조건의 `SELECT COUNT(*)` 로 대상을 확인한다** ([database.md §9](docs/database.md)). 건수 미리보기 기능은 없다.
+
+**기본 설정으로 띄운 API 는 아무도 누르지 않아도 매일 06:30(KST) 에 수동 실행과 똑같이 되돌릴 수 없는 삭제를 한다 — 그 API 가 연결된 DB 에, 이 브랜치가 머지된 뒤 개발자의 개발 DB 도 포함해서.** 위 `SELECT COUNT(*)` 로 대상을 확인하기 전에는 `--data-retention.schedule.enabled=false` 를 넘겨 스케줄을 끈 채로 띄운다.
 
 ### 10-2. 실행
 - **스케줄**: 매일 06:30 (KST), 오늘 날짜로. 재시도 회차는 없다 — 다음 날 실행은 새 인스턴스이고 기준이 뒤로 가 밀린 행까지 지운다. 끝난 날짜는 조용히(INFO) 넘어간다.
@@ -417,11 +423,15 @@ DELETE FROM BATCH_JOB_INSTANCE WHERE JOB_INSTANCE_ID = ? AND NOT EXISTS (SELECT 
 
 **`reason.code = ERROR`(`IllegalStateException`)** — 처음 시작하다 죽어 잡 인스턴스만 남았다. §9-6 의 "잡 인스턴스만 있고 실행이 없음" 과 같은 SQL 로 지운다 (`JOB_NAME = 'dataRetentionJob'`).
 
-**`RESTART_REFUSED`** — 지난 실행이 `UNKNOWN` 으로 끝났다. `BATCH_JOB_EXECUTION` 의 `STATUS` 를 확인하고 위와 같이 `FAILED` 로 바꿔 다시 실행한다.
+**`RESTART_REFUSED`** — 지난 실행이 `UNKNOWN` 으로 끝났다. `BATCH_JOB_EXECUTION` 의 `STATUS` 를 확인하고 `FAILED` 로 바꿔 다시 실행한다. 위 STARTED 의 SQL 을 그대로 쓰면 안 된다 — 그 스텝 UPDATE 는 `STARTING` · `STARTED` 만 바꿔서 `UNKNOWN` 스텝이 그대로 남고, 재시작이 `JobRestartException`("Cannot restart step … from UNKNOWN status") 으로 다시 거부된다. 스텝 조건에 `'UNKNOWN'` 을 넣는다:
+```sql
+UPDATE BATCH_STEP_EXECUTION SET STATUS='FAILED', EXIT_CODE='FAILED', END_TIME=NOW(6) WHERE JOB_EXECUTION_ID=? AND STATUS IN ('STARTING','STARTED','UNKNOWN');
+UPDATE BATCH_JOB_EXECUTION SET STATUS='FAILED', EXIT_CODE='FAILED', END_TIME=NOW(6) WHERE JOB_EXECUTION_ID=?;
+```
 
 **동시 시작 때 ERROR 스택은 정상이다** — §9-6 과 같다 (`RetentionRunningException`).
 
 ### 10-5. 함께 알아 둘 것
-- 만료 후 30일이 지난 인증을 확인하면 "만료"(410) 대신 404 `VERIFICATION_NOT_FOUND` 다.
+- 만료 후 30일이 지난 인증을 확인하면 "만료"(410) 대신 404 `VERIFICATION_NOT_FOUND` 다. 잠긴(`LOCKED`) 인증도 같다 — "잠김"(423 `VERIFICATION_LOCKED`) 대신 404.
 - 한 번도 쓰지 않는 `VERIFIED` 는 영원히 남는다 — 인증에 만료 정책이 생길 때 다룬다.
 - 손 확인은 [`http/data-retention.http`](http/data-retention.http), Postman 7 폴더. **손 확인의 실행(1) · 7-1)도 시드만이 아니라 그 DB 의 정책에 맞는 모든 행을 영구히 지운다.** 먼저 §10-1 의 `SELECT COUNT(*)` 로 대상을 보고, 옛 행이 소중하면 버려도 되는 별도 DB 에서 한다. 1-1) · 7-2 는 앞 실행이 끝난 뒤에만 보낸다.

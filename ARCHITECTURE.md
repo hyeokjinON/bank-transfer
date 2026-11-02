@@ -368,7 +368,7 @@ flowchart TB
 
 ### P5-2 보존 배치
 - 매일 06:30(KST) `dataRetentionJob`: ① 발행 뒤 7일 지난 `outbox_event` ② `VERIFIED` 가 아니고 만료 뒤 30일 지난 `account_verification`. 금융 기록은 지우지 않는다 ([database.md §4-9](docs/database.md)).
-- 호출마다 `DELETE … LIMIT 1000` 한 문장 = READ COMMITTED 트랜잭션 하나. 접수의 아웃박스 INSERT 를 막지 않는다 (재현: `RetentionLockTest`).
+- 호출마다 `DELETE … LIMIT 1000` 한 문장 = READ COMMITTED 트랜잭션 하나. 삭제 트랜잭션이 열려 있어도 아웃박스 INSERT 가 들어가는 것을 `RetentionLockTest` 로 확인했다 (트랜잭션 길이는 재지 않았다).
 - 대사와 같은 잡 저장소 · 시작 경합 처리(`DatedJobLauncher`) · 알림. 건수는 인스턴스의 모든 실행의 합. 근거: [ADR-0011](docs/adr/0011-data-retention.md)
 
 ## 7. 관련 문서

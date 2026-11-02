@@ -15,7 +15,7 @@
 | P4-1 원화 잔고 | ✅ 완료 (2026-10-26, [#11](https://github.com/hyeokjinON/bank-transfer/pull/11)) | ADR-0008 채택, 테스트 206개. CI `build` · `infra-smoke` 통과. 손 확인: Postman 5 폴더로 `user-p41` 출금 19건(COMPLETED 6 · 은행 거절 FAILED 1001 13) — 환불 13건이 거절 건수와 정확히 같고, 잔고 1,500,000 = 원장 합 |
 | P4-2 락 전략 비교 | ✅ 완료 (2026-10-28, [#13](https://github.com/hyeokjinON/bank-transfer/pull/13)) | ADR-0009 채택, 테스트 240개. CI `build` · `infra-smoke` 통과. 차감 전략 4종 · 409/503 · k6 도구. 측정 24회 ([docs/perf](docs/perf/p4-2-lock-comparison.md)): 핫스팟 접수 조건부 106/s > 비관적 99 > Redis 81 > 낙관적 45(409 77%), 분산은 차이 없음. 손 확인: `redis` 전략 + Redis 정지 상태에서 API 기동 → 출금 접수 503 `WALLET_BUSY` + `Retry-After: 1`, 남은 출금 없음 (Postman 5-8 · curl, 인증 사용자 `user-p41`). `manualWalletBusy` 를 켜지 않고 Send 하면 5-8 이 나가지 않음(응답 없음)도 확인 |
 | P5-1 일마감 대사 | ✅ 완료 (2026-10-30, [#15](https://github.com/hyeokjinON/bank-transfer/pull/15)) | ADR-0010 채택, 테스트 370개. CI `build` · `infra-smoke` 통과. 대사 파일 v0.3 · 점검 시간 · Spring Batch 잡 · 알림. 손 확인 (`http/daily-recon.http` 순서를 curl 로, `user-1`): 정상 출금 `COMPLETED` · 무응답 계좌 출금 `UNKNOWN` → `--close-day=20261030` → 실행 구성 6 으로 오늘 대사 200 `COMPLETED` (출금 2 · 일치 1 · 자동 완료 1 · 불일치 0, 0.8초), `recon_issue` 에 `AUTO_COMPLETED` 한 줄, 무응답 건 `COMPLETED 0000`, 잔고 97,000 = 원장(충전 100,000 − 출금 3,000). 다시 보내면 409 `RECON_ALREADY_COMPLETED`, 2099-12-31 은 400 `RECON_DATE_NOT_CLOSED`. 기본 구성 + 지금을 포함한 점검(09:50 ~ 10:40)으로 다시 띄우면 오늘 날짜 대사도 400 `RECON_DATE_NOT_CLOSED`, 출금 · 1원인증 503 `BANK_MAINTENANCE` + `Retry-After: 2339` (10:40 까지 남은 초), 잔고 조회 200. 알림은 처음엔 로그(`ALERT … [INFO] 일마감 대사 2026-10-30 완료 — 불일치 없음`), 봇 설정 뒤에는 텔레그램: 출금 없는 지난 날(10-01 curl · 10-02 Postman 6-3)의 완료 요약이 휴대폰으로 왔다. 겪은 함정 두 가지 — 환경 변수를 넣기 전에 켜 둔 IntelliJ 에서 띄운 API 는 값을 못 받아 로그 알림으로 떨어진다(완전히 종료 후 다시 켜기, SETUP 2-6). Postman 6-3 이 `reconDate` 를 비운 채 한 번 나가면 스크립트가 오늘을 Current value 에 넣어, 나중에 바꾼 값 대신 오늘이 나가 400 `RECON_DATE_NOT_CLOSED` (Current value 를 고친다) |
-| P5-2 보존 배치 | 🔧 구현 완료 · PR 전 (브랜치 `feat/p5-2-data-retention`) | ADR-0011 제안, 테스트 409개. 잠금 재현 · 변이 검사 결과는 ADR. 손 확인(`http/data-retention.http`, Postman 7)과 EXPLAIN 결과는 PR 뒤 — **아직 하지 않았다** |
+| P5-2 보존 배치 | 🔧 구현 완료 · PR 전 (브랜치 `feat/p5-2-data-retention`) | ADR-0011 제안, 테스트 411개. 잠금 재현 · 변이 검사 결과는 ADR. 손 확인(`http/data-retention.http`, Postman 7)과 EXPLAIN 결과는 PR 뒤 — **아직 하지 않았다** |
 | P6 ~ P9 | ⬜ 예정 | README 로드맵 |
 
 ## 2. P3 설계 (합의된 것)
@@ -82,7 +82,7 @@ P3-1 (PR #3) · P3-2 (PR #5) · P3-3a (PR #7) · P3-3b (PR #9) 모두 머지됐�
 
 ## 3. 다음 할 일 (순서대로)
 1. velog `#2` ~ `#9` 는 비공개로 올라가 있다 (`#9` = P5-1 일마감 대사). 시리즈 지정 · 글마다 "핵심 3줄" 직접 작성 후 공개.
-2. P5-2 PR → 손 확인(EXPLAIN 포함, 결과를 이 표에) → 머지 → ADR-0011 채택 → velog #10. PR 본문에는 `idx_verification_purge` 운영 반영(온라인 DDL) 한 줄과, 손 확인이 PR 뒤라는 것을 적는다 ([database.md §8](docs/database.md)). 부하를 다시 잴 때는 다른 API 인스턴스(IntelliJ 등)를 모두 끄고, 끝나면 `bash load/run.sh cleanup` ([OPERATION §8](OPERATION.md#8-부하-측정-p4-2-k6)).
+2. **!! 기본 설정으로 띄운 API 는 06:30(KST) 에 아무 조작 없이도 수동 실행과 같은 되돌릴 수 없는 삭제를 한다 — 그 API 가 가리키는 DB 에, 머지 뒤에는 개발자의 개발 DB 도 포함해서. 손 확인의 `SELECT COUNT(*)` 미리보기를 확인하기 전에는 항상 `--data-retention.schedule.enabled=false` 를 넘긴다.** P5-2 PR → 손 확인(EXPLAIN 포함, 결과를 이 표에) → 머지 → ADR-0011 채택 → velog #10. PR 본문에는 `idx_verification_purge` 운영 반영(온라인 DDL) 한 줄과, 손 확인이 PR 뒤라는 것을 적는다 ([database.md §8](docs/database.md)). 부하를 다시 잴 때는 다른 API 인스턴스(IntelliJ 등)를 모두 끄고, 끝나면 `bash load/run.sh cleanup` ([OPERATION §8](OPERATION.md#8-부하-측정-p4-2-k6)).
 
 ### P5-1 범위 밖으로 남긴 것
 - 원장 · 대사 기록의 아카이빙 · 파티셔닝 (지우지 않기로 함, ADR-0011).

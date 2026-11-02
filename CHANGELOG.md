@@ -18,7 +18,7 @@
 ### Changed
 - 시작 경합 처리를 `DatedJobLauncher` · `DatedJobSingleRunGuard` 로 뽑아 대사와 같이 쓴다 (대사 동작 변화 없음).
 - 스케줄 풀 3 → 4. `Job` 빈이 둘이 되어 대사 쪽 주입에 `@Qualifier`.
-- 부하 측정 실행 구성 · 명령줄에 `--data-retention.schedule.enabled=false` (명령줄에는 빠져 있던 `--daily-recon.schedule.enabled=false` 도).
+- 부하 측정 실행 구성 · 명령줄에 `--data-retention.schedule.enabled=false`.
 ### Fixed
 - `AlertConfigurationTest` 가 PC 의 `ALERT_TELEGRAM_*` 환경 변수에 좌우되던 P5-1 테스트 버그 (커밋 `3be03bb`).
 
