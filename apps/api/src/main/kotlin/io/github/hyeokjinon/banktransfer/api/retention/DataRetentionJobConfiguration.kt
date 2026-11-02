@@ -1,11 +1,15 @@
 package io.github.hyeokjinon.banktransfer.api.retention
 
+import io.github.hyeokjinon.banktransfer.api.alert.AlertNotifier
 import io.github.hyeokjinon.banktransfer.api.batch.DatedJobSingleRunGuard
 import org.springframework.batch.core.job.Job
 import org.springframework.batch.core.job.builder.JobBuilder
 import org.springframework.batch.core.job.parameters.DefaultJobParametersValidator
+import org.springframework.batch.core.launch.JobOperator
 import org.springframework.batch.core.repository.JobRepository
 import org.springframework.batch.core.step.builder.StepBuilder
+import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -13,6 +17,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.interceptor.DefaultTransactionAttribute
+import java.time.Clock
 import java.time.Duration
 
 /**
@@ -33,6 +38,15 @@ class DataRetentionJobConfiguration {
         props: DataRetentionProperties,
         repo: RetentionRepository,
     ): Job = buildDataRetentionJob(jobRepository, transactionManager, props, repo::deleteOutboxEvents, repo::deleteVerifications)
+
+    @Bean
+    fun dataRetentionLauncher(jobOperator: JobOperator, @Qualifier(DataRetention.JOB_NAME) job: Job, jobRepository: JobRepository, alerts: AlertNotifier) =
+        DataRetentionLauncher(jobOperator, job, jobRepository, alerts)
+
+    @Bean
+    @ConditionalOnProperty(prefix = "data-retention.schedule", name = ["enabled"], havingValue = "true", matchIfMissing = true)
+    fun dataRetentionScheduler(launcher: DataRetentionLauncher, clock: Clock, props: DataRetentionProperties, alerts: AlertNotifier) =
+        DataRetentionScheduler(launcher::run, clock, props.schedule.zone, alerts)
 }
 
 /** 잡 모양. 삭제 함수를 받는 이유: 재시작 · 동시 실행 테스트가 같은 잡에 실패 · 멈춤을 끼운다 (행 락으로 만들면 묶음 순서가 옵티마이저에 달려 흔들린다). */

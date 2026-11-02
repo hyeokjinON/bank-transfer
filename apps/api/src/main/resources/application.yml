@@ -4,7 +4,7 @@ spring:
   task:
     scheduling:
       pool:
-        size: 3   # 발행기(0.5초) · 정리 작업(10초) · 일마감 대사(01 ~ 06시, 동기로 수 초)가 서로 막지 않게 (P5-1 에서 2 → 3)
+        size: 4   # 발행기(0.5초) · 정리 작업(10초) · 일마감 대사(01 ~ 06시) · 보존 배치(06:30, 밀린 행이 많으면 길다)가 서로 막지 않게 (P5-2 에서 3 → 4)
   mvc:
     problemdetails:
       enabled: true   # ApiExceptionHandler 가 ResponseEntityExceptionHandler 를 상속하므로 표준 오류도 ProblemDetail + code 로 응답한다 (Boot 기본 핸들러는 물러난다. 설정은 명시용으로 유지)

@@ -2,8 +2,11 @@ package io.github.hyeokjinon.banktransfer.api.retention
 
 import io.github.hyeokjinon.banktransfer.api.support.ApiIntegrationTest
 import org.junit.jupiter.api.AfterEach
+import org.springframework.batch.core.BatchStatus
+import org.springframework.batch.core.job.JobExecution
 import org.springframework.batch.core.launch.JobOperator
 import org.springframework.batch.core.repository.JobRepository
+import org.springframework.batch.infrastructure.item.ExecutionContext
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.transaction.PlatformTransactionManager
@@ -11,6 +14,7 @@ import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.util.UUID
 
 /**
@@ -78,6 +82,27 @@ abstract class RetentionTestSupport : ApiIntegrationTest() {
 
     protected fun verificationExists(id: String): Boolean =
         jdbc.queryForObject("SELECT COUNT(*) FROM account_verification WHERE id = ?", Int::class.java, id) == 1
+
+    /** [day] 의 STARTED 실행 — 다른 곳이 돌고 있거나, 도중에 JVM 이 죽어 남은 실행. */
+    protected fun startedExecution(day: LocalDate): JobExecution {
+        val params = DataRetention.parameters(day)
+        val instance = jobRepository.getJobInstance(DataRetention.JOB_NAME, params) ?: jobRepository.createJobInstance(DataRetention.JOB_NAME, params)
+        return jobRepository.createJobExecution(instance, params, ExecutionContext()).also {
+            it.status = BatchStatus.STARTED
+            it.setStartTime(LocalDateTime.now())
+            jobRepository.update(it)
+        }
+    }
+
+    /** 이 날짜는 다시 쓰지 않지만 '돌고 있는 실행' 으로 남기지 않는다. */
+    protected fun abandon(vararg executions: JobExecution) = executions.forEach {
+        it.status = BatchStatus.FAILED
+        it.setEndTime(LocalDateTime.now())   // 게터는 @Nullable, 세터는 non-null 이라 Kotlin 속성 대입이 안 된다
+        jobRepository.update(it)
+    }
+
+    protected fun executions(day: LocalDate): List<JobExecution> =
+        jobRepository.getJobInstance(DataRetention.JOB_NAME, DataRetention.parameters(day))?.let { jobRepository.getJobExecutions(it) } ?: emptyList()
 
     private companion object {
         const val VERIFICATION_INSERT =
