@@ -65,17 +65,41 @@ class RetentionLockTest : RetentionTestSupport() {
         val published = outboxRow(cutoff.minusSeconds(60))
         outboxRow(publishedAt = null)   // 마지막 미발행 행 — 새 행은 이 행과 위 발행 행 사이로 들어간다
         val inserted = UUID.randomUUID().toString()
+        var insert: CompletableFuture<InsertOutcome>? = null
+        var failure: Throwable? = null
         try {
             val outcome = TransactionTemplate(transactionManager, definition).execute { status ->
                 status.setRollbackOnly()
                 assertEquals(1, retention.deleteOutboxEvents(cutoff, 1_000))
-                CompletableFuture.supplyAsync { insertUnpublished(inserted) }.get(WAIT_BOUND_SECONDS, TimeUnit.SECONDS)
+                val started = CompletableFuture.supplyAsync { insertUnpublished(inserted) }
+                insert = started
+                started.get(WAIT_BOUND_SECONDS, TimeUnit.SECONDS)
             }!!
             assertTrue(outboxExists(published))
             return outcome
+        } catch (e: Throwable) {
+            failure = e
+            throw e
         } finally {
-            jdbc.update("DELETE FROM outbox_event WHERE aggregate_id = ?", inserted)
+            // 정리가 실패해도 진짜 실패 원인을 가리지 않는다: 원래 예외를 주(主)로 두고 정리 실패는 suppressed 로 붙인다
+            try {
+                insert?.let(::awaitSettled)
+                jdbc.update("DELETE FROM outbox_event WHERE aggregate_id = ?", inserted)
+            } catch (cleanup: Throwable) {
+                if (failure == null) throw cleanup
+                failure.addSuppressed(cleanup)
+            }
         }
+    }
+
+    /**
+     * 바깥 Future 가 시간 초과해도 비동기 INSERT 는 취소되지 않는다. 먼저 지우면 늦은 INSERT 가 그 뒤에 커밋되어 미발행 행이 공유 DB 에 남고,
+     * 표 전체를 세는 OutboxRelayTest 가 엉뚱한 곳에서 깨진다. 삭제 트랜잭션은 이미 되돌렸으므로 INSERT 를 막는 것은 없다.
+     * 그래도 안 끝나면 지워도 소용없으니 정리하지 않고 시끄럽게 실패한다. INSERT 의 성공 · 실패는 여기서 보지 않는다 — 끝났는지만 본다.
+     */
+    private fun awaitSettled(insert: CompletableFuture<InsertOutcome>) {
+        runCatching { insert.get(SETTLE_BOUND_SECONDS, TimeUnit.SECONDS) }
+        check(insert.isDone) { "outbox INSERT did not settle within $SETTLE_BOUND_SECONDS seconds - an unpublished row may remain in the shared DB" }
     }
 
     private fun record(label: String, outcome: InsertOutcome) = println("[RetentionLockTest] observed: $label = $outcome")
@@ -100,6 +124,7 @@ class RetentionLockTest : RetentionTestSupport() {
         const val LOCK_WAIT_SECONDS = 2
         const val POOL_LOCK_WAIT_SECONDS = 5
         const val WAIT_BOUND_SECONDS = 20L
+        const val SETTLE_BOUND_SECONDS = LOCK_WAIT_SECONDS + 10L
         const val ER_LOCK_WAIT_TIMEOUT = 1205
     }
 }
