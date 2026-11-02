@@ -105,6 +105,20 @@ class RetentionRepositoryTest : RetentionTestSupport() {
     }
 
     @Test
+    fun `1원인증 - 목록에 없는 새 상태는 expires_at 이 기준보다 한참 전이어도 지우지 않는다 (VERIFIED 가 아닌 것 전부가 아니라 목록)`() {
+        val cutoff = nextCutoff()
+        val unknownStatus = verificationRow("PENDING", cutoff.minus(Duration.ofDays(365)))   // VARCHAR(10) 에 맞는 가상의 새 상태
+
+        try {
+            assertEquals(0, retention.deleteVerifications(cutoff, anyLimit))
+
+            assertTrue(verificationExists(unknownStatus))
+        } finally {
+            jdbc.update("DELETE FROM account_verification WHERE id = ?", unknownStatus)
+        }
+    }
+
+    @Test
     fun `1원인증 - 한 번에 limit 행까지만 지운다`() {
         val cutoff = nextCutoff()
         verificationRows(3, "SENT", cutoff.minusSeconds(1))

@@ -10,6 +10,7 @@ import org.springframework.batch.core.job.JobExecution
 import org.springframework.batch.core.job.SimpleJob
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.context.ApplicationContext
 import org.springframework.http.MediaType
 import org.springframework.orm.jpa.JpaTransactionManager
 import org.springframework.test.util.ReflectionTestUtils
@@ -32,6 +33,7 @@ class DataRetentionJobTest : RetentionTestSupport() {
 
     @Autowired @Qualifier(DataRetention.JOB_NAME) private lateinit var job: Job
     @Autowired private lateinit var verifications: VerificationRepository
+    @Autowired private lateinit var context: ApplicationContext
 
     private fun start(day: LocalDate, target: Job = job): JobExecution = jobOperator.start(target, DataRetention.parameters(day))
 
@@ -44,6 +46,12 @@ class DataRetentionJobTest : RetentionTestSupport() {
             .header("Idempotency-Key", UUID.randomUUID().toString())
             .body(mapOf("bankCode" to "090", "accountNo" to account, "amount" to 1_000, "memo" to "보존"))
             .exchange { _, response -> response.statusCode.value() }
+
+    @Test
+    fun `테스트에서는 06시 30분 스케줄이 꺼져 있다 - 속성 이름이 틀리면 스케줄이 켜진 채 다른 테스트의 DB 를 지운다`() {
+        // data-retention.schedule.enabled=false (ApiIntegrationTest) 가 DataRetentionJobConfiguration 의 ConditionalOnProperty 와 같은 이름이어야 빈이 없다
+        assertTrue(context.getBeansOfType(DataRetentionScheduler::class.java).isEmpty())
+    }
 
     @Test
     fun `핵심 - expires_at 이 지난 VERIFIED 는 남고, 잡 뒤에도 그 사용자의 출금이 202 다`() {
