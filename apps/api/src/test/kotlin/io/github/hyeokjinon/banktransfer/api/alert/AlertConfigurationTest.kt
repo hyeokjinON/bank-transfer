@@ -20,13 +20,15 @@ class AlertConfigurationTest {
 
     @Test
     fun `설정이 없으면 LogNotifier`() {
-        runner.run { ctx -> assertIs<LogNotifier>(ctx.getBean(AlertNotifier::class.java)) }
+        // 이 PC 에는 환경변수(SETUP 2-6)가 있어 바인딩되므로, 없는 값은 빈 값으로 못박아 환경에 좌우되지 않게 한다
+        runner.withPropertyValues("alert.telegram.bot-token=", "alert.telegram.chat-id=").run { ctx -> assertIs<LogNotifier>(ctx.getBean(AlertNotifier::class.java)) }
     }
 
     @Test
     fun `토큰만 있거나 chat id 만 있으면 LogNotifier`() {
-        runner.withPropertyValues("alert.telegram.bot-token=123:TEST").run { ctx -> assertIs<LogNotifier>(ctx.getBean(AlertNotifier::class.java)) }
-        runner.withPropertyValues("alert.telegram.chat-id=42").run { ctx -> assertIs<LogNotifier>(ctx.getBean(AlertNotifier::class.java)) }
+        // 없는 쪽은 빈 값으로 못박는다 — PC 의 환경변수(SETUP 2-6)가 채워 넣지 못하게
+        runner.withPropertyValues("alert.telegram.bot-token=123:TEST", "alert.telegram.chat-id=").run { ctx -> assertIs<LogNotifier>(ctx.getBean(AlertNotifier::class.java)) }
+        runner.withPropertyValues("alert.telegram.bot-token=", "alert.telegram.chat-id=42").run { ctx -> assertIs<LogNotifier>(ctx.getBean(AlertNotifier::class.java)) }
     }
 
     @Test
