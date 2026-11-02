@@ -5,6 +5,9 @@ import io.github.hyeokjinon.banktransfer.api.config.BankRejectedException
 import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconAlreadyCompletedException
 import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconDateNotClosedException
 import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconRunningException
+import io.github.hyeokjinon.banktransfer.api.retention.RetentionAlreadyCompletedException
+import io.github.hyeokjinon.banktransfer.api.retention.RetentionDateInFutureException
+import io.github.hyeokjinon.banktransfer.api.retention.RetentionRunningException
 import io.github.hyeokjinon.banktransfer.gateway.BankTimeoutException
 import io.github.hyeokjinon.banktransfer.gateway.BankUnavailableException
 import io.github.hyeokjinon.banktransfer.transfer.TransferException
@@ -70,6 +73,9 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
         ReconAlreadyCompletedException::class,
         ReconRunningException::class,
         ReconDateNotClosedException::class,
+        RetentionAlreadyCompletedException::class,
+        RetentionRunningException::class,
+        RetentionDateInFutureException::class,
     )
     fun handle(e: Exception): ResponseEntity<ProblemDetail> {
         val cause = if (e is CompletionException && e.cause != null) e.cause!! else e
@@ -103,6 +109,10 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
             is ReconAlreadyCompletedException -> HttpStatus.CONFLICT to "RECON_ALREADY_COMPLETED"
             is ReconRunningException -> HttpStatus.CONFLICT to "RECON_RUNNING"
             is ReconDateNotClosedException -> HttpStatus.BAD_REQUEST to "RECON_DATE_NOT_CLOSED"
+            // P5-2 보존 배치 관리 API. 대사와 같이 날짜마다 잡 인스턴스 하나
+            is RetentionAlreadyCompletedException -> HttpStatus.CONFLICT to "RETENTION_ALREADY_COMPLETED"
+            is RetentionRunningException -> HttpStatus.CONFLICT to "RETENTION_RUNNING"
+            is RetentionDateInFutureException -> HttpStatus.BAD_REQUEST to "RETENTION_DATE_IN_FUTURE"
             else -> {
                 log.error("unexpected error", cause)
                 HttpStatus.INTERNAL_SERVER_ERROR to "INTERNAL_ERROR"
