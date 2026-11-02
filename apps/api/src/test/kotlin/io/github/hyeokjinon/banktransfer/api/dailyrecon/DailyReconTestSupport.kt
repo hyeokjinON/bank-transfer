@@ -13,6 +13,7 @@ import org.springframework.batch.core.job.JobExecution
 import org.springframework.batch.core.launch.JobOperator
 import org.springframework.batch.core.repository.JobRepository
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.jdbc.core.JdbcTemplate
 import java.nio.file.Files
 import java.time.Instant
@@ -33,7 +34,7 @@ abstract class DailyReconTestSupport : ApiIntegrationTest() {
     @Autowired protected lateinit var jdbc: JdbcTemplate
     @Autowired protected lateinit var props: DailyReconProperties
     @Autowired protected lateinit var jobOperator: JobOperator
-    @Autowired protected lateinit var job: Job
+    @Autowired @Qualifier(DailyRecon.JOB_NAME) protected lateinit var job: Job
     @Autowired protected lateinit var jobRepository: JobRepository
 
     private val references = RandomReferenceGenerator()
