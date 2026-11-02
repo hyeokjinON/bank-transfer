@@ -3,6 +3,8 @@ name: 7-2 (수동) 같은 날짜 다시 → 409 RETENTION_ALREADY_COMPLETED
 method: POST
 url: '{{baseUrl}}/admin/retention-runs?date={{retentionDate}}'
 order: 2000
+description: |-
+  7-1 을 보낸 뒤에만 보낸다. 그 날짜가 아직 끝나지 않았다면 이 요청이 첫 실제 삭제가 되어 7-1 과 같이 이 DB 의 오래된 행을 영구히 지운다 (7-1 의 경고 참고).
 scripts:
   - type: beforeRequest
     language: text/javascript

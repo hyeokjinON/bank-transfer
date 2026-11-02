@@ -424,4 +424,4 @@ DELETE FROM BATCH_JOB_INSTANCE WHERE JOB_INSTANCE_ID = ? AND NOT EXISTS (SELECT 
 ### 10-5. 함께 알아 둘 것
 - 만료 후 30일이 지난 인증을 확인하면 "만료"(410) 대신 404 `VERIFICATION_NOT_FOUND` 다.
 - 한 번도 쓰지 않는 `VERIFIED` 는 영원히 남는다 — 인증에 만료 정책이 생길 때 다룬다.
-- 손 확인은 [`http/data-retention.http`](http/data-retention.http), Postman 7 폴더.
+- 손 확인은 [`http/data-retention.http`](http/data-retention.http), Postman 7 폴더. **손 확인의 실행(1) · 7-1)도 시드만이 아니라 그 DB 의 정책에 맞는 모든 행을 영구히 지운다.** 먼저 §10-1 의 `SELECT COUNT(*)` 로 대상을 보고, 옛 행이 소중하면 버려도 되는 별도 DB 에서 한다. 1-1) · 7-2 는 앞 실행이 끝난 뒤에만 보낸다.

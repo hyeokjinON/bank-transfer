@@ -4,7 +4,10 @@ method: POST
 url: '{{baseUrl}}/admin/retention-runs?date={{retentionDate}}'
 order: 1000
 description: |-
-  수동 확인 전용 — manualRetention 이 true 일 때만 나간다 (실제로 지운다). 준비: http/data-retention.http 0) 의 시드와 실행 명령.
+  !! 되돌릴 수 없는 삭제. 시드만이 아니라 이 DB 에서 정책에 맞는 모든 행을 영구히 지운다 — 발행된 지 7일이 지난 모든 outbox_event(이전 손 확인 · k6 가 남긴 것 포함, 미발행은 남음)와
+  만료 후 30일이 지난 SENT · EXPIRED · LOCKED account_verification(VERIFIED 는 남음). 기준은 retentionDate 00:00 KST. 옛 행이 소중하면 버려도 되는 별도 DB 에서 한다.
+  보내기 전에 http/data-retention.http 1) 앞의 SELECT COUNT(*) 두 개로 대상 건수를 먼저 본다.
+  수동 확인 전용 — manualRetention 이 true 일 때만 나간다. 준비: http/data-retention.http 0) 의 시드와 실행 명령.
   retentionDate 가 비어 있으면 오늘(KST)을 넣는다. 지난 날을 넣으면 기준이 더 과거라 지우는 범위가 좁아진다.
 scripts:
   - type: beforeRequest
