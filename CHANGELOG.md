@@ -9,6 +9,19 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
+## [P5-2] 보존 배치 — 진행 중 (브랜치 `feat/p5-2-data-retention`)
+### Added
+- Spring Batch 6 잡 `dataRetentionJob`(① `purgeOutbox` ② `purgeVerifications`), `DELETE … LIMIT n` 을 READ COMMITTED 트랜잭션마다 한 번. 발행된 `outbox_event`(7일) · `VERIFIED` 가 아닌 만료 `account_verification`(30일)만 지운다.
+- Flyway V5 `idx_verification_purge (status, expires_at)`, 설정 `data-retention.*`(범위를 벗어나면 기동 실패).
+- 스케줄 매일 06:30 KST · `POST /admin/retention-runs`(200 / 409 `RETENTION_ALREADY_COMPLETED` · `RETENTION_RUNNING` / 400 `RETENTION_DATE_IN_FUTURE`), 실패 WARN 알림.
+- `http/data-retention.http`, Postman 7 폴더, ADR-0011, database.md 보존 정책표(§4-9), OPERATION §10.
+### Changed
+- 시작 경합 처리를 `DatedJobLauncher` · `DatedJobSingleRunGuard` 로 뽑아 대사와 같이 쓴다 (대사 동작 변화 없음).
+- 스케줄 풀 3 → 4. `Job` 빈이 둘이 되어 대사 쪽 주입에 `@Qualifier`.
+- 부하 측정 실행 구성 · 명령줄에 `--data-retention.schedule.enabled=false` (명령줄에는 빠져 있던 `--daily-recon.schedule.enabled=false` 도).
+### Fixed
+- `AlertConfigurationTest` 가 PC 의 `ALERT_TELEGRAM_*` 환경 변수에 좌우되던 P5-1 테스트 버그 (커밋 `3be03bb`).
+
 ## [P5-1] 일마감 대사 · 은행 점검 시간 · 알림 — 2026-10-30 ([#15](https://github.com/hyeokjinON/bank-transfer/pull/15), 머지 후 정리 [#16](https://github.com/hyeokjinON/bank-transfer/pull/16))
 ### Added
 - 대사 파일 형식 v0.3 (`ReconFileFormat`, 헤더 · 상세 · 트레일러, 59바이트 레코드), 모의 은행 거래 기록 · 재기동 복원 · 00:05 일마감 · `--close-day` · `--bank-files`.

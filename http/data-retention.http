@@ -1,0 +1,62 @@
+### IntelliJ HTTP Client 로 보존 배치 확인 (P5-2). 머지 전 손 확인 — 로컬 infra MySQL 에 행을 심고 지운다.
+### 준비: infra up, 모의 은행 "1. Mock Bank (9090)". API 는 미발행 행이 발행되지 않게 발행기를 끄고, 06:30 스케줄도 끈 채로:
+###   ./gradlew :apps:api:bootRun --args="--transfer.outbox.relay.enabled=false --data-retention.schedule.enabled=false"
+
+### 날짜 — 1) · 2) 에서 쓴다. 오늘(KST)로 직접 고친다 (Git Bash: TZ=Asia/Seoul date +%F).
+@retentionDate = 2026-11-02
+
+### ============================================================
+### 0) 시드 — MySQL 클라이언트로 직접 (접속은 infra/README.md "직접 만져 보기"). 모두 'retention-hand' 로 시작해 끝에 지운다.
+###    -- 아웃박스: 8일 전 발행(지움) · 6일 전 발행(남음) · 미발행(남음)
+###    INSERT INTO outbox_event (aggregate_id, event_type, payload, created_at, published_at) VALUES
+###      ('retention-hand-old', 'TransferRequested', '{}', NOW(6), NOW(6) - INTERVAL 8 DAY),
+###      ('retention-hand-new', 'TransferRequested', '{}', NOW(6), NOW(6) - INTERVAL 6 DAY),
+###      ('retention-hand-pending', 'TransferRequested', '{}', NOW(6) - INTERVAL 40 DAY, NULL);
+###    -- 인증: SENT · EXPIRED · LOCKED 31일 전 만료(지움), SENT 29일 전 만료(남음), VERIFIED 31일 전 만료(남음)
+###    INSERT INTO account_verification (id, user_id, bank_code, account_no, holder_name, code_hash, status, failed_attempts, expires_at, created_at) VALUES
+###      ('retention-hand-sent', 'user-retention', '090', '5500000000099', '홍길동', REPEAT('0', 64), 'SENT', 0, NOW(6) - INTERVAL 31 DAY, NOW(6)),
+###      ('retention-hand-expired', 'user-retention', '090', '5500000000099', '홍길동', REPEAT('0', 64), 'EXPIRED', 0, NOW(6) - INTERVAL 31 DAY, NOW(6)),
+###      ('retention-hand-locked', 'user-retention', '090', '5500000000099', '홍길동', REPEAT('0', 64), 'LOCKED', 5, NOW(6) - INTERVAL 31 DAY, NOW(6)),
+###      ('retention-hand-fresh', 'user-retention', '090', '5500000000099', '홍길동', REPEAT('0', 64), 'SENT', 0, NOW(6) - INTERVAL 29 DAY, NOW(6)),
+###      ('retention-hand-verified', 'user-retention', '090', '1002123456789', '홍길동', REPEAT('0', 64), 'VERIFIED', 0, NOW(6) - INTERVAL 31 DAY, NOW(6));
+###    -- 실행 계획 (database.md §9 의 EXPLAIN 두 줄, 기준 날짜를 고쳐서). 결과를 HANDOVER 손 확인에 적는다
+
+### 0-1) 시드 사용자 충전 → 200
+POST http://localhost:8080/api/v1/wallet/deposits
+Content-Type: application/json
+X-User-Id: user-retention
+
+{
+  "amount": 100000
+}
+
+### ============================================================
+### 1) 실행 → 200 {"status":"COMPLETED","reason":null,"deleted":{"outboxEvents":1 이상,"verifications":3 이상}} (로컬 DB 의 다른 오래된 행도 조건에 맞으면 함께 지운다)
+###    SQL 확인: SELECT aggregate_id, published_at FROM outbox_event WHERE aggregate_id LIKE 'retention-hand%';  → new · pending 만
+###             SELECT id, status FROM account_verification WHERE id LIKE 'retention-hand%';                    → fresh · verified 만
+POST http://localhost:8080/admin/retention-runs?date={{retentionDate}}
+
+### 1-1) 다시 보내면 409 RETENTION_ALREADY_COMPLETED
+POST http://localhost:8080/admin/retention-runs?date={{retentionDate}}
+
+### 1-2) 내일 이후는 400 RETENTION_DATE_IN_FUTURE (고치지 않아도 되게 먼 미래 날짜)
+POST http://localhost:8080/admin/retention-runs?date=2099-12-31
+
+### ============================================================
+### 2) 핵심: expires_at 이 지난 VERIFIED 사용자의 출금 → 202. 422 ACCOUNT_NOT_VERIFIED 면 VERIFIED 를 지운 것이다
+POST http://localhost:8080/api/v1/transfers
+Content-Type: application/json
+X-User-Id: user-retention
+Idempotency-Key: {{$random.uuid}}
+
+{
+  "bankCode": "090",
+  "accountNo": "1002123456789",
+  "amount": 1000,
+  "memo": "보존"
+}
+
+### ============================================================
+### 3) 정리 (MySQL): DELETE FROM outbox_event WHERE aggregate_id LIKE 'retention-hand%';
+###                 DELETE FROM account_verification WHERE id LIKE 'retention-hand%';
+###    2) 의 출금은 RECEIVED + 미발행으로 남는다 — 발행기를 켠 구성으로 다시 띄우면 평소처럼 처리된다

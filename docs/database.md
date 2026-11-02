@@ -1,8 +1,8 @@
 # 데이터베이스 — 모델 정의와 구조
 
-> 기준: P5-1 (Flyway `V1` ~ `V4` 적용). 1원인증 · 이체 · 아웃박스 · 지갑 · 원장 · 대사(은행 줄 · 이슈) 테이블과 Spring Batch 메타 표가 MySQL 에 있다.
+> 기준: P5-2 (Flyway `V1` ~ `V5` 적용). 1원인증 · 이체 · 아웃박스 · 지갑 · 원장 · 대사(은행 줄 · 이슈) 테이블과 Spring Batch 메타 표가 MySQL 에 있다.
 > 이 문서가 스키마의 기준이다. 마이그레이션을 추가할 때 이 문서도 같은 PR 에서 고친다.
-> 설계 배경: [P3 설계 문서](superpowers/specs/2026-10-19-p3-transfer-design.md) §2~§6 · [P4-1 설계](superpowers/specs/2026-10-26-p4-1-wallet-balance-design.md) · [P4-2 설계](superpowers/specs/2026-10-27-p4-2-lock-comparison-design.md) · [P5-1 설계](superpowers/specs/2026-10-29-p5-1-daily-reconciliation-design.md)
+> 설계 배경: [P3 설계 문서](superpowers/specs/2026-10-19-p3-transfer-design.md) §2~§6 · [P4-1 설계](superpowers/specs/2026-10-26-p4-1-wallet-balance-design.md) · [P4-2 설계](superpowers/specs/2026-10-27-p4-2-lock-comparison-design.md) · [P5-1 설계](superpowers/specs/2026-10-29-p5-1-daily-reconciliation-design.md) · [P5-2 설계](superpowers/specs/2026-11-02-p5-2-data-retention-design.md)
 
 ## 1. 개요
 
@@ -117,7 +117,7 @@ erDiagram
 점선 관계는 **논리적 관계**이고 **외래키(FK)를 걸지 않는다**.
 - `account_verification` 과 `transfer` 는 다른 모듈(account / transfer)의 데이터다. P8 에서 서비스를 나누면 DB 도 나뉠 수 있으므로 모듈 경계를 넘는 FK 를 만들지 않는다 ([ADR-0001](adr/0001-modular-monolith-ports.md)). 검증은 코드(`VerifiedAccounts` 포트)가 한다.
 - `outbox_event` 는 여러 종류의 집합(aggregate)을 담을 수 있는 범용 테이블이라 특정 테이블에 FK 를 걸지 않는다.
-- `wallet_ledger` 는 append-only 기록이라 이체 행 삭제 · 보존 정책(P5-2)과 묶지 않는다. `wallet` 도 마찬가지로 FK 없이 `user_id` 로만 잇는다.
+- `wallet_ledger` 는 append-only 기록이라 이체 행 삭제 · 보존 정책(§4-9)과 묶지 않는다. `wallet` 도 마찬가지로 FK 없이 `user_id` 로만 잇는다.
 - `bank_statement_line` · `recon_issue` 도 FK 없이 거래번호(`reference`) · `transfer_id` · `user_id` 로만 잇는다 — 은행 쪽 기록은 우리에게 없는 거래번호를 담을 수 있고, 이슈는 이체 행과 수명이 다르다.
 
 ## 4. 테이블 정의
@@ -137,9 +137,12 @@ erDiagram
 | `verified_at` | `DATETIME(6)` | Y | 인증 완료 시각 |
 | `created_at` | `DATETIME(6)` | N | 생성 시각 |
 
+`VERIFIED` 가 아닌 만료 행은 보존 배치가 지운다 (§4-9). `expires_at` 은 코드 입력 시한이라 `VERIFIED` 도 지나 있다 — 출금은 `status = VERIFIED` 만 보므로 이 행을 지우면 안 된다.
+
 인덱스:
 - `idx_verification_account (bank_code, account_no, status)` — "이 계좌가 VERIFIED 인가?" 조회 (P3)
 - `idx_verification_user_account (user_id, bank_code, account_no, status)` — 출금 계좌 확인 ("이 사용자가 이 계좌를 인증했는가?", V3)
+- `idx_verification_purge (status, expires_at)` — 보존 배치의 삭제 조건 (V5, P5-2). 없으면 묶음마다 표 전체를 훑는다
 
 ### 4-2. `transfer` — 출금이체 (transfer 모듈, P3-1)
 | 컬럼 | 타입 | NULL | 설명 |
@@ -180,6 +183,7 @@ erDiagram
 | `published_at` | `DATETIME(6)` | Y | Kafka 발행 완료 시각. `NULL` = 미발행. 브로커가 받았다고 확인한 뒤 `NOW(6)`로 기록한다. `NOW(6)` 은 세션 시간대를 따르고, 세션 시간대는 JDBC `forceConnectionTimeZoneToSession=true` + `connectionTimeZone=Asia/Seoul` 이 KST 로 맞춘다 (서버 시간대만의 결과가 아니다, §2) |
 
 인덱스: `idx_outbox_unpublished (published_at, id)` — `WHERE published_at IS NULL ORDER BY id LIMIT 100` 를 인덱스만으로 처리.
+발행 뒤 7일이 지난 행은 보존 배치가 지운다 (§4-9). 범위 삭제가 이 인덱스를 탄다. 미발행은 NULL 이라 비교에 걸리지 않는다.
 
 발행 메시지 모양 (`transfer.requested`, [ADR-0005](adr/0005-kafka-delivery-and-consumer-idempotency.md)): key = `aggregate_id`(이체 id), value = `{"transferId", "occurredAt", "eventId"}`. 같은 이체의 메시지는 같은 파티션으로 간다.
 
@@ -264,6 +268,20 @@ append-only. 대사가 읽기만 하고 고치지 않는다.
 
 append-only — 사람이 `resolved_at` · `resolution_note` 만 채운다. DB 에는 계좌 원문이 있다 — 알림으로 나갈 때만 가린다.
 
+### 4-9. 보존 정책 (P5-2)
+| 표 | 정책 | 조건 · 이유 |
+|---|---|---|
+| `outbox_event` | 발행 뒤 7일 지나면 삭제 | `published_at < 기준`. 미발행은 아무리 오래돼도 남는다. 7일은 브로커 기본 보존과 같아 그동안 Kafka 메시지와 대조할 수 있다 |
+| `account_verification` | 만료 뒤 30일 지나면 삭제 (`VERIFIED` 제외) | `status IN ('SENT','EXPIRED','LOCKED') AND expires_at < 기준`. 끝나지 않은 인증이 예금주명 · 계좌번호를 들고 있을 이유가 없다 |
+| `account_verification` 의 `VERIFIED` | 삭제하지 않음 | 출금 인증의 근거. `expires_at` 이 지나 있어도 지우면 그 사용자의 출금이 422 `ACCOUNT_NOT_VERIFIED` 다. 한 번도 쓰지 않는 `VERIFIED` 도 남는다 — 인증에 만료 정책이 생길 때 다룬다 |
+| `transfer` · `wallet_ledger` · `wallet` | 삭제하지 않음 | 전자금융거래 기록 · 잔고의 근거 |
+| `bank_statement_line` · `recon_issue` | 삭제하지 않음 | 대사 근거 · 감사 기록. 대사 ③ 이 모든 날짜의 줄을 본다 |
+| `BATCH_*` | 삭제하지 않음 | 하루 몇 행, 실행 이력 |
+
+기준 시각 = 실행 날짜 00:00(KST) − 보관 기간 (`data-retention.*`, OPERATION §10). 7일 · 30일은 법이 아니라 이 프로젝트의 운영 판단이다.
+
+**법정 보존 기간 (확인되지 않은 가정)**: 전자금융거래법 시행령 제12조 기준 5년(1만 원 이하 거래 등은 1년)으로 2차 자료에서 확인했고, 조문 원문은 확인하지 않았다. 이 프로젝트의 가정이며 실제 적용은 원문 · 금융위 고시 확인이 필요하다.
+
 ## 5. 상태 값
 상태는 MySQL `ENUM` 이 아니라 `VARCHAR` + Kotlin `enum` 으로 둔다. 값을 추가할 때 `ALTER TABLE ... MODIFY ENUM` (테이블 재작성 위험) 없이 코드만 바꾸면 되고, 허용 전이는 도메인이 검증한다.
 
@@ -303,6 +321,8 @@ append-only — 사람이 `resolved_at` · `resolution_note` 만 채운다. DB �
 | 충전 | `INSERT … ON DUPLICATE KEY UPDATE` | 지갑이 없으면 만들고 있으면 더한다 + `INSERT wallet_ledger`(DEPOSIT) |
 | 일마감 대사 ③ ④ (P5-1) | READ COMMITTED 청크 + 조건부 전이 | 0건이면 다시 읽어 판정(최대 3회). REPEATABLE READ 면 청크 첫 읽기의 스냅숏이라 바뀐 상태를 못 본다 |
 | 같은 날짜 대사 동시 실행 (P5-1) | 잡 인스턴스 UNIQUE + 실행 중 확인 + SingleRunGuard | 처음 시작 경합은 UNIQUE 에서 진 쪽이 DuplicateKeyException → 409 RECON_RUNNING. 실패한 날짜의 동시 재시작은 가드가 나중 실행을 멈춘다 |
+| 보존 배치 삭제 (P5-2) | READ COMMITTED + 트랜잭션마다 DELETE … LIMIT n 한 문장 | 짧은 트랜잭션, gap 락 없음. REPEATABLE READ 와 비교한 재현은 RetentionLockTest · ADR-0011 |
+| 같은 날짜 보존 배치 동시 실행 (P5-2) | 대사와 같은 코드 (DatedJobLauncher · DatedJobSingleRunGuard) | 진 쪽은 409 RETENTION_RUNNING |
 
 네 전략의 처리량 · 지연 비교(k6)는 [docs/perf/p4-2-lock-comparison.md](perf/p4-2-lock-comparison.md), 결정은 [ADR-0009](adr/0009-wallet-debit-strategies-and-lock-comparison.md).
 
@@ -315,7 +335,7 @@ append-only — 사람이 `resolved_at` · `resolution_note` 만 채운다. DB �
 - 개인정보 원문(인증코드)은 저장하지 않는다. 계좌번호 마스킹: `Transfer.toString()` 은 뒤 4자리만 남겨 로그에 원문이 찍히지 않는다. API 응답 마스킹은 인증 도입 때 적용한다.
 
 ## 8. 마이그레이션 규칙 (Flyway)
-- 파일명: `V<번호>__<설명>.sql` (예 `V1__init.sql`, `V2__transfer_republish.sql`, `V3__wallet.sql`, `V4__daily_reconciliation.sql`).
+- 파일명: `V<번호>__<설명>.sql` (예 `V1__init.sql`, `V2__transfer_republish.sql`, `V3__wallet.sql`, `V4__daily_reconciliation.sql`, `V5__data_retention.sql`).
 - **이미 적용된 파일은 고치지 않는다.** 바꿀 게 있으면 새 버전을 추가한다 (체크섬 불일치로 기동 실패).
 - 앱 기동 시 자동 적용. 테스트(Testcontainers)도 같은 파일로 스키마를 만든다.
 - 큰 테이블 변경(인덱스 추가 등)은 운영 반영 방법(온라인 DDL)을 PR 에 적는다.
@@ -407,13 +427,34 @@ WHERE i.JOB_NAME = 'dailyReconciliationJob' ORDER BY e.JOB_EXECUTION_ID DESC LIM
 ```
 `BATCH_*` 의 시각(`START_TIME` · `END_TIME`)은 KST 가 아니라 JVM 기본 시간대다 (§2). 이 PC 의 JVM 이 UTC 면 업무 표와 9시간 차이가 난다 — 실행 이력을 읽을 때 유의한다.
 
+### 보존 배치 (P5-2)
+```sql
+-- 첫 운영 실행 전 대상 확인 (건수 미리보기 기능은 없다). 기준은 실행 날짜 00:00 KST − 보관 기간
+SELECT COUNT(*) FROM outbox_event WHERE published_at < '2026-10-26 00:00:00';
+SELECT status, COUNT(*) FROM account_verification
+WHERE status IN ('SENT','EXPIRED','LOCKED') AND expires_at < '2026-10-03 00:00:00' GROUP BY status;
+
+-- 실행 이력 · 표별 삭제 건수 (실행 · 단계마다 한 줄, 재시작하면 여러 줄 — 더하면 응답의 deleted 와 같다)
+SELECT p.PARAMETER_VALUE AS retention_date, e.JOB_EXECUTION_ID, e.STATUS, s.STEP_NAME, s.WRITE_COUNT, s.COMMIT_COUNT, e.START_TIME, e.END_TIME
+FROM BATCH_JOB_INSTANCE i
+JOIN BATCH_JOB_EXECUTION e ON e.JOB_INSTANCE_ID = i.JOB_INSTANCE_ID
+JOIN BATCH_JOB_EXECUTION_PARAMS p ON p.JOB_EXECUTION_ID = e.JOB_EXECUTION_ID AND p.PARAMETER_NAME = 'retentionDate'
+LEFT JOIN BATCH_STEP_EXECUTION s ON s.JOB_EXECUTION_ID = e.JOB_EXECUTION_ID
+WHERE i.JOB_NAME = 'dataRetentionJob' ORDER BY e.JOB_EXECUTION_ID DESC, s.STEP_EXECUTION_ID LIMIT 40;
+
+-- 실행 계획 (행이 적으면 옵티마이저가 전체 훑기를 고를 수 있다 — 시드 데이터로 본다)
+EXPLAIN DELETE FROM outbox_event WHERE published_at < '2026-10-26 00:00:00' LIMIT 1000;
+EXPLAIN DELETE FROM account_verification WHERE status IN ('SENT','EXPIRED','LOCKED') AND expires_at < '2026-10-03 00:00:00' LIMIT 1000;
+```
+위 예시의 날짜는 2026-11-02 실행 기준이다.
+
 ## 10. 검토 중 · 다음 단계
 - **PK 타입**: 지금은 읽기 쉬운 `CHAR(36)` 무작위 UUID. InnoDB 는 PK 순서로 데이터를 저장하므로 무작위 값은 삽입 시 페이지 분할이 생기고 보조 인덱스도 커진다. 부하 측정 도구(`load/`, P4-2)로 `BINARY(16)` · 시간순 UUID(v7) · `BIGINT` 와 삽입 성능을 비교해 결정한다.
-- **데이터 보존**: 발행된 `outbox_event`, 만료된 `account_verification` 정리는 P5-2 보존 배치.
-- **잔고 락 전략**: P4-2 에서 네 전략을 바꿔 끼울 수 있게 했고 k6 로 비교했다 (ADR-0009, 결과 [docs/perf](perf/p4-2-lock-comparison.md) — 핫스팟은 조건부가 가장 빠르고 낙관적은 409 77%). 원장 보존(파티셔닝 · 보관)은 P5-2.
+- **데이터 보존**: 발행된 outbox_event · 만료된 account_verification 은 보존 배치가 지운다 (§4-9, P5-2). 한 번도 쓰지 않는 VERIFIED 는 남는다.
+- **잔고 락 전략**: P4-2 에서 네 전략을 바꿔 끼울 수 있게 했고 k6 로 비교했다 (ADR-0009, 결과 [docs/perf](perf/p4-2-lock-comparison.md) — 핫스팟은 조건부가 가장 빠르고 낙관적은 409 77%). 원장은 지우지 않는다 (§4-9). 아카이빙 · 파티셔닝은 범위 밖.
 - **읽기 성능**: 조회 API 가 늘면 실행계획(`EXPLAIN ANALYZE`) 결과를 이 문서에 남긴다.
 - **`transfer.sending_at` 단독 인덱스**: 대사 ③ 이 하루 범위를 훑는다 (지금은 전체 훑기, 하루 한 번이라 추가하지 않았다).
-- **대사 보존 · 파티셔닝**: `bank_statement_line` · `recon_issue` 는 매일 늘어난다 (P5-2 보존 배치).
+- **대사 기록 파티셔닝**: bank_statement_line · recon_issue 는 매일 늘지만 지우지 않는다 (§4-9). 커지면 파티셔닝을 검토한다.
 
 ## 변경 이력
 | 날짜 | 변경 | 관련 |
@@ -427,3 +468,4 @@ WHERE i.JOB_NAME = 'dailyReconciliationJob' ORDER BY e.JOB_EXECUTION_ID DESC LIM
 | 2026-10-26 | V3: wallet · wallet_ledger, transfer · account_verification 의 user_id, 멱등 UNIQUE 를 (user_id, idempotency_key) 로, 잔고 동시성 · 운영 쿼리(잔고 = 원장 합) | [PR #11](https://github.com/hyeokjinON/bank-transfer/pull/11) (P4-1) |
 | 2026-10-27 | 스키마 변경 없음. 동시성 표에 차감 전략 4종 · 락 대기 5초, `wallet.version` 의 낙관적 락 사용 | P4-2 (ADR-0009) |
 | 2026-10-29 | V4: Spring Batch 6 메타 표 · bank_statement_line · recon_issue, E002, 대사 동시성 · 운영 쿼리 | P5-1 (ADR-0010) |
+| 2026-11-02 | V5: idx_verification_purge, 보존 정책표(§4-9), 보존 배치 동시성 · 운영 쿼리 | P5-2 (ADR-0011) |

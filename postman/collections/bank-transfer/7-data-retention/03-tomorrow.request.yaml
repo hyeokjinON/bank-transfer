@@ -1,0 +1,19 @@
+$kind: http-request
+name: 7-3 내일 날짜 → 400 RETENTION_DATE_IN_FUTURE
+method: POST
+url: '{{baseUrl}}/admin/retention-runs?date={{tomorrow}}'
+order: 3000
+description: |-
+  내일 이후(KST)는 기준 시각이 앞당겨져 정책보다 일찍 지우게 되므로 거부한다. 아무것도 지우지 않아 언제나 안전하다.
+scripts:
+  - type: beforeRequest
+    language: text/javascript
+    code: |-
+      pm.collectionVariables.set("tomorrow", new Date(Date.now() + 33 * 3600 * 1000).toISOString().slice(0, 10));   // KST 내일
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("400 RETENTION_DATE_IN_FUTURE", () => {
+        pm.response.to.have.status(400);
+        pm.expect(pm.response.json().code).to.eql("RETENTION_DATE_IN_FUTURE");
+      });
