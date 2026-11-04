@@ -1,14 +1,12 @@
 package io.github.hyeokjinon.banktransfer.api.messaging
 
 import io.github.hyeokjinon.banktransfer.api.support.ApiIntegrationTest
+import io.github.hyeokjinon.banktransfer.api.support.awaitRecords
 import io.github.hyeokjinon.banktransfer.transfer.RandomReferenceGenerator
 import io.github.hyeokjinon.banktransfer.transfer.Transfer
 import io.github.hyeokjinon.banktransfer.transfer.TransferEvent
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus
 import io.github.hyeokjinon.banktransfer.transfer.TransferStore
-import org.apache.kafka.clients.consumer.ConsumerRecord
-import org.awaitility.kotlin.await
-import org.awaitility.kotlin.untilAsserted
 import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.jdbc.core.JdbcTemplate
@@ -70,17 +68,14 @@ class OutboxRelayTest : ApiIntegrationTest() {
         )
         assertNotNull(publishedAt)
 
-        // 별도 그룹의 소비자로 토픽을 처음부터 읽어 메시지 모양을 확인한다
-        consumerFactory.createConsumer("relay-test-${UUID.randomUUID()}", null).use { consumer ->
-            consumer.subscribe(listOf(TransferTopics.REQUESTED))
-            val seen = mutableListOf<ConsumerRecord<String, String>>()
-            await.atMost(Duration.ofSeconds(20)) untilAsserted {
-                seen += consumer.poll(Duration.ofMillis(500))
-                val record = seen.single { it.key() == transfer.id.toString() }
-                assertTrue("\"transferId\": \"${transfer.id}\"" in record.value() || "\"transferId\":\"${transfer.id}\"" in record.value(), record.value())
-                assertTrue("\"eventId\"" in record.value(), record.value())
-            }
-        }
+        // 토픽을 처음부터 끝 오프셋까지 읽어(assign, 그룹 없음) 메시지 모양을 확인한다.
+        // 그룹 구독 + poll 로 읽으면 안 된다: poll 한 번은 max-poll-records(50) 건까지만 주고(전체 빌드에서는 앞 테스트들의 레코드가 40건 넘게 쌓여 있다),
+        // 첫 poll 은 그룹 참여가 늦으면 빈 채로 끝난다. 거기서 single 이 NoSuchElementException 을 던지면 untilAsserted 는 AssertionError 만 다시 시도하므로 곧바로 실패했다
+        val records = consumerFactory.awaitRecords(TransferTopics.REQUESTED, transfer.id.toString(), timeout = Duration.ofSeconds(20))
+        assertEquals(1, records.size, "key=${transfer.id} 레코드가 ${records.size}건 (한 번만 발행돼야 한다)")
+        val value = records.single().value()
+        assertTrue("\"transferId\": \"${transfer.id}\"" in value || "\"transferId\":\"${transfer.id}\"" in value, value)
+        assertTrue("\"eventId\"" in value, value)
     }
 
     @Test
