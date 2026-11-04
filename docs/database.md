@@ -142,7 +142,7 @@ erDiagram
 인덱스:
 - `idx_verification_account (bank_code, account_no, status)` — "이 계좌가 VERIFIED 인가?" 조회 (P3)
 - `idx_verification_user_account (user_id, bank_code, account_no, status)` — 출금 계좌 확인 ("이 사용자가 이 계좌를 인증했는가?", V3)
-- `idx_verification_purge (status, expires_at)` — 보존 배치의 삭제 조건 (V5, P5-2). 이 인덱스로 범위를 좁히려는 설계다 — 실행 계획으로 확인하기 전이다(§9 의 대표 데이터 `EXPLAIN`)
+- `idx_verification_purge (status, expires_at)` — 보존 배치의 삭제 조건 (V5, P5-2). 대표 데이터 1만 행 `EXPLAIN` 에서 `range` 로 이 인덱스를 탔다 (§9, 2026-11-04 손 확인)
 
 ### 4-2. `transfer` — 출금이체 (transfer 모듈, P3-1)
 | 컬럼 | 타입 | NULL | 설명 |
@@ -183,7 +183,7 @@ erDiagram
 | `published_at` | `DATETIME(6)` | Y | Kafka 발행 완료 시각. `NULL` = 미발행. 브로커가 받았다고 확인한 뒤 `NOW(6)`로 기록한다. `NOW(6)` 은 세션 시간대를 따르고, 세션 시간대는 JDBC `forceConnectionTimeZoneToSession=true` + `connectionTimeZone=Asia/Seoul` 이 KST 로 맞춘다 (서버 시간대만의 결과가 아니다, §2) |
 
 인덱스: `idx_outbox_unpublished (published_at, id)` — `WHERE published_at IS NULL ORDER BY id LIMIT 100` 를 인덱스만으로 처리.
-발행 뒤 7일이 지난 행은 보존 배치가 지운다 (§4-9). 범위 삭제가 이 인덱스를 타도록 한 설계다 (실행 계획은 아직 확인하지 않았다, §9). 미발행은 NULL 이라 비교에 걸리지 않는다.
+발행 뒤 7일이 지난 행은 보존 배치가 지운다 (§4-9). 범위 삭제가 이 인덱스를 탄다 (대표 데이터 1만 행 `EXPLAIN` 에서 `range`, §9). 미발행은 NULL 이라 비교에 걸리지 않는다.
 
 발행 메시지 모양 (`transfer.requested`, [ADR-0005](adr/0005-kafka-delivery-and-consumer-idempotency.md)): key = `aggregate_id`(이체 id), value = `{"transferId", "occurredAt", "eventId"}`. 같은 이체의 메시지는 같은 파티션으로 간다.
 
@@ -447,6 +447,15 @@ EXPLAIN DELETE FROM outbox_event WHERE published_at < '2026-10-26 00:00:00' LIMI
 EXPLAIN DELETE FROM account_verification WHERE status IN ('SENT','EXPIRED','LOCKED') AND expires_at < '2026-10-03 00:00:00' LIMIT 1000;
 ```
 위 예시의 날짜는 2026-11-02 실행 기준이다.
+
+손 확인 결과 (2026-11-04, 개발 DB, `http/data-retention.http` 0-2 의 1만 행씩 · 표 전체 약 1만 행, `@d = '2026-11-04'`):
+
+| 문장 | type | key | key_len | rows | Extra |
+|---|---|---|---|---|---|
+| 아웃박스 삭제 | `range` | `idx_outbox_unpublished` | 9 | 400 | Using where |
+| 인증 삭제 | `range` | `idx_verification_purge` | 50 | 1000 | Using where |
+
+한 번의 결과이고 운영 크기 · 분포의 계획은 아니다.
 
 ## 10. 검토 중 · 다음 단계
 - **PK 타입**: 지금은 읽기 쉬운 `CHAR(36)` 무작위 UUID. InnoDB 는 PK 순서로 데이터를 저장하므로 무작위 값은 삽입 시 페이지 분할이 생기고 보조 인덱스도 커진다. 부하 측정 도구(`load/`, P4-2)로 `BINARY(16)` · 시간순 UUID(v7) · `BIGINT` 와 삽입 성능을 비교해 결정한다.
