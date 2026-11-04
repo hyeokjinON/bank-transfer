@@ -16,7 +16,8 @@
 | P4-2 락 전략 비교 | ✅ 완료 (2026-10-28, [#13](https://github.com/hyeokjinON/bank-transfer/pull/13)) | ADR-0009 채택, 테스트 240개. CI `build` · `infra-smoke` 통과. 차감 전략 4종 · 409/503 · k6 도구. 측정 24회 ([docs/perf](docs/perf/p4-2-lock-comparison.md)): 핫스팟 접수 조건부 106/s > 비관적 99 > Redis 81 > 낙관적 45(409 77%), 분산은 차이 없음. 손 확인: `redis` 전략 + Redis 정지 상태에서 API 기동 → 출금 접수 503 `WALLET_BUSY` + `Retry-After: 1`, 남은 출금 없음 (Postman 5-8 · curl, 인증 사용자 `user-p41`). `manualWalletBusy` 를 켜지 않고 Send 하면 5-8 이 나가지 않음(응답 없음)도 확인 |
 | P5-1 일마감 대사 | ✅ 완료 (2026-10-30, [#15](https://github.com/hyeokjinON/bank-transfer/pull/15)) | ADR-0010 채택, 테스트 370개. CI `build` · `infra-smoke` 통과. 대사 파일 v0.3 · 점검 시간 · Spring Batch 잡 · 알림. 손 확인 (`http/daily-recon.http` 순서를 curl 로, `user-1`): 정상 출금 `COMPLETED` · 무응답 계좌 출금 `UNKNOWN` → `--close-day=20261030` → 실행 구성 6 으로 오늘 대사 200 `COMPLETED` (출금 2 · 일치 1 · 자동 완료 1 · 불일치 0, 0.8초), `recon_issue` 에 `AUTO_COMPLETED` 한 줄, 무응답 건 `COMPLETED 0000`, 잔고 97,000 = 원장(충전 100,000 − 출금 3,000). 다시 보내면 409 `RECON_ALREADY_COMPLETED`, 2099-12-31 은 400 `RECON_DATE_NOT_CLOSED`. 기본 구성 + 지금을 포함한 점검(09:50 ~ 10:40)으로 다시 띄우면 오늘 날짜 대사도 400 `RECON_DATE_NOT_CLOSED`, 출금 · 1원인증 503 `BANK_MAINTENANCE` + `Retry-After: 2339` (10:40 까지 남은 초), 잔고 조회 200. 알림은 처음엔 로그(`ALERT … [INFO] 일마감 대사 2026-10-30 완료 — 불일치 없음`), 봇 설정 뒤에는 텔레그램: 출금 없는 지난 날(10-01 curl · 10-02 Postman 6-3)의 완료 요약이 휴대폰으로 왔다. 겪은 함정 두 가지 — 환경 변수를 넣기 전에 켜 둔 IntelliJ 에서 띄운 API 는 값을 못 받아 로그 알림으로 떨어진다(완전히 종료 후 다시 켜기, SETUP 2-6). Postman 6-3 이 `reconDate` 를 비운 채 한 번 나가면 스크립트가 오늘을 Current value 에 넣어, 나중에 바꾼 값 대신 오늘이 나가 400 `RECON_DATE_NOT_CLOSED` (Current value 를 고친다) |
 | P5-2 보존 배치 | ✅ 완료 (2026-11-04, [#17](https://github.com/hyeokjinON/bank-transfer/pull/17)) | ADR-0011 채택, 테스트 411개. CI `build` · `infra-smoke` 통과. 발행 7일 지난 아웃박스 · `VERIFIED` 가 아닌 만료 30일 지난 1원인증만 06:30 에 READ COMMITTED 로 나눠 삭제. 잠금 재현 · 변이 검사 결과는 ADR. 손 확인 (개발 DB, Postman 7 + MySQL 클라이언트, relay · reconcile · schedule 끔): 시드(아웃박스 3 · 인증 5) 뒤 7-3 미래 날짜 400 `RETENTION_DATE_IN_FUTURE`, 7-1 → 200 `COMPLETED` 아웃박스 32 · 인증 3 삭제 (아웃박스 31건은 시드 밖, 이전 손 확인 · 부하 측정이 남긴 발행 7일 지난 행), 다시 보내면 409 `RETENTION_ALREADY_COMPLETED`. 남은 행은 기대대로 6일 전 발행 · 미발행 아웃박스, 29일 전 만료 `SENT` · 31일 전 만료 `VERIFIED` 인증. 7-4 만료 시각이 지난 `VERIFIED` 사용자의 출금 → 202 `RECEIVED` (처음 422 는 충전을 빠뜨린 `INSUFFICIENT_BALANCE`). 대표 데이터 1만 행 `EXPLAIN`: 두 삭제 모두 `range`, `idx_outbox_unpublished` · `idx_verification_purge` (database.md §9). 겪은 함정 — Docker Desktop 이 꺼져 있으면 API 가 뜨지 않는다. `http/data-retention.http` 의 날짜는 그날로 고친다(Postman 은 비우면 오늘) |
-| P6 ~ P9 | ⬜ 예정 | README 로드맵 |
+| P6-1 컨슈머 코루틴 | 🔄 구현 완료 · 측정 전 (브랜치 `feat/p6-1-consumer-coroutines`) | ADR-0012 제안, 테스트 465개. suspend 리스너 · begin/finish · 은행 동시 호출 상한 · 측정 도구 `load/consumer/`. 측정은 OPERATION §11. 퍼밋은 begin 보다 먼저 받는다 (대기 중 SENDING 이면 정리 작업이 환불한 뒤 송금될 수 있어서, ADR-0012 결정 6). 측정 도구 첫 시험 실행이 개발 DB 의 손 확인 출금 6건을 측정용 모의 은행으로 처리한 일이 있어 `run.sh` 에 사전 확인이 들어갔다 (OPERATION §11-2) |
+| P6-2 ~ P9 | ⬜ 예정 | README 로드맵 |
 
 ## 2. P3 설계 (합의된 것)
 설계 섹션 1~5 모두 승인(2026-10-19) → **[설계 문서](docs/superpowers/specs/2026-10-19-p3-transfer-design.md)** 로 정리.
@@ -83,7 +84,7 @@ P3-1 (PR #3) · P3-2 (PR #5) · P3-3a (PR #7) · P3-3b (PR #9) 모두 머지됐�
 ## 3. 다음 할 일 (순서대로)
 1. velog `#2` ~ `#10` 은 비공개로 올라가 있다 (`#9` = P5-1 일마감 대사, `#10` = P5-2 보존 배치). 시리즈 지정 · 글마다 "핵심 3줄" 직접 작성 후 공개.
 2. **!! 기본 설정으로 띄운 API 는 06:30(KST) 에 아무 조작 없이도 되돌릴 수 없는 삭제를 한다 — 그 API 가 가리키는 DB 에, 개발 DB 도 포함해서.** 옛 행이 필요하면 `SELECT COUNT(*)` 미리보기(OPERATION §10-1) 전에는 `--data-retention.schedule.enabled=false` 를 넘긴다. 부하를 다시 잴 때는 다른 API 인스턴스(IntelliJ 등)를 모두 끄고, 끝나면 `bash load/run.sh cleanup` ([OPERATION §8](OPERATION.md#8-부하-측정-p4-2-k6)).
-3. 다음 단계 P6 (WebFlux / Coroutines 버전과 성능 비교, README 로드맵) 설계.
+3. P6-1 측정(OPERATION §11) → 결과 문서 · ADR-0012 결과 절 → PR. 그다음 P6-2 (웹 — WebFlux 별도 앱 모듈) 설계.
 
 ### P5-2 범위 밖으로 남긴 것
 - `transfer` · `wallet_ledger` 아카이빙, `bank_statement_line` · `recon_issue` 삭제 · 파티셔닝 (금융 기록이라 지우지 않는다, ADR-0011).
@@ -147,6 +148,7 @@ P3-1 (PR #3) · P3-2 (PR #5) · P3-3a (PR #7) · P3-3b (PR #9) 모두 머지됐�
 - (P3-3b) 은행 장애가 약 26분((재시도 약 95초 + 대기 5분) × 4 ≈ 26분, 정리 작업 주기 최대 10초 별도)보다 길면 그 사이 접수된 출금은 `FAILED E001` 이 된다. 복구 직후 밀린 건이 한꺼번에 은행에 간다(컨슈머 3개가 상한). 재시도 토픽 컨슈머가 5분 넘게 밀리면 재발행과 재시도가 겹칠 수 있다 (은행 호출은 조건부 전이로 한 번뿐).
 - (P3-3a) `UNKNOWN` · 멈춘 `SENDING` 은 정리 작업이 결과조회로 확정한다. 단 원거래가 은행 안에서 아직 처리 중일 때 조회하면 `2001` 이 올 수 있다. `sending_at` 30초 유예(정리 작업이 바꾼 `UNKNOWN` 과 컨슈머가 적은 `UNKNOWN` 모두)로 줄였지만, 은행이 30초보다 더 늦으면 `2001` → `FAILED` 로 확정된 뒤 늦은 이체 응답은 로그만 남는다(최종 안전망은 일마감 대사 — P5-1). 10번 물어도 모르는 건은 `UNKNOWN` 으로 남아 경고만 난다. 인스턴스가 여러 대면 같은 `UNKNOWN` 을 중복 조회할 수 있다(결과는 같다).
 - (P3-2) 컨슈머 스레드가 은행 응답을 블로킹으로 기다린다(최대 3초) → P4 에서 측정, P6 · P7 에서 비교.
+- (P6-1) 코루틴 모드는 같은 파티션 순서를 지키지 않고, 처리 중 메시지가 최대 150(컨슈머 3 × poll 50)이다. 상한을 키우면 DB(IO 디스패처 64 · Hikari 20)가 다음 한계다. 기본은 블로킹 그대로 — 운영 기본을 바꿀지는 ADR-0012 의 측정 판단을 본다.
 - 게이트웨이 응답 매칭은 단일 연결 · 단일 인스턴스 전제 (ADR-0002 한계).
 - Kafka 는 단일 노드라 복제 · ISR 장애 실험 불가 (ADR-0003 한계).
 - Windows: 셸 스크립트는 Git Bash 로. PowerShell `bash` 는 WSL 실행기라 실패한다.

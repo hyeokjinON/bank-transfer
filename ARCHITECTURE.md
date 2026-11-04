@@ -58,7 +58,7 @@ flowchart LR
 | `modules/bank-protocol` | 전문 모델(`sealed interface BankMessage`), 고정길이 직렬화, Netty 프레임 디코더/코덱 | `netty-handler` (api) | Netty |
 | `modules/bank-gateway` | 은행 접속 클라이언트: 폴링, 재접속(지수 백오프), 전문번호 기반 응답 매칭, 타임아웃 | `bank-protocol` (api) | Netty |
 | `modules/account` | 1원 계좌인증 도메인 + 포트(`BankPort`, `VerificationRepository`, `CodeGenerator`) | **없음** | 없음 |
-| `modules/transfer` | 출금이체 도메인: 상태 전이, 사용자 범위 멱등 접수, 실패 확정 포트 `fail()`, 거래번호, 처리(`TransferProcessor`), 정리 작업(`TransferReconciler`) + 포트(`TransferStore`, `VerifiedAccounts`, `ReferenceGenerator`, `BankTransferPort`, `BankInquiryPort`) | **없음** | 없음 |
+| `modules/transfer` | 출금이체 도메인: 상태 전이, 사용자 범위 멱등 접수, 실패 확정 포트 `fail()`, 거래번호, 처리(`TransferProcessor` — begin · finish 로 나뉨, P6-1), 정리 작업(`TransferReconciler`) + 포트(`TransferStore`, `VerifiedAccounts`, `ReferenceGenerator`, `BankTransferPort` · `SuspendBankTransferPort`(P6-1), `BankInquiryPort`) | **없음** | 없음 |
 | `apps/api` | REST API, 예외 → HTTP 매핑, 조립(`AppConfiguration`), 어댑터, 잔고 SQL(`WalletLedger` · 차감 전략 `WalletDebit`), JPA 저장소(`persistence/`), Kafka 발행 · 소비(`messaging/`) | `account`, `transfer`, `bank-gateway` | Spring Boot 4 (MVC, JPA, Kafka) |
 | `apps/mock-bank` | 모의 은행 FEP 서버. 실행 가능 + 테스트 픽스처 | `bank-protocol` (api) | Netty |
 
@@ -81,7 +81,8 @@ apps/mock-bank ─────────────────────�
 apps/api/src/main/kotlin/.../api/
   BankTransferApplication.kt        # main
   config/AppConfiguration.kt        # 빈 조립, BankGatewayAdapter(BankPort 구현), 설정 프로퍼티
-  config/BankTransferAdapter.kt     # BankTransferPort 구현: 게이트웨이 예외를 완료 · 거절 · 결과 모름 · 미전송으로 분류
+  config/BankTransferAdapter.kt     # BankTransferPort 구현 + 분류 규칙 classifyBankFailure (두 판 공용): 완료 · 거절 · 결과 모름 · 미전송
+  config/SuspendBankTransferAdapter.kt  # SuspendBankTransferPort 구현 (await, 취소는 다시 던짐, P6-1)
   config/BankInquiryAdapter.kt      # BankInquiryPort 구현: 확실한 답(0000 · 2001)만 확정, 나머지는 모름 (예외 없음)
   config/WalletDebitConfiguration.kt  # wallet.* 설정, 차감 전략 하나 선택, redis 일 때만 RedissonClient
   web/AccountVerificationController.kt
@@ -96,7 +97,10 @@ apps/api/src/main/kotlin/.../api/
   persistence/RedisWalletDebit.kt   # Redisson 사용자 락(바깥) + 조건부 UPDATE(안), redissonConfig
   messaging/MessagingConfiguration.kt     # 토픽 · 릴레이 · 프로세서 조립, 재시도 토픽 전용 스케줄러 (RetryTopicSchedulerWrapper)
   messaging/OutboxRelay.kt                # 폴링 퍼블리셔 (SKIP LOCKED, 발행 확인 후 published_at)
-  messaging/TransferRequestedListener.kt  # transfer.requested 컨슈머 (수동 ack, @RetryableTopic 재시도 토픽 · @DltHandler)
+  messaging/TransferRequestedListener.kt  # transfer.requested 컨슈머 — 블로킹 판, 기본 (수동 ack, @RetryableTopic 재시도 토픽 · @DltHandler)
+  messaging/SuspendingTransferRequestedListener.kt  # 같은 컨슈머의 코루틴 판 (P6-1): 은행 await · DB 는 IO 디스패처 · 은행 동시 호출 상한
+  messaging/TransferRequestedHandling.kt  # 두 판의 공용: key 읽기 · 결과 마무리(CONFLICT · RETRY_LATER) · DLT 로그 · 알림, @RetryableTopic 값
+  messaging/ConsumerConfiguration.kt      # transfer.consumer.* 설정, 모드에 맞는 리스너 하나만 조립
   reconcile/ReconcileConfiguration.kt     # 정리 작업 조립 + 10초 스케줄러 (TransferReconcilerScheduler), transfer.reconcile.* 설정
   batch/DatedJobLauncher.kt                # 날짜별 잡 시작 · 시작 경합 처리 · 동시 실행 가드 (대사 · 보존 배치 공용, P5-2)
   dailyrecon/                             # 일마감 대사 (P5-1, Spring Batch 6)
@@ -219,6 +223,7 @@ sequenceDiagram
 - 중복 메시지는 `RECEIVED → SENDING` 조건부 UPDATE 가 막는다(0건이면 은행에 보내지 않고 ack). 결과를 모르면 `UNKNOWN` 으로 두고 다시 보내지 않는다.
 - 미전송이면 `RECEIVED` 로 되돌리고 컨슈머가 예외를 던진다 → 재시도 토픽(5s · 30s · 60s) → DLT (P3-3b, 아래).
 - 은행 응답 뒤 DB 기록이 실패하면 `SENDING` 으로 남는다 (아래 P3-3a 정리 작업 대상).
+- 컨슈머는 두 판이 있다 (P6-1, [ADR-0012](docs/adr/0012-consumer-coroutines.md)): 위 그림은 기본인 블로킹 판이다. `transfer.consumer.mode=coroutine` 이면 `SuspendingTransferRequestedListener` 가 은행 동시 호출 상한(세마포어) 퍼밋을 받은 뒤 `begin`(DB, IO 디스패처) → 은행 `await`(스레드를 잡지 않음) 을 하고, 퍼밋을 놓은 다음 `finish`(DB, IO 디스패처) 로 같은 판정을 부른다. 퍼밋을 `begin` 보다 먼저 받는 것은 `SENDING` 인 채 퍼밋을 기다리다 정리 작업이 환불한 뒤 송금되는 일을 막으려는 것이다. 은행 응답 뒤 코드는 Netty 이벤트 루프에서 이어지므로 DB 호출을 거기서 옮긴다. 같은 파티션 안 처리 순서는 지키지 않는다.
 - 근거와 한계: [ADR-0005](docs/adr/0005-kafka-delivery-and-consumer-idempotency.md)
 
 ### P3-3a 정리 작업 흐름
@@ -389,3 +394,4 @@ flowchart TB
 | [0009](docs/adr/0009-wallet-debit-strategies-and-lock-comparison.md) | 잔고 차감은 전략 인터페이스로 바꿔 끼우고(조건부 · 비관적 · 낙관적 · Redis), Redis 락은 DB 앞의 줄 세우기로만 |
 | [0010](docs/adr/0010-daily-reconciliation.md) | 일마감 대사는 은행 대사 파일과 맞추고 결과를 모르는 출금만 자동 확정, 점검 시간으로 날짜 경계, API 앱 안의 Spring Batch |
 | [0011](docs/adr/0011-data-retention.md) | 보존 배치는 일회성 데이터 두 종류만 READ COMMITTED 로 나눠 지우고, 금융 기록은 지우지 않는다 |
+| [0012](docs/adr/0012-consumer-coroutines.md) | 출금 컨슈머의 은행 대기를 suspend 리스너로도 만들어 설정으로 고르고, 판정은 한 곳, DB 는 IO 디스패처, 은행 동시 호출 상한 (제안) |

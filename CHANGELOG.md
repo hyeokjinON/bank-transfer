@@ -9,6 +9,18 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
+## [P6-1] 컨슈머 코루틴 — (머지 전)
+### Added
+- 출금 컨슈머의 코루틴 판 `SuspendingTransferRequestedListener` (Spring Kafka suspend 리스너): 은행은 `await`, DB 는 IO 디스패처, 은행 동시 호출 상한 `Semaphore` (퍼밋을 받은 뒤 `begin`).
+- 설정 `transfer.consumer.mode`(`blocking` 기본 · `coroutine`, 소문자만) · `transfer.consumer.coroutine.max-in-flight-bank-calls`(64, 1 ~ 1024), 범위를 벗어나면 기동 실패. `/actuator/info` 에 모드 · 상한 · 풀 크기.
+- `SuspendBankTransferPort` · `SuspendBankTransferAdapter`(취소는 분류하지 않고 다시 던짐), 모의 은행 `--response-delay=<0~2999>ms` · 동시 대기 최댓값.
+- Spring Kafka suspend 리스너 실험 테스트(재시도 토픽 · poll 묶음 정지 · await 뒤 스레드), 코루틴 모드 흐름 테스트, 측정 도구 `load/consumer/`(개발 데이터가 섞여 있으면 시작하지 않는 사전 확인 포함), 실행 구성 `7. API (코루틴 컨슈머)`, ADR-0012, OPERATION §11. 테스트 411 → 465개.
+- 의존성 kotlinx-coroutines-core · -reactor 1.10.2 (Boot BOM).
+### Changed
+- `TransferProcessor.process` 를 `begin` · `finish` 로 나눴다 (동작 변화 없음). 리스너의 key · 결과 마무리 · DLT 를 `TransferRequestedHandling` 으로, 예외 분류를 `classifyBankFailure` 로 뽑아 두 판이 같이 쓴다. 블로킹 리스너 빈은 `ConsumerConfiguration` 으로 옮겼다.
+### Fixed
+- `OutboxRelayTest` 의 발행 확인이 가끔 깨지던 것: Awaitility `untilAsserted` 는 `AssertionError` 만 다시 시도하는데 `single{}` 이 `NoSuchElementException` 을 던져 사실상 poll 한 번이었다. 토픽 끝 오프셋까지 읽는 방식으로 고쳤다.
+
 ## [P5-2] 보존 배치 — 2026-11-04 ([#17](https://github.com/hyeokjinON/bank-transfer/pull/17), 머지 후 정리 [#18](https://github.com/hyeokjinON/bank-transfer/pull/18))
 ### Added
 - Spring Batch 6 잡 `dataRetentionJob`(① `purgeOutbox` ② `purgeVerifications`), `DELETE … LIMIT n` 을 READ COMMITTED 트랜잭션마다 한 번. 발행된 `outbox_event`(7일) · `VERIFIED` 가 아닌 만료 `account_verification`(30일)만 지운다.
