@@ -9,7 +9,7 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
-## [P5-2] 보존 배치 — 진행 중 (브랜치 `feat/p5-2-data-retention`)
+## [P5-2] 보존 배치 — 2026-11-04 ([#17](https://github.com/hyeokjinON/bank-transfer/pull/17), 머지 후 정리 [#18](https://github.com/hyeokjinON/bank-transfer/pull/18))
 ### Added
 - Spring Batch 6 잡 `dataRetentionJob`(① `purgeOutbox` ② `purgeVerifications`), `DELETE … LIMIT n` 을 READ COMMITTED 트랜잭션마다 한 번. 발행된 `outbox_event`(7일) · `VERIFIED` 가 아닌 만료 `account_verification`(30일)만 지운다.
 - Flyway V5 `idx_verification_purge (status, expires_at)`, 설정 `data-retention.*`(범위를 벗어나면 기동 실패).

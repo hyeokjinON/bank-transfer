@@ -1,4 +1,4 @@
-### IntelliJ HTTP Client 로 보존 배치 확인 (P5-2). 머지 전 손 확인 — 로컬 infra MySQL 에 행을 심고, 1) 의 실행은 시드가 아닌 이 DB 의 오래된 행도 지운다.
+### IntelliJ HTTP Client 로 보존 배치 확인 (P5-2). 손 확인 — 로컬 infra MySQL 에 행을 심고, 1) 의 실행은 시드가 아닌 이 DB 의 오래된 행도 지운다.
 ### !! 주의: 보존 배치는 'retention-hand' 시드만 지우지 않는다. 정책에 맞는 이 DB 의 모든 행을 영구히 지운다 (되돌릴 수 없다). 아래 1) 앞의 경고를 먼저 읽는다.
 ### 준비: infra up, 모의 은행 "1. Mock Bank (9090)". API 는 아래 세 가지를 꺼서 띄운다:
 ###   ./gradlew :apps:api:bootRun --args="--transfer.outbox.relay.enabled=false --transfer.reconcile.enabled=false --data-retention.schedule.enabled=false"
@@ -68,6 +68,7 @@ X-User-Id: user-retention
 ###
 ###      기록할 것 (HANDOVER 손 확인 · database.md §9): 두 EXPLAIN 각각의 type · key · key_len · rows · Extra 와 이 DB 의 두 표 전체 행 수(시드 포함).
 ###      기대(설계 의도): 아웃박스 type=range · key=idx_outbox_unpublished, 인증 type=range · key=idx_verification_purge.
+###      2026-11-04 손 확인에서 두 문장 모두 기대대로 나왔다 (database.md §9 의 표).
 ###      type=ALL 이 나오면 그대로 적는다 — 그 크기에서는 묶음마다 표 전체를 훑는다는 뜻이다. 인덱스를 탄다는 문장(database.md · V5)은 이 결과가 나온 뒤에 사실로 고친다.
 ###      한 번의 1만 행 결과이고 운영 크기·분포의 계획은 아니다.
 

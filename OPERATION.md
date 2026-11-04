@@ -384,7 +384,7 @@ DELETE FROM BATCH_JOB_INSTANCE WHERE JOB_INSTANCE_ID = ? AND NOT EXISTS (SELECT 
 
 **삭제는 되돌릴 수 없다. 첫 운영 실행 전에는 같은 조건의 `SELECT COUNT(*)` 로 대상을 확인한다** ([database.md §9](docs/database.md)). 건수 미리보기 기능은 없다.
 
-**기본 설정으로 띄운 API 는 아무도 누르지 않아도 매일 06:30(KST) 에 수동 실행과 똑같이 되돌릴 수 없는 삭제를 한다 — 그 API 가 연결된 DB 에, 이 브랜치가 머지된 뒤 개발자의 개발 DB 도 포함해서.** 위 `SELECT COUNT(*)` 로 대상을 확인하기 전에는 `--data-retention.schedule.enabled=false` 를 넘겨 스케줄을 끈 채로 띄운다.
+**기본 설정으로 띄운 API 는 아무도 누르지 않아도 매일 06:30(KST) 에 수동 실행과 똑같이 되돌릴 수 없는 삭제를 한다 — 그 API 가 연결된 DB 에, 개발자의 개발 DB 도 포함해서.** 위 `SELECT COUNT(*)` 로 대상을 확인하기 전에는 `--data-retention.schedule.enabled=false` 를 넘겨 스케줄을 끈 채로 띄운다.
 
 ### 10-2. 실행
 - **스케줄**: 매일 06:30 (KST), 오늘 날짜로. 재시도 회차는 없다 — 다음 날 실행은 새 인스턴스이고 기준이 뒤로 가 밀린 행까지 지운다. 끝난 날짜는 조용히(INFO) 넘어간다.

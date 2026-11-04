@@ -1,6 +1,6 @@
 # ADR-0011 보존 배치는 일회성 데이터 두 종류만 READ COMMITTED 로 나눠 지운다 — 금융 기록은 지우지 않는다
 
-- 상태: 제안 (2026-11-02)
+- 상태: 채택 (2026-11-04, [#17](https://github.com/hyeokjinON/bank-transfer/pull/17))
 - 단계: P5-2 · 설계: [P5-2 설계](../superpowers/specs/2026-11-02-p5-2-data-retention-design.md) · [ADR-0005](0005-kafka-delivery-and-consumer-idempotency.md) (발행기 READ COMMITTED) · [ADR-0010](0010-daily-reconciliation.md) (Spring Batch · 실행기) · [database.md](../database.md) §4-9
 
 ## 맥락
@@ -92,7 +92,7 @@
 - 한 번도 쓰지 않는 `VERIFIED` 는 영원히 남는다 — 인증에 만료 정책이 생길 때 다룬다.
 - 묶음 사이에 쉬지 않는다. 지연 복제가 있는 운영이면 쉬는 시간이 필요하다 (이 프로젝트에는 복제가 없다).
 - 삭제가 늘 돌아도 InnoDB 표 파일은 바로 줄지 않는다 — 공간은 재사용된다.
-- **실행 계획은 자동 테스트로 두지 않았다.** 행이 적으면 옵티마이저가 전체 훑기를 고를 수 있다. `idx_verification_purge (status, expires_at)` 와 `idx_outbox_unpublished` 를 타는지는 손 확인 때 대표 데이터(1만 행)로 `EXPLAIN` 한다 (`http/data-retention.http` 0-2 · database.md §9). 위 탐색의 `range` 계획은 아웃박스 쪽 일회성 관찰일 뿐이다.
+- **실행 계획은 자동 테스트로 두지 않았다.** 행이 적으면 옵티마이저가 전체 훑기를 고를 수 있다. 손 확인(2026-11-04)에서 개발 DB 에 대표 데이터 1만 행씩을 넣고 `EXPLAIN` 했다 (`http/data-retention.http` 0-2 · database.md §9): 아웃박스 `range` · `idx_outbox_unpublished`, 인증 `range` · `idx_verification_purge`. 한 번의 1만 행 결과이고 운영 크기 · 분포의 계획은 아니다.
 - 실행 이력이 `STARTED` 로 남는 JVM 사망은 그 날짜만 막는다(409). 푸는 SQL 은 OPERATION §10-4.
 - **법정 보존 기간은 확인되지 않은 가정이다.** 전자금융거래법 시행령 제12조 기준 5년(1만 원 이하 거래 등은 1년)이라고 2차 자료에서 확인했고 **조문 원문은 확인하지 않았다.** 이 프로젝트의 가정이며, 실제로 쓰려면 원문과 금융위 고시를 확인해야 한다. 7일 · 30일은 법이 아니라 이 프로젝트의 운영 판단이다. 이 단계는 금융 기록을 지우지 않으므로 법정 기간이 코드에 들어가 있지는 않다.
 
