@@ -189,8 +189,8 @@ metric() {   # 읽지 못하면 '-' — 빈 값이면 cpu.txt 의 열이 밀린�
 SAMPLERS+=($!)
 MYSQL_NAME=$(dc ps --format '{{.Name}}' mysql)
 KAFKA_NAME=$(dc ps --format '{{.Name}}' kafka)
-# docker stats --no-stream 은 한 번에 1 ~ 2초 걸린다 — 쉬지 않고 이어 부른다
-( while :; do T=$(date +%s%3N); docker stats --no-stream --format '{{.Name}} {{.CPUPerc}}' "$MYSQL_NAME" "$KAFKA_NAME" | sed "s/^/$T /" || true; done ) > "$WORK/docker.txt" 2>/dev/null &
+# docker stats --no-stream 은 한 번에 1 ~ 2초 걸린다 — 쉬지 않고 이어 부른다 — 실패하면 1초 쉰다 (계속 실패할 때 CPU 를 태우지 않게)
+( while :; do T=$(date +%s%3N); docker stats --no-stream --format '{{.Name}} {{.CPUPerc}}' "$MYSQL_NAME" "$KAFKA_NAME" | sed "s/^/$T /" || sleep 1; done ) > "$WORK/docker.txt" 2>/dev/null &
 SAMPLERS+=($!)
 
 LEFT_SQL="SELECT COUNT(*) FROM transfer WHERE user_id LIKE 'load-p61-u%' AND status IN ('RECEIVED', 'SENDING')"
