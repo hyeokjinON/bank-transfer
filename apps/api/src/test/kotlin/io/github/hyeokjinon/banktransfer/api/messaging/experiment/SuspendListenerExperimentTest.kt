@@ -24,6 +24,7 @@ import org.springframework.kafka.annotation.KafkaListener
 import org.springframework.kafka.annotation.RetryableTopic
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry
 import org.springframework.kafka.config.TopicBuilder
+import org.springframework.kafka.listener.ConcurrentMessageListenerContainer
 import org.springframework.kafka.core.KafkaAdmin
 import org.springframework.kafka.core.KafkaTemplate
 import org.springframework.kafka.retrytopic.RetryTopicSchedulerWrapper
@@ -126,27 +127,32 @@ class SuspendListenerExperimentTest {
     }
 
     @Test
-    fun `② 처리 중인 레코드는 poll 묶음 단위로 묶인다 - 컨슈머 3 × max-poll-records 50 이하, 컨슈머 스레드 3 보다는 많다`() {
-        // 컨테이너가 서기 전에 모두 넣는다: 첫 poll 이 파티션마다 50건을 한 번에 받게 (조금씩 받으면 묶음이 작아진다)
+    fun `② 처리 중인 레코드는 poll 묶음 단위로 묶인다 - 컨슈머 3 × max-poll-records 50 = 150 에서 멈추고 문을 열면 300건이 한 번씩 처리된다`() {
+        val container = registry.getListenerContainer(IN_FLIGHT_ID)!! as ConcurrentMessageListenerContainer<*, *>
+        container.start()
+        // 컨슈머 3개가 각자 파티션 1개를 받을 때까지 기다린다: 합류가 늦어 리밸런스가 레코드 처리 중에 나면 안 받은 레코드가 다른 컨슈머로 다시 가
+        // 두 번 처리되고 처리 중 수가 150 을 넘는다 (부하가 큰 전체 빌드에서 가끔 깨진 원인)
+        await.atMost(Duration.ofSeconds(60)) until { container.containers.size == 3 && container.containers.all { it.assignedPartitions?.size == 1 } }
+        // 레코드를 넣는 동안 poll 을 멈춘다: 조금씩 도착하는 레코드를 받으면 첫 묶음이 50건보다 작아져 150 에 닿지 않는다.
+        // 다 넣은 뒤 다시 시작하면 첫 poll 이 파티션마다 50건을 한 번에 받는다
+        container.pause()
+        await.atMost(Duration.ofSeconds(30)) until { container.isContainerPaused }
         (0 until PER_PARTITION * 3)
             .map { i -> kafka.send(ProducerRecord(IN_FLIGHT_TOPIC, i % 3, "k-$i", "{}")) }
             .forEach { it.get(5, TimeUnit.SECONDS) }
-        registry.getListenerContainer(IN_FLIGHT_ID)!!.start()
+        container.resume()
 
-        // 문이 닫혀 있어 아무것도 끝나지 않는다 — 처리 중 수가 늘다가 2초 동안 그대로면 멈춘 것이다
-        var last = -1
-        await.atMost(Duration.ofSeconds(30)).pollDelay(Duration.ofSeconds(2)).pollInterval(Duration.ofSeconds(2)) until {
-            val now = inFlight.inFlight.get()
-            (now > 0 && now == last).also { last = now }
-        }
-        val stalled = inFlight.maxInFlight.get()
-        println("[P6-1 실험 ②] 문을 닫은 채 처리 중 최대 = $stalled (150 이면 컨슈머 3 × 50 에서 poll 묶음 단위로 멈춤)")
-        assertTrue(stalled in 4..150, "처리 중 최대 $stalled")
+        // 문이 닫혀 있어 아무것도 끝나지 않는다 — 컨슈머마다 50건을 받아 150 이 되면 더 poll 하지 않고 멈춘다
+        await.atMost(Duration.ofSeconds(60)) until { inFlight.inFlight.get() == 3 * MAX_POLL_RECORDS }
+        Thread.sleep(2_000)   // 150 에서 더 늘지 않는지 (poll 묶음 단위로 멈췄는지) 조금 더 본다
+        println("[P6-1 실험 ②] 문을 닫은 채 처리 중 = ${inFlight.inFlight.get()}, 최대 = ${inFlight.maxInFlight.get()} (150 = 컨슈머 3 × 50, poll 묶음 단위로 멈춤)")
+        assertEquals(3 * MAX_POLL_RECORDS, inFlight.inFlight.get(), "멈춘 동안 처리 중 수")
+        assertEquals(3 * MAX_POLL_RECORDS, inFlight.maxInFlight.get(), "멈춘 동안 처리 중 최대")
 
         inFlight.gate.complete(Unit)
         await.atMost(Duration.ofSeconds(60)) untilAsserted { assertEquals(PER_PARTITION * 3, inFlight.done.size) }
         assertTrue(inFlight.done.values.all { it.get() == 1 }, "같은 레코드를 두 번 처리했다")
-        assertTrue(inFlight.maxInFlight.get() <= 150, "문을 연 뒤 최대 ${inFlight.maxInFlight.get()}")
+        assertEquals(3 * MAX_POLL_RECORDS, inFlight.maxInFlight.get(), "문을 연 뒤 최대")
         for (p in 0 until 3) {
             await.atMost(Duration.ofSeconds(15)) untilAsserted {
                 assertEquals(PER_PARTITION.toLong(), kafkaAdmin.committedOffset(IN_FLIGHT_GROUP, TopicPartition(IN_FLIGHT_TOPIC, p)))
@@ -175,6 +181,7 @@ class SuspendListenerExperimentTest {
         const val THREAD_TOPIC = "p61x.thread"
         const val FAKE_BANK_THREAD = "x-fake-bank-loop"
         const val PER_PARTITION = 100
+        const val MAX_POLL_RECORDS = 50   // application.yml 의 spring.kafka.consumer.max-poll-records
     }
 }
 
