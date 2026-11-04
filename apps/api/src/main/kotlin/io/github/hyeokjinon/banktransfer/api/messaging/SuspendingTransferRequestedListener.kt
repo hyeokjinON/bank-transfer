@@ -32,8 +32,11 @@ import java.util.UUID
  *   처리 중인 메시지 수 자체는 Spring Kafka 비동기 ack 의 poll 묶음 단위 정지로 컨슈머 3 × max-poll-records 50 에 묶인다 (Task 1 실험 ②).
  * - DB 호출(begin · finish)과 결과 마무리(CONFLICT 알림 = 텔레그램 HTTP)는 [db] 에서 돈다. Spring 7 은 suspend 리스너를 Dispatchers.Unconfined 로 부르므로
  *   은행 응답 뒤의 코드는 그 응답을 완료한 Netty 이벤트 루프 스레드(게이트웨이에 하나뿐)에서 이어진다 — 거기서 JDBC 를 기다리면 모든 은행 응답이 멈춘다 (실험 ③).
- *   세마포어를 놓으면 기다리던 코루틴이 놓은 스레드에서 이어지지만, 그 구간은 전문 쓰기뿐이라 막지 않는다.
- * - ack 는 프레임워크가 한다: 함수가 정상으로 끝나면 ack, 예외를 던지면 오류 처리기 → 재시도 토픽 (블로킹 판의 수동 ack 와 같은 결과, 실험 ①).
+ *   세마포어를 놓으면 기다리던 코루틴이 놓은 스레드에서 이어지지만, 그 코루틴의 다음 단계가 곧바로 `withContext(db)`(begin)라서 거기서 바로 db 스레드로 넘어간다.
+ *   그래서 bank.transfer 도 db 스레드에서 시작한다 (전문 쓰기만 하고 막지 않는다). 어느 단계도 이벤트 루프에서 DB 를 기다리지 않는다.
+ * - ack 는 프레임워크가 한다: 함수가 정상으로 끝나면 ack, 예외를 던지면 오류 처리기 → 재시도 토픽 (블로킹 판의 수동 ack 와 같은 결과 — 정상 경로에서만, 실험 ①).
+ *   비동기 실패 경로는 ack 를 먼저 하고 재시도 토픽 발행을 나중에 한다(바이트코드로 확인): 그 사이에 죽거나 발행이 실패하면 재시도 메시지를 잃을 수 있다.
+ *   RETRY_LATER 는 sending_at 이 있어 정리 작업이 다시 발행하지만, begin 의 DB 예외(sending_at 이 NULL)는 DLT 알림 없이 RECEIVED 로 남는다 (ADR-0012).
  * - 같은 파티션 안 메시지의 처리 순서를 지키지 않는다. 출금은 서로 독립이고 상태 전이가 조건부라 영향이 없다 (ADR-0012).
  * 판정은 [TransferProcessor] 의 begin · finish, key 읽기 · 결과 마무리 · DLT 는 [TransferRequestedHandling] — 블로킹 판과 같은 코드다. DLT 처리는 블로킹 그대로(드물고 짧다).
  */

@@ -7,11 +7,14 @@
 # 사용 (Git Bash, 저장소 루트):
 #   bash load/consumer/run.sh <blocking|coroutine> <지연ms 0~2999> <회차> [상한=64] [hikari=20]
 #   bash load/consumer/run.sh cleanup      # 측정이 끝나면 반드시 (아래 경고)
+#   bash load/consumer/run.sh reset-dev-group   # 사람이 직접, 필요할 때만: 개발용 그룹 transfer-processor 의 밀린 오프셋을 끝으로 (아래 경고)
 # 먼저 (OPERATION §11): infra up, ./gradlew :apps:api:bootJar :apps:mock-bank:installDist.
 #   포트 8080 · 9190 을 쓰는 프로세스와 다른 API 인스턴스(IntelliJ 등)는 끈다 — 같은 DB 의 측정 출금을 건드리거나 메시지를 나눠 가진다.
 #   이 스크립트가 API 와 모의 은행을 직접 띄우고 내린다 (모의 은행은 회차마다 새 거래 기록 디렉터리).
 # 경고: 측정 데이터는 사용자 load-p61-u001 ~ u100 으로만 만들고 지운다. 회차가 끝나면 그 출금은 COMPLETED 로 남는다 —
 #       지우지 않고 두면 다음 날 개발용 API 의 일마감 대사가 "은행 파일에 없는 COMPLETED" 로 잡는다. 끝나면 cleanup.
+#       측정이 발행한 메시지는 개발용 그룹(transfer-processor)에게도 밀린 메시지(lag)로 쌓인다 — 다음에 개발용 API 를 띄우면 그걸 다 읽는다 (사용자가 없어 NOT_FOUND 로 지나가지만
+#       수십만 건이면 새 개발 출금이 RECEIVED 로 한참 멈춰 보인다). cleanup 은 이 그룹을 건드리지 않고 안내만 한다 → 개발용 API 가 꺼져 있을 때 reset-dev-group 을 직접 친다.
 # 환경변수: N(건수 — 기본은 설계 §6 표) TIMEOUT(처리 대기 최대 초, 900) API_PORT(8080) BANK_PORT(9190)
 set -euo pipefail
 export MSYS_NO_PATHCONV=1   # Git Bash 가 /opt/... 를 Windows 경로로 바꾸지 않게 (그래서 taskkill 도 /F 로 쓴다)
@@ -26,10 +29,59 @@ rootsql() { dc exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql 
 kgroups() { dc exec -T kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 "$@"; }
 RUN=consumer
 die() { echo "[$RUN] $*" >&2; exit 1; }
+API_PORT=${API_PORT:-8080}
+DEV_GROUP=transfer-processor   # 개발용 API 의 그룹. 측정은 자기 그룹(아래 GROUP)을 써서 이 그룹의 오프셋은 움직이지 않는다
+port_busy() { netstat -ano 2>/dev/null | grep -E "TCP +[^ ]+:$1 +[^ ]+ +LISTENING" >/dev/null; }
+cond() { echo "COALESCE($1, '') LIKE 'load-p61-u%' AND COALESCE($1, '') REGEXP '^load-p61-u(00[1-9]|0[1-9][0-9]|100)\$'"; }   # $1 = 컬럼 (t.user_id | user_id) — cleanup.sql 과 같은 엄격한 조건, user_id 가 NULL 인 옛 행도 "측정 사용자 아님"으로 센다
+# 읽기만 하는 사전 확인: 발행기는 측정 사용자가 아닌 미발행 아웃박스도 발행하고, 측정 컨슈머가 그걸 처리해 버린다 → FOREIGN_OUTBOX · FOREIGN_PENDING 를 채운다
+foreign_counts() {
+  FOREIGN_OUTBOX=$(echo "SELECT COUNT(*) FROM outbox_event o LEFT JOIN transfer t ON t.id = o.aggregate_id WHERE o.published_at IS NULL AND (t.id IS NULL OR NOT ($(cond t.user_id)))" | sql)
+  FOREIGN_PENDING=$(echo "SELECT COUNT(*) FROM transfer WHERE status IN ('RECEIVED', 'SENDING') AND NOT ($(cond user_id))" | sql)
+}
+# 읽기만: 그룹 $1 이 토픽 $2 에 가진 lag 합 (그룹 · 오프셋이 없거나 읽지 못하면 0). 열: GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG …
+group_lag() { { kgroups --describe --group "$1" 2>/dev/null || true; } | tr -d '\r' | awk -v t="$2" '$2 == t && $6 ~ /^[0-9]+$/ { s += $6 } END { print s + 0 }'; }
+group_has_offsets() { { kgroups --describe --group "$1" 2>/dev/null || true; } | tr -d '\r' | awk -v t="$2" '$2 == t && $4 ~ /^[0-9]+$/ { f = 1 } END { exit !f }'; }
+group_idle() { { kgroups --describe --group "$1" --members 2>&1 || true; } | grep -qE "has no active members|does not exist|GroupIdNotFoundException|not found"; }
 
 if [ "${1:-}" = cleanup ]; then
   sql < load/consumer/cleanup.sql
   echo "cleanup 완료 (측정 사용자 load-p61-u001 ~ u100 의 지갑 · 원장 · 출금 · 아웃박스 · 인증)"
+  DEV_LAG=$(group_lag "$DEV_GROUP" transfer.requested)
+  if [[ "$DEV_LAG" =~ ^[0-9]+$ ]] && [ "$DEV_LAG" -gt 0 ]; then
+    echo "[$RUN] 안내: 개발용 그룹 $DEV_GROUP 의 transfer.requested 에 밀린 메시지가 ${DEV_LAG}건 있다 — 측정 메시지가 쌓인 것이다."
+    echo "[$RUN]       개발용 API 를 띄우면 이걸 다 읽는다(새 개발 출금이 RECEIVED 로 한참 멈춰 보인다). 개발용 API 가 꺼져 있을 때 직접: bash load/consumer/run.sh reset-dev-group"
+  fi
+  exit 0
+fi
+
+# 사람이 직접 치는 명령 (cleanup 이 자동으로 하지 않는다 — 개발용 그룹의 오프셋을 움직이는 일이라): 개발용 그룹 transfer-processor 를 transfer.requested 의 끝으로.
+# 개발 데이터를 건너뛰지 않을 때만 한다: 측정 사용자 밖의 미발행 아웃박스 · 처리 대기 출금이 없고, 개발용 API(8080)와 그룹의 컨슈머가 없을 때. 묻지 않는다 — 조건이 안 맞으면 아무것도 바꾸지 않고 멈춘다.
+if [ "${1:-}" = reset-dev-group ]; then
+  RUN=reset-dev-group
+  port_busy "$API_PORT" && die "포트 $API_PORT 를 쓰고 있다 — 개발용 API 를 먼저 끈다 (아무것도 바꾸지 않았다)"
+  group_idle "$DEV_GROUP" || die "그룹 $DEV_GROUP 에 붙은 컨슈머가 있다 — 개발용 API 를 먼저 끈다 (아무것도 바꾸지 않았다)"
+  foreign_counts
+  echo "[$RUN] 사전 확인 — 측정 사용자 밖의 미발행 아웃박스 $FOREIGN_OUTBOX · 처리 대기(RECEIVED/SENDING) 출금 $FOREIGN_PENDING"
+  { [[ "$FOREIGN_OUTBOX" =~ ^[0-9]+$ ]] && [[ "$FOREIGN_PENDING" =~ ^[0-9]+$ ]]; } || die "사전 확인 쿼리를 읽지 못했다 (아웃박스 '$FOREIGN_OUTBOX', 출금 '$FOREIGN_PENDING') — 아무것도 바꾸지 않았다"
+  { [ "$FOREIGN_OUTBOX" = 0 ] && [ "$FOREIGN_PENDING" = 0 ]; } || die "측정 사용자 밖의 미발행 아웃박스 $FOREIGN_OUTBOX 건 · 처리 대기 출금 $FOREIGN_PENDING 건이 있다 — 오프셋을 끝으로 옮기면 그 메시지를 건너뛴다. 먼저 처리한다 (아무것도 바꾸지 않았다)"
+  TOPICS=$(dc exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list | tr -d '\r')
+  grep -qx transfer.requested <<<"$TOPICS" || die "토픽 transfer.requested 가 없다 — 옮길 것이 없다"
+  echo "[$RUN] 전: $DEV_GROUP 의 transfer.requested lag $(group_lag "$DEV_GROUP" transfer.requested)"
+  # (그룹, 토픽) 쌍: 원래 토픽은 항상, 재시도 · DLT 는 그 그룹이 오프셋을 가졌을 때만 (없는 오프셋을 새로 만들지 않는다)
+  pairs=("$DEV_GROUP transfer.requested")
+  for i in 0 1 2; do pairs+=("$DEV_GROUP-retry-$i transfer.requested-retry-$i"); done
+  pairs+=("$DEV_GROUP-dlt transfer.requested-dlt")
+  for pair in "${pairs[@]}"; do
+    read -r g t <<<"$pair"
+    if [ "$t" != transfer.requested ]; then
+      grep -qx "$t" <<<"$TOPICS" || continue
+      group_has_offsets "$g" "$t" || continue
+    fi
+    group_idle "$g" || die "그룹 $g 에 붙은 컨슈머가 있다 — 건너뛰고 멈춘다"
+    kgroups --group "$g" --topic "$t" --reset-offsets --to-latest --execute >/dev/null
+    echo "[$RUN] $g → $t 끝으로 옮겼다"
+  done
+  echo "[$RUN] 후: $DEV_GROUP 의 transfer.requested lag $(group_lag "$DEV_GROUP" transfer.requested)"
   exit 0
 fi
 
@@ -51,7 +103,6 @@ if [ -z "${N:-}" ]; then
 fi
 { [[ "$N" =~ ^[0-9]{1,6}$ ]] && [ "$N" -ge 1 ] && [ "$N" -le 100000 ]; } || { echo "N 은 1 ~ 100000: $N" >&2; exit 2; }
 TIMEOUT=${TIMEOUT:-900}
-API_PORT=${API_PORT:-8080}
 BANK_PORT=${BANK_PORT:-9190}
 API="http://localhost:$API_PORT"
 GROUP=transfer-processor-p61   # 측정 전용 그룹: 오프셋을 옮겨도 개발용 그룹(transfer-processor)의 밀린 메시지를 건너뛰지 않는다
@@ -70,7 +121,6 @@ ls apps/mock-bank/build/install/mock-bank/lib/*.jar >/dev/null 2>&1 || die "모�
 API_PID=; BANK_PID=; SAMPLERS=()
 OK=0
 STARTED=0   # 이전 결과 파일을 지우는 지점부터 1 — 그 앞에서 멈추면(점검 · 포트 · 사전 확인) 이전 회차 결과를 .invalid 로 바꾸지 않는다
-port_busy() { netstat -ano 2>/dev/null | grep -E "TCP +[^ ]+:$1 +[^ ]+ +LISTENING" >/dev/null; }
 stop_pid() { [ -n "${1:-}" ] || return 0; kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
 free_port() {   # 그 포트를 쥔 프로세스가 끝날 때까지 (최대 15초). kill 이 듣지 않았으면 Windows PID 로 강제 종료
   for _ in $(seq 15); do port_busy "$1" || return 0; sleep 1; done
@@ -115,10 +165,8 @@ for g in transfer-processor "$GROUP"; do
   done
   grep -qE "has no active members|does not exist|GroupIdNotFoundException|not found" <<<"$members" || die "그룹 $g 에 붙은 컨슈머가 있다 — 다른 API 인스턴스를 끈다: $members"
 done
-# 읽기만 하는 사전 확인: 발행기는 측정 사용자가 아닌 미발행 아웃박스도 발행하고, 측정 컨슈머가 그걸 처리해 버린다 → 개발 데이터가 있으면 아무것도 건드리지 않고 멈춘다
-cond() { echo "COALESCE($1, '') LIKE 'load-p61-u%' AND COALESCE($1, '') REGEXP '^load-p61-u(00[1-9]|0[1-9][0-9]|100)\$'"; }   # $1 = 컬럼 (t.user_id | user_id) — cleanup.sql 과 같은 엄격한 조건, user_id 가 NULL 인 옛 행도 "측정 사용자 아님"으로 센다
-FOREIGN_OUTBOX=$(echo "SELECT COUNT(*) FROM outbox_event o LEFT JOIN transfer t ON t.id = o.aggregate_id WHERE o.published_at IS NULL AND (t.id IS NULL OR NOT ($(cond t.user_id)))" | sql)
-FOREIGN_PENDING=$(echo "SELECT COUNT(*) FROM transfer WHERE status IN ('RECEIVED', 'SENDING') AND NOT ($(cond user_id))" | sql)
+# 읽기만 하는 사전 확인 (foreign_counts): 개발 데이터가 있으면 아무것도 건드리지 않고 멈춘다
+foreign_counts
 echo "[$RUN] 0/6 사전 확인 — 측정 사용자 밖의 미발행 아웃박스 $FOREIGN_OUTBOX · 처리 대기(RECEIVED/SENDING) 출금 $FOREIGN_PENDING"
 { [[ "$FOREIGN_OUTBOX" =~ ^[0-9]+$ ]] && [[ "$FOREIGN_PENDING" =~ ^[0-9]+$ ]]; } || die "사전 확인 쿼리를 읽지 못했다 (아웃박스 '$FOREIGN_OUTBOX', 출금 '$FOREIGN_PENDING') — 아무것도 건드리지 않았다"
 { [ "$FOREIGN_OUTBOX" = 0 ] && [ "$FOREIGN_PENDING" = 0 ]; } || die "측정 사용자(load-p61-u001 ~ u100) 밖의 미발행 아웃박스 $FOREIGN_OUTBOX 건 · 처리 대기 출금 $FOREIGN_PENDING 건이 있다 — 발행기 · 컨슈머가 개발 데이터를 처리해 버리므로 시작하지 않는다 (아무것도 건드리지 않았다). 개발 쪽에서 먼저 처리하거나 정리한다"
