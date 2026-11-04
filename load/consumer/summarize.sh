@@ -6,12 +6,14 @@
 # 예상(리틀의 법칙) = 동시에 은행을 기다리는 수 ÷ 지연: blocking 3, coroutine min(상한, 150 = 컨슈머 3 × poll 50). 지연 0 은 계산하지 않는다.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-RAW=docs/perf/raw/p6-1
+RAW=${RAW_DIR:-docs/perf/raw/p6-1}   # RAW_DIR 은 시험용
 
 num() { grep -o "\"$2\": *[-0-9.eE+]*" "$1" | head -1 | sed 's/.*: *//'; }
 str() { grep -o "\"$2\": *\"[^\"]*\"" "$1" | head -1 | sed 's/.*: *"//; s/"$//'; }
-median() { sort -g | awk '{ v[NR] = $1 } END { if (NR == 0) print "nan"; else print v[int((NR + 1) / 2)] }'; }
-maxdev() { awk -v m="$1" '{ d = (m == 0) ? 0 : ($1 - m) / m * 100; if (d < 0) d = -d; if (d > x) x = d } END { printf "%.0f", x }'; }
+# 숫자가 아닌 값(JSON null → num 이 빈 값을 낸다 · '-')은 건너뛴다. 값이 하나도 없으면 '-'
+median() { awk '/^[-+]?[0-9]/' | sort -g | awk '{ v[NR] = $1 } END { if (NR == 0) print "-"; else print v[int((NR + 1) / 2)] }'; }
+fmt() { if [[ "$1" =~ ^[-+]?[0-9] ]]; then printf "%.${2}f" "$1"; else printf -- "-"; fi; }   # $1 = 값, $2 = 소수 자릿수
+maxdev() { awk '/^[-+]?[0-9]/' | awk -v m="$1" '{ d = (m == 0) ? 0 : ($1 - m) / m * 100; if (d < 0) d = -d; if (d > x) x = d } END { printf "%.0f", x }'; }
 key() { echo "$(str "$1" mode) $(num "$1" delay_ms) $(num "$1" cap) $(num "$1" hikari)"; }
 
 table() {   # $1 = 회차 정규식, $2 = 제목
@@ -23,8 +25,8 @@ table() {   # $1 = 회차 정규식, $2 = 제목
   echo
   echo "### $2"
   echo
-  echo "| 모드 | 지연 (ms) | 상한 | Hikari | N | 회차 | 처리량 (건/s) | 예상 (건/s) | p50 (ms) | p95 (ms) | 시스템 CPU 평균 / 최대 (%) | API CPU 평균 (%) | MySQL CPU 평균 (%) | 은행 최대 동시 | 편차 |"
-  echo "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+  echo "| 모드 | 지연 (ms) | 상한 | Hikari | N | 회차 | 처리량 (건/s) | 예상 (건/s) | p50 (ms) | p95 (ms) | 시스템 CPU 평균 / 최대 (%) | CPU 표본 | API CPU 평균 (%) | MySQL CPU 평균 (%) | 은행 최대 동시 | 편차 |"
+  echo "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
   [ ${#files[@]} -gt 0 ] || return 0
   # 파이프 뒤 while 은 하위 셸이라 local 을 쓰지 않는다 (변수는 그 안에서만 산다)
   for f in "${files[@]}"; do key "$f"; done | sort -u -k1,1 -k2,2n -k3,3n -k4,4n | while read -r mode delay cap hikari; do
@@ -36,9 +38,8 @@ table() {   # $1 = 회차 정규식, $2 = 제목
     if [ "$delay" = 0 ]; then expect="-"; else expect=$(awk -v c="$conc" -v d="$delay" 'BEGIN { printf "%.0f", c * 1000 / d }'); fi
     d1=$(for g in "${group[@]}"; do num "$g" tps; done | maxdev "$tps")
     d2=$(for g in "${group[@]}"; do num "$g" p95_ms; done | maxdev "$p95")
-    printf '| %s | %s | %s | %s | %.0f | %d | %.1f | %s | %.1f | %.1f | %.1f / %.1f | %.1f | %.1f | %.0f | %s%% |\n' \
-      "$mode" "$delay" "$capcol" "$hikari" "$(med n)" "${#group[@]}" "$tps" "$expect" "$(med p50_ms)" "$p95" \
-      "$(med sys_cpu_avg)" "$(med sys_cpu_max)" "$(med api_cpu_avg)" "$(med mysql_cpu_avg)" "$(med bank_peak)" "$(( d1 > d2 ? d1 : d2 ))"
+    smp=$(med cpu_samples); smpcol=$(fmt "$smp" 0); [[ "$smp" =~ ^[0-9]+$ ]] && [ "$smp" -lt 10 ] && smpcol="$smpcol (<10)"
+    echo "| $mode | $delay | $capcol | $hikari | $(fmt "$(med n)" 0) | ${#group[@]} | $(fmt "$tps" 1) | $expect | $(fmt "$(med p50_ms)" 1) | $(fmt "$p95" 1) | $(fmt "$(med sys_cpu_avg)" 1) / $(fmt "$(med sys_cpu_max)" 1) | $smpcol | $(fmt "$(med api_cpu_avg)" 1) | $(fmt "$(med mysql_cpu_avg)" 1) | $(fmt "$(med bank_peak)" 0) | $(( d1 > d2 ? d1 : d2 ))% |"
   done
 }
 

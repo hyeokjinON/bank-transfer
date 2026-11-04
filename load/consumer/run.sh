@@ -47,6 +47,7 @@ if [ -z "${N:-}" ]; then
   # 설계 §6: 칸마다 20초 이상 걸리게 (예상 처리량 = 동시에 은행을 기다리는 수 ÷ 지연). 대조 실험(coroutine 상한 3)은 blocking 과 같은 N
   KIND=$MODE; { [ "$MODE" = coroutine ] && [ "$CAP" -le 3 ]; } && KIND=blocking
   case "$KIND-$DELAY" in blocking-100) N=1500 ;; blocking-500) N=400 ;; *) N=5000 ;; esac
+  [[ "$ROUND" == sweep* ]] && N=20000   # 용량 탐색(설계 §6)은 20,000건
 fi
 { [[ "$N" =~ ^[0-9]{1,6}$ ]] && [ "$N" -ge 1 ] && [ "$N" -le 100000 ]; } || { echo "N 은 1 ~ 100000: $N" >&2; exit 2; }
 TIMEOUT=${TIMEOUT:-900}
@@ -68,6 +69,7 @@ ls apps/mock-bank/build/install/mock-bank/lib/*.jar >/dev/null 2>&1 || die "모�
 # --- 프로세스 · 정리 ---
 API_PID=; BANK_PID=; SAMPLERS=()
 OK=0
+STARTED=0   # 이전 결과 파일을 지우는 지점부터 1 — 그 앞에서 멈추면(점검 · 포트 · 사전 확인) 이전 회차 결과를 .invalid 로 바꾸지 않는다
 port_busy() { netstat -ano 2>/dev/null | grep -E "TCP +[^ ]+:$1 +[^ ]+ +LISTENING" >/dev/null; }
 stop_pid() { [ -n "${1:-}" ] || return 0; kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
 free_port() {   # 그 포트를 쥔 프로세스가 끝날 때까지 (최대 15초). kill 이 듣지 않았으면 Windows PID 로 강제 종료
@@ -79,7 +81,7 @@ free_port() {   # 그 포트를 쥔 프로세스가 끝날 때까지 (최대 15�
 finish() {
   for p in "${SAMPLERS[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null || true; done
   stop_pid "$API_PID"; stop_pid "$BANK_PID"
-  if [ "$OK" != 1 ] && [ -f "$OUT" ]; then mv -f "$OUT" "$OUT.invalid"; echo "[$RUN] 확인을 통과하지 못해 $OUT.invalid 로 바꿨다 — 이 회차 숫자는 쓰지 않는다" >&2; fi
+  if [ "$OK" != 1 ] && [ "$STARTED" = 1 ] && [ -f "$OUT" ]; then mv -f "$OUT" "$OUT.invalid"; echo "[$RUN] 확인을 통과하지 못해 $OUT.invalid 로 바꿨다 — 이 회차 숫자는 쓰지 않는다" >&2; fi
   return 0
 }
 trap finish EXIT
@@ -113,8 +115,16 @@ for g in transfer-processor "$GROUP"; do
   done
   grep -qE "has no active members|does not exist|GroupIdNotFoundException|not found" <<<"$members" || die "그룹 $g 에 붙은 컨슈머가 있다 — 다른 API 인스턴스를 끈다: $members"
 done
+# 읽기만 하는 사전 확인: 발행기는 측정 사용자가 아닌 미발행 아웃박스도 발행하고, 측정 컨슈머가 그걸 처리해 버린다 → 개발 데이터가 있으면 아무것도 건드리지 않고 멈춘다
+cond() { echo "COALESCE($1, '') LIKE 'load-p61-u%' AND COALESCE($1, '') REGEXP '^load-p61-u(00[1-9]|0[1-9][0-9]|100)\$'"; }   # $1 = 컬럼 (t.user_id | user_id) — cleanup.sql 과 같은 엄격한 조건, user_id 가 NULL 인 옛 행도 "측정 사용자 아님"으로 센다
+FOREIGN_OUTBOX=$(echo "SELECT COUNT(*) FROM outbox_event o LEFT JOIN transfer t ON t.id = o.aggregate_id WHERE o.published_at IS NULL AND (t.id IS NULL OR NOT ($(cond t.user_id)))" | sql)
+FOREIGN_PENDING=$(echo "SELECT COUNT(*) FROM transfer WHERE status IN ('RECEIVED', 'SENDING') AND NOT ($(cond user_id))" | sql)
+echo "[$RUN] 0/6 사전 확인 — 측정 사용자 밖의 미발행 아웃박스 $FOREIGN_OUTBOX · 처리 대기(RECEIVED/SENDING) 출금 $FOREIGN_PENDING"
+{ [[ "$FOREIGN_OUTBOX" =~ ^[0-9]+$ ]] && [[ "$FOREIGN_PENDING" =~ ^[0-9]+$ ]]; } || die "사전 확인 쿼리를 읽지 못했다 (아웃박스 '$FOREIGN_OUTBOX', 출금 '$FOREIGN_PENDING') — 아무것도 건드리지 않았다"
+{ [ "$FOREIGN_OUTBOX" = 0 ] && [ "$FOREIGN_PENDING" = 0 ]; } || die "측정 사용자(load-p61-u001 ~ u100) 밖의 미발행 아웃박스 $FOREIGN_OUTBOX 건 · 처리 대기 출금 $FOREIGN_PENDING 건이 있다 — 발행기 · 컨슈머가 개발 데이터를 처리해 버리므로 시작하지 않는다 (아무것도 건드리지 않았다). 개발 쪽에서 먼저 처리하거나 정리한다"
 mkdir -p "$RAW" "$WORK"
 rm -f "$OUT" "$OUT.invalid"
+STARTED=1
 rm -rf "$BANK_FILES"
 
 # --- 1. 정리 · 시드 ---
@@ -171,13 +181,16 @@ grep -q "\"mode\":\"$MODE\"" <<<"$INFO" || die "앱의 모드가 $MODE 가 아�
 grep -qE "\"max-in-flight-bank-calls\":\"?$CAP\"?[,}]" <<<"$INFO" || die "앱의 상한이 $CAP 이 아니다: $INFO"
 grep -qE "\"maximum-pool-size\":\"?$HIKARI\"?[,}]" <<<"$INFO" || die "앱의 Hikari 가 $HIKARI 가 아니다: $INFO"
 
-metric() { curl -sf "$API/actuator/metrics/$1" | grep -o '"value":[-0-9.eE+]*' | head -1 | cut -d: -f2; }
+metric() {   # 읽지 못하면 '-' — 빈 값이면 cpu.txt 의 열이 밀린다
+  local x; x=$(curl -sf "$API/actuator/metrics/$1" | grep -o '"value":[-0-9.eE+]*' | head -1 | cut -d: -f2 || true)
+  echo "${x:--}"
+}
 ( while :; do echo "$(date +%s%3N) $(metric system.cpu.usage) $(metric process.cpu.usage)"; sleep 1; done ) > "$WORK/cpu.txt" 2>/dev/null &
 SAMPLERS+=($!)
 MYSQL_NAME=$(dc ps --format '{{.Name}}' mysql)
 KAFKA_NAME=$(dc ps --format '{{.Name}}' kafka)
 # docker stats --no-stream 은 한 번에 1 ~ 2초 걸린다 — 쉬지 않고 이어 부른다
-( while :; do T=$(date +%s%3N); docker stats --no-stream --format '{{.Name}} {{.CPUPerc}}' "$MYSQL_NAME" "$KAFKA_NAME" | sed "s/^/$T /"; done ) > "$WORK/docker.txt" 2>/dev/null &
+( while :; do T=$(date +%s%3N); docker stats --no-stream --format '{{.Name}} {{.CPUPerc}}' "$MYSQL_NAME" "$KAFKA_NAME" | sed "s/^/$T /" || true; done ) > "$WORK/docker.txt" 2>/dev/null &
 SAMPLERS+=($!)
 
 LEFT_SQL="SELECT COUNT(*) FROM transfer WHERE user_id LIKE 'load-p61-u%' AND status IN ('RECEIVED', 'SENDING')"
@@ -204,12 +217,14 @@ START_MS=$(v start_ms); END_MS=$(v end_ms)
 DURATION=$(awk -v s="$START_MS" -v e="$END_MS" 'BEGIN { printf "%.3f", (e - s) / 1000 }')
 TPS=$(awk -v n="$N" -v d="$DURATION" 'BEGIN { printf "%.1f", (d > 0) ? n / d : 0 }')
 # CPU 표본은 처리 구간(첫 sending_at ~ 마지막 updated_at) 안의 것만. Actuator 값은 0 ~ 1 → %, docker 는 이미 % (100% = 코어 1개)
-cpu_stat() { awk -v s="$START_MS" -v e="$END_MS" -v c="$1" '$1 >= s && $1 <= e && $c != "" { x = $c * 100; t += x; n++; if (x > m) m = x } END { if (n) printf "%.1f %.1f %d\n", t / n, m, n; else print "null null 0" }' "$WORK/cpu.txt"; }
+cpu_stat() { awk -v s="$START_MS" -v e="$END_MS" -v c="$1" '$1 >= s && $1 <= e && $c ~ /^[0-9]/ { x = $c * 100; t += x; n++; if (x > m) m = x } END { if (n) printf "%.1f %.1f %d\n", t / n, m, n; else print "null null 0" }' "$WORK/cpu.txt"; }
 docker_stat() { awk -v s="$START_MS" -v e="$END_MS" -v name="$1" '$1 >= s && $1 <= e && $2 == name { x = $3; sub("%", "", x); x += 0; t += x; n++; if (x > m) m = x } END { if (n) printf "%.1f %.1f\n", t / n, m; else print "null null" }' "$WORK/docker.txt"; }
 read -r SYS_AVG SYS_MAX SAMPLES < <(cpu_stat 2)
 read -r API_AVG API_MAX _ < <(cpu_stat 3)
 read -r MYSQL_AVG MYSQL_MAX < <(docker_stat "$MYSQL_NAME")
 read -r KAFKA_AVG KAFKA_MAX < <(docker_stat "$KAFKA_NAME")
+[ "$MYSQL_AVG" != null ] && [ "$KAFKA_AVG" != null ] || echo "[$RUN] 경고: 처리 구간 안의 docker stats 표본이 없다 (MySQL $MYSQL_AVG · Kafka $KAFKA_AVG) — 구간이 너무 짧다. N 을 늘린다" >&2
+[ "${SAMPLES:-0}" -ge 10 ] || echo "[$RUN] 경고: Actuator CPU 표본이 ${SAMPLES:-0}개 (< 10) — 구간이 너무 짧다. N 을 늘린다" >&2
 BANK_PEAK=$(grep -o 'mock bank peak pending responses: [0-9]*' "$WORK/mock-bank.log" | tail -1 | grep -o '[0-9]*$' || true)
 cat > "$OUT" <<EOF
 {
