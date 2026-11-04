@@ -86,10 +86,20 @@ sealed interface BankTransferOutcome {
     data object NotSent : BankTransferOutcome
 }
 
-/** 은행 출금이체 포트. 결과가 나올 때까지 호출 스레드에서 기다린다 (Kafka 컨슈머 스레드가 부른다). */
+/** 은행 출금이체 포트. 결과가 나올 때까지 호출 스레드에서 기다린다 (블로킹 컨슈머 · Kafka 컨슈머 스레드가 부른다). */
 fun interface BankTransferPort {
     /** [reference] = 이용기관 거래번호. 결과를 모를 때 이 번호로 결과조회한다. */
     fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String, reference: String): BankTransferOutcome
+}
+
+/**
+ * 은행 출금이체 포트의 suspend 판 (P6-1, ADR-0012). 응답을 기다리는 동안 스레드를 잡지 않는다 — 코루틴 컨슈머가 부른다.
+ * 결과 분류는 [BankTransferPort] 와 같다. 기다리는 중 코루틴이 취소되면 분류하지 않고 취소를 그대로 던진다 (은행에 갔는지 모른다 — NotSent 면 다시 보내진다).
+ * 이 모듈은 코루틴 라이브러리를 쓰지 않는다: suspend 는 언어 기능이다.
+ */
+interface SuspendBankTransferPort {
+    /** [reference] = 이용기관 거래번호. 결과를 모를 때 이 번호로 결과조회한다. */
+    suspend fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String, reference: String): BankTransferOutcome
 }
 
 /** 결과조회 결과. 처리됨 · 처리 안 됨(확정) · 모름(조회에도 답이 없음 등). */

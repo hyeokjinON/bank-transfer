@@ -30,6 +30,10 @@ enum class ProcessResult {
  *    보내지도 못했으면 RECEIVED 로 되돌려 재시도하게 한다.
  *    은행이 거절하면 FAILED 와 함께 차감한 금액을 돌려준다 — [TransferStore.fail] 이 한 트랜잭션에서 한다 (P4-1).
  * 은행 응답 뒤 DB 기록이 실패하면 SENDING 으로 남는다 — 정리 작업(TransferReconciler)이 30초 넘게 SENDING 인 건을 UNKNOWN 으로 바꾸고 결과조회로 확정한다.
+ *
+ * 1 은 [begin], 3 은 [finish] 다 (P6-1). 블로킹 컨슈머는 [process] 가 셋을 이어 부르고,
+ * 코루틴 컨슈머는 [begin] · [finish] 를 부르고 그 사이의 은행 호출만 suspend 로 한다 (SuspendBankTransferPort).
+ * 판정(조건부 전이 · CONFLICT)은 이 클래스 하나에만 있다 — 두 모드가 복사본을 갖지 않는다.
  */
 class TransferProcessor(
     private val store: TransferStore,
@@ -37,22 +41,46 @@ class TransferProcessor(
     private val clock: Clock = Clock.systemUTC(),
 ) {
 
-    fun process(transferId: UUID): ProcessResult {
-        val transfer = store.findById(transferId) ?: return ProcessResult.NOT_FOUND
-        if (!store.transition(transferId, RECEIVED, SENDING, clock.instant())) return ProcessResult.ALREADY_HANDLED
+    /** [begin] 의 결과 (P6-1). */
+    sealed interface Begin {
+        /** RECEIVED → SENDING 으로 바꿨다 — 이 출금을 은행에 보낸다. [transfer] 는 바꾸기 전에 읽은 값이다 (은행에 보낼 내용만 쓴다). */
+        data class Started(val transfer: Transfer) : Begin
 
+        /** 없는 출금 — 은행을 부르지 않는다. */
+        data object NotFound : Begin
+
+        /** 다른 소비자가 이미 집어 갔거나 끝난 건 — 은행을 부르지 않는다. */
+        data object AlreadyHandled : Begin
+    }
+
+    fun process(transferId: UUID): ProcessResult {
+        val transfer = when (val begun = begin(transferId)) {
+            Begin.NotFound -> return ProcessResult.NOT_FOUND
+            Begin.AlreadyHandled -> return ProcessResult.ALREADY_HANDLED
+            is Begin.Started -> begun.transfer
+        }
         val outcome = try {
             bank.transfer(transfer.bankCode, transfer.accountNo, transfer.amount, transfer.memo, transfer.reference)
         } catch (e: Exception) {
             // 포트가 결과를 분류하지 못하고 예외를 던졌다 = 은행이 받았는지 모른다 → 다시 보내지 않고 UNKNOWN (P3-3 결과조회로 확정)
             BankTransferOutcome.ResultUnknown
         }
-        return when (outcome) {
-            BankTransferOutcome.Completed -> record(transferId, COMPLETED, BANK_OK, ProcessResult.COMPLETED)
-            is BankTransferOutcome.Rejected -> record(transferId, FAILED, outcome.responseCode, ProcessResult.FAILED)
-            BankTransferOutcome.ResultUnknown -> record(transferId, UNKNOWN, null, ProcessResult.UNKNOWN)
-            BankTransferOutcome.NotSent -> record(transferId, RECEIVED, null, ProcessResult.RETRY_LATER)
-        }
+        return finish(transferId, outcome)
+    }
+
+    /** 1단계: 조회 · RECEIVED → SENDING 조건부 전이 (P6-1 에서 [process] 에서 나눔). 은행은 부르지 않는다. */
+    fun begin(transferId: UUID): Begin {
+        val transfer = store.findById(transferId) ?: return Begin.NotFound
+        if (!store.transition(transferId, RECEIVED, SENDING, clock.instant())) return Begin.AlreadyHandled
+        return Begin.Started(transfer)
+    }
+
+    /** 3단계: 은행 결과를 기록하고 판정한다 (P6-1 에서 [process] 에서 나눔). [begin] 이 Started 를 돌려준 출금에만 부른다. 은행은 부르지 않는다. */
+    fun finish(transferId: UUID, outcome: BankTransferOutcome): ProcessResult = when (outcome) {
+        BankTransferOutcome.Completed -> record(transferId, COMPLETED, BANK_OK, ProcessResult.COMPLETED)
+        is BankTransferOutcome.Rejected -> record(transferId, FAILED, outcome.responseCode, ProcessResult.FAILED)
+        BankTransferOutcome.ResultUnknown -> record(transferId, UNKNOWN, null, ProcessResult.UNKNOWN)
+        BankTransferOutcome.NotSent -> record(transferId, RECEIVED, null, ProcessResult.RETRY_LATER)
     }
 
     /**
