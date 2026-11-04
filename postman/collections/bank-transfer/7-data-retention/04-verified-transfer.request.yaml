@@ -1,0 +1,37 @@
+$kind: http-request
+name: 7-4 (수동) 만료 시각이 지난 VERIFIED 사용자의 출금 → 202
+method: POST
+url: '{{baseUrl}}/api/v1/transfers'
+order: 4000
+description: |-
+  이 단계의 핵심 확인. http/data-retention.http 0) 의 시드(user-retention 의 VERIFIED)와 충전 뒤, 7-1 다음에 보낸다. 422 ACCOUNT_NOT_VERIFIED 면 VERIFIED 를 지운 것이다.
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: X-User-Id
+    value: user-retention
+  - key: Idempotency-Key
+    value: '{{$guid}}'
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "1002123456789",
+      "amount": 1000,
+      "memo": "보존"
+    }
+scripts:
+  - type: beforeRequest
+    language: text/javascript
+    code: |-
+      if (pm.variables.get("manualRetention") !== "true") {
+        pm.execution.skipRequest();
+      }
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("202 RECEIVED", () => {
+        pm.response.to.have.status(202);
+        pm.expect(pm.response.json().status).to.eql("RECEIVED");
+      });

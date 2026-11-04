@@ -44,6 +44,8 @@ import kotlin.random.Random
         "transfer.retry.max-delay-ms=2000",
         // 일마감 대사 스케줄은 끈다 (P5-1): 테스트가 실행기를 직접 부른다. 켜 두면 01 ~ 06시에 진짜 시각으로 전날 대사가 돈다
         "daily-recon.schedule.enabled=false",
+        // 보존 배치 스케줄도 끈다 (P5-2): 켜 두면 06:30 에 진짜 날짜로 돌아 다른 테스트의 오래된 행을 지운다
+        "data-retention.schedule.enabled=false",
     ],
 )
 @Import(MySqlTestContainer::class, KafkaTestContainer::class, RedisTestContainer::class, TestClockConfiguration::class, AlertTestConfiguration::class)

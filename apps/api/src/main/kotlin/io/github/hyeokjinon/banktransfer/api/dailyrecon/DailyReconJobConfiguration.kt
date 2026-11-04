@@ -208,7 +208,7 @@ class DailyReconJobConfiguration {
     }
 
     @Bean
-    fun dailyReconLauncher(jobOperator: JobOperator, job: Job, jobRepository: JobRepository, summaries: ReconSummaryReader, alerts: AlertNotifier) =
+    fun dailyReconLauncher(jobOperator: JobOperator, @Qualifier(JOB_NAME) job: Job, jobRepository: JobRepository, summaries: ReconSummaryReader, alerts: AlertNotifier) =
         DailyReconLauncher(jobOperator, job, jobRepository, summaries, alerts)
 
     @Bean

@@ -40,7 +40,7 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 | `transfer.reconcile.batch-size` | `100` | 한 번에 처리하는 최대 건수 |
 | `transfer.reconcile.republish-after` | `5m` | 마지막 변경 후 이만큼 지난 `RECEIVED` 를 재발행한다 (재시도 토픽 체인 약 95초가 끝난 뒤) |
 | `transfer.reconcile.max-republish` | `3` | 재발행 한도. 다 쓰고도 은행에 못 보내면 `FAILED` `E001` |
-| `spring.task.scheduling.pool.size` | `3` | 스케줄러 스레드. 발행기(0.5초) · 정리 작업(10초) · 일마감 대사(01 ~ 06시)까지 셋이 서로 막지 않게 한다 (P5-1 에서 2 → 3) |
+| `spring.task.scheduling.pool.size` | `4` | 스케줄러 스레드. 발행기(0.5초) · 정리 작업(10초) · 일마감 대사(01 ~ 06시) · 보존 배치(06:30)가 서로 막지 않게 한다 (P5-2 에서 3 → 4) |
 | `spring.datasource.hikari.maximum-pool-size` | `20` | 커넥션 풀 (P4-2 에서 명시, `minimum-idle` = 최대) |
 | `spring.datasource.hikari.connection-init-sql` | `SET SESSION innodb_lock_wait_timeout = 5` | 행 락 대기 한도 5초 (MySQL 기본 50초). 넘으면 503 `WALLET_BUSY`. 풀의 모든 커넥션에 적용 — 발행기 · 정리 작업 트랜잭션도 (지금은 짧다) |
 | `wallet.debit-strategy` | `conditional` | 잔고 차감 전략: `conditional` · `pessimistic` · `optimistic` · `redis` ([ADR-0009](docs/adr/0009-wallet-debit-strategies-and-lock-comparison.md)). 기동 때 하나, 모르는 이름이면 기동 실패. 지금 값은 `GET /actuator/info` |
@@ -57,6 +57,9 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 | `daily-recon.file-dir` | `./bank-files` | 은행 대사 파일 디렉터리 (`recon/RECON_yyyyMMdd.dat`) |
 | `daily-recon.chunk-size` | `100` | ③ 출금 대조 · ④ 은행 줄 대조 청크 (② 적재는 500 고정) |
 | `daily-recon.schedule.enabled` / `cron` / `zone` | `true` / `0 0 1-6 * * *` / `Asia/Seoul` | 매시 정각 전날 대사. 부하 측정 · 테스트는 `false` |
+| `data-retention.outbox-retention` / `verification-retention` | `7d` / `30d` | 발행 · 만료 뒤 이만큼 지난 행을 지운다 (§10). 1일 미만이면 기동 실패 |
+| `data-retention.batch-size` | `1000` | 트랜잭션 하나에 지우는 최대 행 수. 1 ~ 10000 밖이면 기동 실패 |
+| `data-retention.schedule.enabled` / `cron` / `zone` | `true` / `0 30 6 * * *` / `Asia/Seoul` | 매일 06:30 오늘 날짜로. 부하 측정 · 테스트는 `false` |
 | `alert.telegram.bot-token` / `chat-id` | (비어 있음) | 환경변수 `ALERT_TELEGRAM_BOT_TOKEN` · `ALERT_TELEGRAM_CHAT_ID`. 둘 다 있을 때만 텔레그램, 아니면 로그(`ALERT` 로거) |
 | `alert.telegram.base-url` | `https://api.telegram.org` | Bot API 주소 |
 | `spring.batch.job.enabled` / `spring.batch.jdbc.initialize-schema` | `false` / `never` | 기동 때 잡을 돌리지 않는다 / `BATCH_*` 표는 Flyway V4 |
@@ -175,6 +178,9 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
 | 대사: 이미 완료한 날짜 | 409 | `RECON_ALREADY_COMPLETED` |
 | 대사: 같은 날짜가 실행 중 | 409 | `RECON_RUNNING` |
 | 대사: 아직 마감되지 않은 날짜 (오늘 이후, KST) | 400 | `RECON_DATE_NOT_CLOSED` |
+| 보존 배치: 이미 완료한 날짜 | 409 | `RETENTION_ALREADY_COMPLETED` |
+| 보존 배치: 같은 날짜가 실행 중 | 409 | `RETENTION_RUNNING` |
+| 보존 배치: 내일 이후 날짜 (KST) | 400 | `RETENTION_DATE_IN_FUTURE` |
 | 허용되지 않는 상태 전이 | 409 | `ILLEGAL_TRANSITION` |
 | 그 밖의 표준 Spring 오류 (405 · 415 …) | 해당 상태 | HTTP 상태 이름 (예 `METHOD_NOT_ALLOWED`) |
 
@@ -246,7 +252,7 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait
 
 **앱 실행** (전략이 바뀔 때마다 다시 띄운다. 백그라운드 작업(발행기 · 정리 작업 · 일마감 대사 스케줄)을 끄고 로그를 줄인다 — 또는 IntelliJ 실행 구성 `5. API (부하 측정)`):
 ```bash
-java -Xms1g -Xmx1g -jar apps/api/build/libs/api-0.1.0-SNAPSHOT.jar   --wallet.debit-strategy=conditional   --transfer.outbox.relay.enabled=false --transfer.reconcile.enabled=false   --spring.kafka.listener.auto-startup=false   --server.tomcat.threads.max=200   --logging.level.io.github.hyeokjinon.banktransfer=WARN   --daily-recon.schedule.enabled=false
+java -Xms1g -Xmx1g -jar apps/api/build/libs/api-0.1.0-SNAPSHOT.jar   --wallet.debit-strategy=conditional   --transfer.outbox.relay.enabled=false --transfer.reconcile.enabled=false   --spring.kafka.listener.auto-startup=false   --server.tomcat.threads.max=200   --logging.level.io.github.hyeokjinon.banktransfer=WARN   --daily-recon.schedule.enabled=false --data-retention.schedule.enabled=false
 ```
 
 **회차 실행** (Git Bash): `bash load/run.sh <전략> <hotspot|spread> <회차>` — 정리 → 시드 → InnoDB 정리 대기 → k6 → 정확성 확인(음수 잔고 · 잔고 ≠ 원장 합 · k6 202 수 ≠ 출금 행 수 · RECEIVED 가 아닌 출금 · 발행된 아웃박스 — 뒤 둘은 다른 인스턴스나 끄지 않은 발행기 · 컨슈머가 부하 출금을 건드렸는지 잡는다)을 한 번에 한다. 떠 있는 앱의 전략(`/actuator/info`)이 인자와 다르면 거부한다. 확인을 통과하지 못했거나 중단된 회차의 요약은 `.json.invalid` 로 바뀌어 표에서 빠진다. 같은 회차 번호를 다시 돌리면 그 회차의 이전 결과를 지우고 새로 만든다. 결과 원본은 `docs/perf/raw/`.
@@ -352,7 +358,11 @@ WHERE i.JOB_NAME = 'dailyReconciliationJob' AND e.JOB_EXECUTION_ID IS NULL;
 DELETE FROM BATCH_JOB_INSTANCE WHERE JOB_INSTANCE_ID = ? AND NOT EXISTS (SELECT 1 FROM BATCH_JOB_EXECUTION e WHERE e.JOB_INSTANCE_ID = ?);
 ```
 
-**`RESTART_REFUSED`** — 지난 실행이 `UNKNOWN`(롤백할 수 없는 실패)으로 끝나 Spring Batch 가 재시작을 거부한 것이다. `BATCH_JOB_EXECUTION` 의 `STATUS` 를 확인하고, 원인을 확인한 뒤 위 STARTED 와 같은 방법으로 `FAILED` 로 바꿔 다시 실행한다.
+**`RESTART_REFUSED`** — 지난 실행이 `UNKNOWN`(롤백할 수 없는 실패)으로 끝나 Spring Batch 가 재시작을 거부한 것이다. `BATCH_JOB_EXECUTION` 의 `STATUS` 를 확인하고, 원인을 확인한 뒤 `FAILED` 로 바꿔 다시 실행한다. 위 STARTED 의 SQL 을 그대로 쓰면 안 된다 — 그 스텝 UPDATE 는 `STARTING` · `STARTED` 만 바꿔서 `UNKNOWN` 스텝이 그대로 남고, 재시작이 `JobRestartException`("Cannot restart step … from UNKNOWN status") 으로 다시 거부된다. 스텝 조건에 `'UNKNOWN'` 을 넣는다:
+   ```sql
+   UPDATE BATCH_STEP_EXECUTION SET STATUS='FAILED', EXIT_CODE='FAILED', END_TIME=NOW(6) WHERE JOB_EXECUTION_ID=? AND STATUS IN ('STARTING','STARTED','UNKNOWN');
+   UPDATE BATCH_JOB_EXECUTION SET STATUS='FAILED', EXIT_CODE='FAILED', END_TIME=NOW(6) WHERE JOB_EXECUTION_ID=?;
+   ```
 
 **동시 시작 때 ERROR 스택은 정상이다** — 실패한 날짜를 두 곳이 동시에 다시 돌리면 나중 실행을 `SingleRunGuard` 가 거부하는데, 이때 Spring Batch 가 "Encountered fatal error executing job" 이라는 **ERROR 로그와 예외 스택**(`ReconRunningException`)을 남긴다. 요청자는 409 `RECON_RUNNING` 을 받고, 먼저 시작한 실행은 계속 돈다. 동시 시작이 의도된 상황이면 무시한다.
 
@@ -360,3 +370,68 @@ DELETE FROM BATCH_JOB_INSTANCE WHERE JOB_INSTANCE_ID = ? AND NOT EXISTS (SELECT 
 - 손 확인은 [`http/daily-recon.http`](http/daily-recon.http), 실행 구성 `6. API (대사 손 확인)` (정리 작업을 꺼서 결과를 모르는 출금이 `UNKNOWN` 으로 남는다).
 - **오늘을 대사하려면 API 를 반드시 실행 구성 6 으로 띄운다** — `--daily-recon.allow-today=true` 가 켜져 있어야 오늘 날짜를 받는다. 다른 구성(`2. API (8080)` 등)으로 띄우면 400 `RECON_DATE_NOT_CLOSED` 다. 명령줄로는 `./gradlew :apps:api:bootRun --args="--transfer.reconcile.enabled=false --daily-recon.allow-today=true"`.
 - **손으로 오늘을 마감하는 것(`--close-day=오늘`)은 손 확인용이다.** 그 뒤에 처리된 출금은 이미 만들어진 오늘 파일에 없다. 오늘 대사를 아직 돌리지 않았다면 내일 01시 회차가 그 파일로 돌아, 그 출금들이 은행에 없는 것으로 보인다 (`UNKNOWN` 은 `E002` 로 확정 · 환불, `COMPLETED` 는 `COMPLETED_NOT_AT_BANK` 이슈). 손 확인을 끝낸 뒤에는 `bank-files/recon/RECON_오늘.dat` 를 지워 두면 00:05 에 모의 은행이 정상 파일을 만든다 (이미 오늘 대사를 끝냈다면 그 날짜는 "이미 완료" 로 조용히 넘어간다).
+
+## 10. 보존 배치 (P5-2)
+근거: [ADR-0011](docs/adr/0011-data-retention.md). 정책표: [database.md §4-9](docs/database.md).
+
+### 10-1. 무엇을 지우나
+| 표 | 조건 | 기본 보관 |
+|---|---|---|
+| `outbox_event` | `published_at < 기준` — 미발행은 남는다 | 7일 |
+| `account_verification` | `status IN ('SENT','EXPIRED','LOCKED') AND expires_at < 기준` — **`VERIFIED` 는 지우지 않는다** | 30일 |
+
+기준 = 실행 날짜 00:00(KST) − 보관 기간. 금융 기록(`transfer` · `wallet_ledger` · `wallet` · `bank_statement_line` · `recon_issue`)은 지우지 않는다.
+
+**삭제는 되돌릴 수 없다. 첫 운영 실행 전에는 같은 조건의 `SELECT COUNT(*)` 로 대상을 확인한다** ([database.md §9](docs/database.md)). 건수 미리보기 기능은 없다.
+
+**기본 설정으로 띄운 API 는 아무도 누르지 않아도 매일 06:30(KST) 에 수동 실행과 똑같이 되돌릴 수 없는 삭제를 한다 — 그 API 가 연결된 DB 에, 이 브랜치가 머지된 뒤 개발자의 개발 DB 도 포함해서.** 위 `SELECT COUNT(*)` 로 대상을 확인하기 전에는 `--data-retention.schedule.enabled=false` 를 넘겨 스케줄을 끈 채로 띄운다.
+
+### 10-2. 실행
+- **스케줄**: 매일 06:30 (KST), 오늘 날짜로. 재시도 회차는 없다 — 다음 날 실행은 새 인스턴스이고 기준이 뒤로 가 밀린 행까지 지운다. 끝난 날짜는 조용히(INFO) 넘어간다.
+- **수동**: `POST /admin/retention-runs?date=yyyy-MM-dd` — 요청 스레드에서 끝까지 돈다.
+
+| 응답 | 뜻 |
+|---|---|
+| 200 `{"date","status":"COMPLETED","reason":null,"deleted":{"outboxEvents":n,"verifications":m}}` | 끝났다. 건수는 이 날짜 인스턴스의 모든 실행을 더한 값 (재시작해도 맞다) |
+| 200 `{"date","status":"FAILED","reason":{"code","message"},"deleted":null}` | 요청은 처리됐고 결과가 실패다 |
+| 409 `RETENTION_ALREADY_COMPLETED` · `RETENTION_RUNNING` | 끝난 날짜 · 돌고 있음 |
+| 400 `RETENTION_DATE_IN_FUTURE` | 내일 이후(KST). 기준 시각이 앞당겨져 정책보다 일찍 지우게 되므로 거부. 오늘과 지난 날은 받는다 (지난 날은 기준이 더 과거라 범위가 좁아질 뿐이다) |
+
+묶음 사이에 쉬지 않는다. 지연 복제가 있는 운영이면 쉬는 시간이 필요하다 (이 프로젝트에는 복제가 없다). 삭제가 늘 돌아도 InnoDB 표 파일은 바로 줄지 않는다 — 공간은 재사용된다.
+
+### 10-3. 알림과 결과 확인
+| 언제 | 수준 | 내용 |
+|---|---|---|
+| 실패 (스케줄 · 수동) | WARN | `보존 배치 {date} 실패` + 이유(예외 종류만, 내부 메시지는 로그) |
+| 시작하지 못함 (DB 장애 등) | WARN | 같은 제목 + `시작하지 못함: 예외 클래스` |
+| 성공 | 없음 | 표별 건수를 INFO 로그로 (`data retention … completed`) — 대사 요약이 이미 매일 간다 |
+
+실행 이력 · 표별 건수는 [database.md §9](docs/database.md) "보존 배치" 쿼리.
+
+### 10-4. 복구
+**실패**: 멈춘 단계 · 지운 만큼은 그대로다. 삭제가 하루 밀려도 급하지 않으니 다음 날 실행에 맡겨도 된다. 그날 날짜를 바로 돌리면 멈춘 단계부터 잇는다.
+
+**실행이 STARTED 로 남음** — 도중에 JVM 이 죽으면 그 실행은 "돌고 있음" 으로 남는다. **다음 날 인스턴스는 막지 않는다** — 그날 날짜를 수동으로 다시 돌릴 때만 409 `RETENTION_RUNNING` 이다. 그 날짜를 꼭 다시 돌려야 할 때만 §9-6 과 같은 SQL 로 푼다:
+1. 실행 이력 쿼리로 `STATUS = STARTED` · `END_TIME` NULL 인 `JOB_EXECUTION_ID` 를 찾는다.
+2. 다른 API 인스턴스가 정말 돌고 있지 않은지 확인한다.
+3. FAILED 로 바꾼다:
+   ```sql
+   UPDATE BATCH_STEP_EXECUTION SET STATUS='FAILED', EXIT_CODE='FAILED', END_TIME=NOW(6) WHERE JOB_EXECUTION_ID=? AND STATUS IN ('STARTING','STARTED');
+   UPDATE BATCH_JOB_EXECUTION SET STATUS='FAILED', EXIT_CODE='FAILED', END_TIME=NOW(6) WHERE JOB_EXECUTION_ID=?;
+   ```
+4. 같은 날짜를 다시 실행하면 멈춘 곳부터 잇는다.
+
+**`reason.code = ERROR`(`IllegalStateException`)** — 처음 시작하다 죽어 잡 인스턴스만 남았다. §9-6 의 "잡 인스턴스만 있고 실행이 없음" 과 같은 SQL 로 지운다 (`JOB_NAME = 'dataRetentionJob'`).
+
+**`RESTART_REFUSED`** — 지난 실행이 `UNKNOWN` 으로 끝났다. `BATCH_JOB_EXECUTION` 의 `STATUS` 를 확인하고 `FAILED` 로 바꿔 다시 실행한다. 위 STARTED 의 SQL 을 그대로 쓰면 안 된다 — 그 스텝 UPDATE 는 `STARTING` · `STARTED` 만 바꿔서 `UNKNOWN` 스텝이 그대로 남고, 재시작이 `JobRestartException`("Cannot restart step … from UNKNOWN status") 으로 다시 거부된다. 스텝 조건에 `'UNKNOWN'` 을 넣는다:
+```sql
+UPDATE BATCH_STEP_EXECUTION SET STATUS='FAILED', EXIT_CODE='FAILED', END_TIME=NOW(6) WHERE JOB_EXECUTION_ID=? AND STATUS IN ('STARTING','STARTED','UNKNOWN');
+UPDATE BATCH_JOB_EXECUTION SET STATUS='FAILED', EXIT_CODE='FAILED', END_TIME=NOW(6) WHERE JOB_EXECUTION_ID=?;
+```
+
+**동시 시작 때 ERROR 스택은 정상이다** — §9-6 과 같다 (`RetentionRunningException`).
+
+### 10-5. 함께 알아 둘 것
+- 만료 후 30일이 지난 인증을 확인하면 "만료"(410) 대신 404 `VERIFICATION_NOT_FOUND` 다. 잠긴(`LOCKED`) 인증도 같다 — "잠김"(423 `VERIFICATION_LOCKED`) 대신 404.
+- 한 번도 쓰지 않는 `VERIFIED` 는 영원히 남는다 — 인증에 만료 정책이 생길 때 다룬다.
+- 손 확인은 [`http/data-retention.http`](http/data-retention.http), Postman 7 폴더. **손 확인의 실행(1) · 7-1)도 시드만이 아니라 그 DB 의 정책에 맞는 모든 행을 영구히 지운다.** 먼저 §10-1 의 `SELECT COUNT(*)` 로 대상을 보고, 옛 행이 소중하면 버려도 되는 별도 DB 에서 한다. 1-1) · 7-2 는 앞 실행이 끝난 뒤에만 보낸다.

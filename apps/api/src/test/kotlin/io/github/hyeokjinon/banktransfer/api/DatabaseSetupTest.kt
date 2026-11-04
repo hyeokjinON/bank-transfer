@@ -126,4 +126,14 @@ class DatabaseSetupTest : ApiIntegrationTest() {
 
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM BATCH_JOB_INSTANCE WHERE JOB_NAME = ?", Int::class.java, name))
     }
+
+    @Test
+    fun `V5 가 보존 배치 삭제용 인덱스를 만들었다 (status, expires_at)`() {
+        val columns = jdbc.queryForList(
+            "SELECT column_name FROM information_schema.statistics WHERE table_schema = DATABASE() " +
+                "AND table_name = 'account_verification' AND index_name = 'idx_verification_purge' ORDER BY seq_in_index",
+            String::class.java,
+        )
+        assertEquals(listOf("status", "expires_at"), columns)
+    }
 }
