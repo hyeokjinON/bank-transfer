@@ -1,6 +1,5 @@
 package io.github.hyeokjinon.banktransfer.api.messaging
 
-import io.github.hyeokjinon.banktransfer.api.alert.AlertNotifier
 import io.github.hyeokjinon.banktransfer.api.config.BankTransferAdapter
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.transfer.TransferProcessor
@@ -71,12 +70,10 @@ class MessagingConfiguration {
     @ConditionalOnProperty(prefix = "transfer.outbox.relay", name = ["enabled"], havingValue = "true", matchIfMissing = true)
     fun outboxRelayScheduler(relay: OutboxRelay) = OutboxRelayScheduler(relay)
 
+    /** 판정은 두 컨슈머 모드가 같이 쓴다 (P6-1). 리스너 조립은 ConsumerConfiguration — 블로킹 판만 이 BankTransferAdapter 를 부른다. */
     @Bean
     fun transferProcessor(store: TransferStore, client: BankGatewayClient, clock: Clock) =
         TransferProcessor(store, BankTransferAdapter(client), clock)
-
-    @Bean
-    fun transferRequestedListener(processor: TransferProcessor, alerts: AlertNotifier) = TransferRequestedListener(alerts, processor::process)
 
     /**
      * 재시도 토픽에서 "아직 때가 안 된" 파티션을 멈췄다가 다시 여는 스케줄러. Spring Kafka 는 이 빈을 TaskScheduler 보다 먼저 찾는다.
