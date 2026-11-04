@@ -446,7 +446,7 @@ UPDATE BATCH_JOB_EXECUTION SET STATUS='FAILED', EXIT_CODE='FAILED', END_TIME=NOW
 - `coroutine`: suspend 리스너. 은행은 `await`, DB 는 IO 디스패처. 은행에 동시에 보내는 수 ≤ `max-in-flight-bank-calls`(64), 처리 중 메시지 ≤ 컨슈머 3 × `max-poll-records` 50.
 - 띄우기: IntelliJ 실행 구성 `7. API (코루틴 컨슈머)` 또는 `./gradlew :apps:api:bootRun --args="--transfer.consumer.mode=coroutine"`. 확인: `curl -s localhost:8080/actuator/info` → `"consumer":{"mode":"coroutine", …}` (`max-in-flight-bank-calls` · `datasource.maximum-pool-size` 도 함께 나온다).
 - 알아 둘 것: 같은 파티션 안 처리 순서를 지키지 않는다 (출금은 독립이라 무해). 재시도 토픽 · DLT · 알림 · 로그 문구는 블로킹과 같고, 로그 이름만 `SuspendingTransferRequestedListener` 다. 두 판을 동시에 띄우지 않는다 — 같은 그룹이면 메시지를 나눠 가진다.
-- 은행 응답을 기다리는 중 앱을 내리면 그 출금은 `SENDING` 으로 남고 정리 작업이 30초 뒤 `UNKNOWN` → 결과조회로 확정한다 (다시 보내지 않는다).
+- 은행 응답을 기다리는 중 앱을 내리면 그 출금은 `SENDING` 또는 `UNKNOWN` 으로 남고(내릴 때 게이트웨이가 대기 중인 요청을 `ResultUnknown` 으로 실패시키면 `UNKNOWN`) 정리 작업이 30초 뒤 `UNKNOWN` → 결과조회로 확정한다 (다시 보내지 않는다).
 
 ### 11-2. 측정 절차
 "밀린 N건 비우기" 를 한 회씩 잰다: 정리 · 시드 → 측정 그룹 오프셋을 끝으로 → 발행만(리스너 끔) → 처리만(그 모드 · 그 은행 지연) → DB 시각으로 처리량 · p50 · p95 → 정확성 확인. 스크립트가 API 와 모의 은행을 직접 띄우고 내린다.
@@ -472,8 +472,10 @@ bash load/consumer/summarize.sh                       # 비교 · 용량 탐색 
 - 이전 회차에서 죽은 API 의 컨슈머 그룹 멤버가 남아 있으면 새 API 가 파티션을 배정받기까지 최대 약 45초 걸린다 — 스크립트가 기다린다.
 
 > **끝나면 반드시** `bash load/consumer/run.sh cleanup`. 측정 출금은 `COMPLETED` 로 남는데, 개발용 은행 대사 파일에는 없어 다음 날 개발용 API 의 일마감 대사가 어긋남으로 잡는다. 이 명령은 측정 사용자 정확히 100명(`load-p61-u001` ~ `u100`)의 데이터만 지운다.
+>
+> **개발용 그룹의 밀린 메시지**: 측정이 발행한 메시지는 측정 그룹뿐 아니라 개발용 그룹 `transfer-processor` 에도 밀린 메시지(lag)로 쌓인다. 다음에 개발용 API 를 띄우면 그걸 다 읽어(사용자가 없어 `NOT_FOUND` 로 지나간다) 수십만 건이면 새 개발 출금이 `RECEIVED` 로 한참 멈춰 보인다. `cleanup` 은 이 그룹을 건드리지 않고, 밀린 게 있으면 안내만 한다. 그때 **개발용 API 를 끈 채로 사람이 직접** `bash load/consumer/run.sh reset-dev-group` — 읽기 전용 사전 확인(측정 사용자 밖의 미발행 아웃박스 0 · `RECEIVED`/`SENDING` 출금 0 · 8080 비어 있음 · 그룹에 컨슈머 없음)을 통과해야만 `transfer-processor` 를 `transfer.requested` 의 끝으로 옮긴다(재시도 · DLT 토픽은 그 그룹이 오프셋을 가졌을 때만). 묻지 않고, 조건이 안 맞으면 아무것도 바꾸지 않고 멈춘다. 전후 lag 를 출력한다.
 
-> **사고 기록 (첫 시험 실행)**: 발행 단계의 발행기는 측정 사용자의 행만이 아니라 **미발행 아웃박스 전부**를 릴레이한다. 첫 시험 실행에서 개발 DB 에 남아 있던 손 확인 출금 6건(`user-retention`)이 함께 발행돼 측정용 모의 은행으로 처리됐다. 지금은 `run.sh` 가 시작 전에 읽기 전용으로 검사해서, `load-p61-*` 가 아닌 미발행 아웃박스 행이나 `RECEIVED` · `SENDING` 인 다른 출금이 있으면 시작하지 않고 멈춘다. 멈추면 그 행을 먼저 정리한 뒤 다시 한다 — 검사를 우회하려고 스크립트를 고치지 않는다.
+> **사고 기록 (첫 시험 실행)**: 발행 단계의 발행기는 측정 사용자의 행만이 아니라 **미발행 아웃박스 전부**를 릴레이한다. 첫 시험 실행에서 개발 DB 에 남아 있던 손 확인 출금 6건(`user-retention`)이 함께 발행돼 측정용 모의 은행으로 처리됐다. 지금은 `run.sh` 가 시작 전에 읽기 전용으로 검사해서, `load-p61-*` 가 아닌 미발행 아웃박스 행이나 `RECEIVED` · `SENDING` 인 다른 출금이 있으면 시작하지 않고 멈춘다. 멈추면 그 행을 먼저 정리한 뒤 다시 한다 — 검사를 우회하려고 스크립트를 고치지 않는다. 그 6건은 측정용 모의 은행으로 처리돼 개발용 은행 거래 기록에 없다 → 개발용 API 의 2026-11-04 일마감 대사가 `COMPLETED_NOT_AT_BANK` 6건을 보고할 수 있다 (시험 데이터라 예상된 결과, 조치 불필요).
 
 - 시험 실행(N=300, 지연 20ms, 워밍업 포함 짧은 실행이라 결과가 아니다): blocking 39.5 tps · p95 48ms · 은행 동시 대기 최댓값 3 / coroutine 상한 64 는 210.7 tps · p95 591ms · 최댓값 64. 스크립트가 끝까지 도는지 보는 용도다.
 - CI 에서는 돌리지 않는다 (CI 는 두 모드의 정확성 테스트만).
