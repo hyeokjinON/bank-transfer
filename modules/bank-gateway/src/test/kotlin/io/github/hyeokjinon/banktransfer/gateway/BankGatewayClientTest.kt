@@ -223,12 +223,12 @@ class BankGatewayClientTest {
         client.transfer("090", "1002123456789", 1, "seq", reference(0)).get(3, TimeUnit.SECONDS)
         assertEquals(1, bank.peakPendingResponses())   // 지연 없음: 받자마자 응답한다
 
-        bank.responseDelay = Duration.ofMillis(300)
+        bank.responseDelay = Duration.ofSeconds(1)   // 느린 CI 에서 20건 보내는 데 걸리는 시간보다 충분히 길게 (응답 시간 초과 2초 안)
         bank.resetPeakPendingResponses()
         val futures = (1..20).map { i -> client.transfer("090", "1002123456789", i.toLong(), "P$i", reference(i)) }
         futures.forEach { it.get(5, TimeUnit.SECONDS) }
 
-        assertEquals(20, bank.peakPendingResponses())   // 20건이 300ms 동안 함께 응답을 기다렸다
+        assertEquals(20, bank.peakPendingResponses())   // 20건이 1초 동안 함께 응답을 기다렸다
     }
 
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }

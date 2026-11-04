@@ -119,7 +119,7 @@ class SuspendListenerExperimentTest {
         val sent = kafka.send(RETRY_TOPIC, key, "{}").get(5, TimeUnit.SECONDS).recordMetadata
         val partition = TopicPartition(RETRY_TOPIC, sent.partition())
 
-        await.atMost(Duration.ofSeconds(15)) untilAsserted {
+        await.atMost(Duration.ofSeconds(15)).ignoreExceptions() untilAsserted {   // 코디네이터 로딩 중 예외는 다시 본다
             val committed = kafkaAdmin.committedOffset(RETRY_GROUP, partition)
             assertTrue(committed != null && committed > sent.offset(), "커밋 = $committed, 레코드 offset = ${sent.offset()}")
         }
@@ -137,6 +137,7 @@ class SuspendListenerExperimentTest {
         // 다 넣은 뒤 다시 시작하면 첫 poll 이 파티션마다 50건을 한 번에 받는다
         container.pause()
         await.atMost(Duration.ofSeconds(30)) until { container.isContainerPaused }
+        Thread.sleep(1_000)   // 이미 나간 fetch 가 일부 묶음을 돌려줄 수 있다 — 가라앉은 뒤에 넣어야 첫 poll 이 파티션마다 50건을 한 번에 받는다
         (0 until PER_PARTITION * 3)
             .map { i -> kafka.send(ProducerRecord(IN_FLIGHT_TOPIC, i % 3, "k-$i", "{}")) }
             .forEach { it.get(5, TimeUnit.SECONDS) }
@@ -154,7 +155,7 @@ class SuspendListenerExperimentTest {
         assertTrue(inFlight.done.values.all { it.get() == 1 }, "같은 레코드를 두 번 처리했다")
         assertEquals(3 * MAX_POLL_RECORDS, inFlight.maxInFlight.get(), "문을 연 뒤 최대")
         for (p in 0 until 3) {
-            await.atMost(Duration.ofSeconds(15)) untilAsserted {
+            await.atMost(Duration.ofSeconds(15)).ignoreExceptions() untilAsserted {
                 assertEquals(PER_PARTITION.toLong(), kafkaAdmin.committedOffset(IN_FLIGHT_GROUP, TopicPartition(IN_FLIGHT_TOPIC, p)))
             }
         }

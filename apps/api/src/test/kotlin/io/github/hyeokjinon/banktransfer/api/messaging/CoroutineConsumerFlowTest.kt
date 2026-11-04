@@ -139,7 +139,8 @@ class CoroutineConsumerFlowTest : ApiIntegrationTest() {
         testClock.fix(duringMaintenance())
 
         relay.publishPending()
-        consumerFactory.awaitRecords(TransferTopics.RETRY_0, t.id.toString())   // 첫 시도가 보내지 못해 재시도 토픽으로 넘어갔다
+        // 첫 시도가 끝났는지(begin 이 sending_at 을 찍고 점검이라 보내지 못함)만 본다. 재시도 토픽 도착을 기다린 뒤에 풀면 첫 재시도(0.5초 뒤)가
+        // 점검 안에서 또 실패하고, 느린 환경에서는 마지막 시도까지 점검 안에 끝나 DLT 로 가 버린다 → 첫 시도가 끝나자마자 푼다
         await.atMost(Duration.ofSeconds(10)) untilAsserted {
             val now = store.findById(t.id)!!
             assertEquals(TransferStatus.RECEIVED, now.status)
@@ -148,6 +149,8 @@ class CoroutineConsumerFlowTest : ApiIntegrationTest() {
         testClock.release()   // 점검이 끝났다: 남은 재시도(0.5 · 1 · 2초 뒤) 중 하나가 보낸다
 
         awaitStatus(t.id, TransferStatus.COMPLETED)
+        // 재시도 토픽을 거쳤다는 증거 (첫 시도가 보내지 못해 넘어간 레코드는 COMPLETED 뒤에도 토픽에 남아 있다)
+        assertTrue(consumerFactory.readAll(TransferTopics.RETRY_0).any { it.key() == t.id.toString() }, "재시도 토픽을 거치지 않았다")
         assertEquals(1, bank.depositsOf(REGISTERED).count { it.reference == t.reference })
     }
 
@@ -160,7 +163,7 @@ class CoroutineConsumerFlowTest : ApiIntegrationTest() {
 
         assertEquals(InvalidTransferKeyException::class.java.name, dlt.headers().lastHeader(KafkaHeaders.EXCEPTION_CAUSE_FQCN)?.value()?.toString(Charsets.UTF_8))
         assertTrue(consumerFactory.readAll(TransferTopics.RETRY_0).none { it.key() == key })
-        await.atMost(Duration.ofSeconds(15)) untilAsserted {
+        await.atMost(Duration.ofSeconds(15)).ignoreExceptions() untilAsserted {   // 코디네이터 로딩 중 예외는 다시 본다 (AssertionError 만 재시도하므로)
             val committed = kafkaAdmin.committedOffset(GROUP, TopicPartition(TransferTopics.REQUESTED, sent.partition()))
             assertTrue(committed != null && committed > sent.offset())
         }
