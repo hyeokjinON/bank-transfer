@@ -1,0 +1,7 @@
+{
+  "run": "coroutine-d100-c64-h20-3", "mode": "coroutine", "delay_ms": 100, "round": "3", "cap": 64, "hikari": 20, "n": 10000,
+  "seconds": 25.783, "tps": 387.9, "p50_ms": 130.4, "p95_ms": 155.8,
+  "sys_cpu_avg": 55.2, "sys_cpu_max": 81.0, "api_cpu_avg": 11.5, "api_cpu_max": 27.7,
+  "mysql_cpu_avg": 84.9, "mysql_cpu_max": 106.0, "kafka_cpu_avg": 48.4, "kafka_cpu_max": 246.5,
+  "cpu_samples": 15, "bank_peak": 64, "api_warn_error_lines": 5, "code": "a7134e0"
+}

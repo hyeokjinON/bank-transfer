@@ -1,0 +1,7 @@
+{
+  "run": "blocking-d20-h20-1", "mode": "blocking", "delay_ms": 20, "round": "1", "cap": 64, "hikari": 20, "n": 5000,
+  "seconds": 100.208, "tps": 49.9, "p50_ms": 40.1, "p95_ms": 44.1,
+  "sys_cpu_avg": 21.5, "sys_cpu_max": 33.0, "api_cpu_avg": 1.9, "api_cpu_max": 11.1,
+  "mysql_cpu_avg": 16.2, "mysql_cpu_max": 21.2, "kafka_cpu_avg": 41.8, "kafka_cpu_max": 205.8,
+  "cpu_samples": 76, "bank_peak": 3, "api_warn_error_lines": 5, "code": "a7134e0"
+}

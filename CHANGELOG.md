@@ -16,6 +16,7 @@
 - `SuspendBankTransferPort` · `SuspendBankTransferAdapter`(취소는 분류하지 않고 다시 던짐), 모의 은행 `--response-delay=<0~2999>ms` · 동시 대기 최댓값.
 - Spring Kafka suspend 리스너 실험 테스트(재시도 토픽 · poll 묶음 정지 · await 뒤 스레드), 코루틴 모드 흐름 테스트, 측정 도구 `load/consumer/`(개발 데이터가 섞여 있으면 시작하지 않는 사전 확인 포함), 실행 구성 `7. API (코루틴 컨슈머)`, ADR-0012, OPERATION §11. 테스트 411 → 465개.
 - 의존성 kotlinx-coroutines-core · -reactor 1.10.2 (Boot BOM).
+- 측정 결과 `docs/perf/p6-1-consumer-coroutines.md` · `docs/perf/raw/p6-1/` (비교 24 + 대조 3 + 용량 탐색 21 + drift 1 = 49회): 은행 지연별 두 모드 처리량, 대조 실험, 상한 · Hikari 용량 탐색, 현상과 읽는 법. ADR-0012 결과 절에 측정과 운영 기본 판단(blocking 유지 · 전환 조건).
 ### Changed
 - `TransferProcessor.process` 를 `begin` · `finish` 로 나눴다 (동작 변화 없음). 리스너의 key · 결과 마무리 · DLT 를 `TransferRequestedHandling` 으로, 예외 분류를 `classifyBankFailure` 로 뽑아 두 판이 같이 쓴다. 블로킹 리스너 빈은 `ConsumerConfiguration` 으로 옮겼다.
 ### Fixed

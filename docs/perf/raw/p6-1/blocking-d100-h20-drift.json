@@ -1,0 +1,7 @@
+{
+  "run": "blocking-d100-h20-drift", "mode": "blocking", "delay_ms": 100, "round": "drift", "cap": 64, "hikari": 20, "n": 1500,
+  "seconds": 70.233, "tps": 21.4, "p50_ms": 117.9, "p95_ms": 122.5,
+  "sys_cpu_avg": 16.5, "sys_cpu_max": 31.7, "api_cpu_avg": 1.4, "api_cpu_max": 7.6,
+  "mysql_cpu_avg": 9.7, "mysql_cpu_max": 12.2, "kafka_cpu_avg": 36.3, "kafka_cpu_max": 186.5,
+  "cpu_samples": 53, "bank_peak": 3, "api_warn_error_lines": 5, "code": "a7134e0"
+}
