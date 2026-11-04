@@ -29,10 +29,13 @@ transfer.consumer.mode = blocking (기본) | coroutine
  blocking  : TransferRequestedListener            fun on(record, ack)
                └ TransferProcessor.process(id)     = begin → bank.transfer() (.get()) → finish
  coroutine : SuspendingTransferRequestedListener  suspend fun on(record)
-               ├ withContext(db) { processor.begin(id) }                     RECEIVED → SENDING
-               ├ semaphore.withPermit { suspendBank.transfer(...) }          await — 스레드를 잡지 않는다
-               └ withContext(db) { processor.finish(id, outcome) }           결과 기록 · 판정
+               ├ semaphore.withPermit {                                       퍼밋을 기다리는 동안 행은 RECEIVED
+               │    withContext(db) { processor.begin(id) }                    RECEIVED → SENDING
+               │    suspendBank.transfer(...) }                                await — 스레드를 잡지 않는다
+               └ withContext(db) { processor.finish(id, outcome) }            결과 기록 · 판정 (퍼밋 밖)
 ```
+
+Task 5 리뷰에서 순서를 바꿨다 — 퍼밋을 기다리는 동안 SENDING 이면 30초 뒤 정리 작업이 결과조회 · 환불한 뒤 송금될 수 있다 (CONFLICT). 퍼밋은 begin 의 짧은 DB 호출 하나를 함께 덮는다.
 
 - **`modules/transfer`** (순수 Kotlin, 코루틴 라이브러리 의존 없음 — `suspend` 는 언어 기능이다)
   - `TransferProcessor.begin(id): Begin` — `Begin.Started(transfer)` · `Begin.NotFound` · `Begin.AlreadyHandled`. 지금 `process` 의 앞부분(조회 · `RECEIVED → SENDING` 조건부 전이) 그대로.

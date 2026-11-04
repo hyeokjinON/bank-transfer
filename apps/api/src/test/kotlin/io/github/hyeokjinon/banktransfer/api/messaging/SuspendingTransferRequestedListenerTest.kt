@@ -283,6 +283,42 @@ class SuspendingTransferRequestedListenerTest {
     }
 
     @Test
+    fun `퍼밋을 기다리는 동안 행은 RECEIVED 로 남는다 - SENDING 이면 정리 작업이 먼저 환불하고 뒤늦게 송금될 수 있다`() {
+        val gate = CompletableDeferred<Unit>()
+        val firstInBank = CompletableDeferred<Unit>()
+        val bank = object : SuspendBankTransferPort {
+            override suspend fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String, reference: String): BankTransferOutcome {
+                firstInBank.complete(Unit)
+                gate.await()
+                return BankTransferOutcome.Completed
+            }
+        }
+        val first = received()
+        val second = received()
+        val listener = listener(bank, permits = 1)
+
+        runBlocking {
+            val job1 = launch(Dispatchers.Unconfined) { listener.on(record(first.id)) }
+            withTimeout(5_000) { firstInBank.await() }
+            store.callThreads.clear()
+            val job2 = launch(Dispatchers.Unconfined) { listener.on(record(second.id)) }
+            delay(300)   // 두 번째가 퍼밋을 기다리는 시간
+
+            val waiting = store.transfers.getValue(second.id)
+            assertEquals(TransferStatus.RECEIVED, waiting.status)
+            assertNull(waiting.sendingAt)
+            assertTrue(store.callThreads.isEmpty(), "퍼밋 전에 DB 를 불렀다: ${store.callThreads}")
+            assertEquals(TransferStatus.SENDING, store.transfers.getValue(first.id).status)
+
+            gate.complete(Unit)
+            listOf(job1, job2).joinAll()
+        }
+
+        assertEquals(TransferStatus.COMPLETED, store.transfers.getValue(first.id).status)
+        assertEquals(TransferStatus.COMPLETED, store.transfers.getValue(second.id).status)
+    }
+
+    @Test
     fun `은행 응답을 기다리는 중에 취소되면 아무것도 기록하지 않고 취소를 다시 던진다 - SENDING 으로 남는다`() {
         val t = received()
         val called = CompletableDeferred<Unit>()
