@@ -46,6 +46,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * - 결과조회(v0.2): 처리한 이체의 이용기관 거래번호면 0000, 아니면 2001
  * - silentAfterProcessingAccounts: 이체를 처리(입금 · 거래번호 기록)하고 응답만 보내지 않는다. 단 1원 이체는 정상 응답 — 1원인증으로 수취 계좌를 등록할 수 있게 (결과조회 시나리오용)
  * - pause/resume: 은행 장애 흉내 (새 연결을 받지 않고 붙은 연결도 끊었다가, 같은 포트로 다시 연다). 입금 · 처리 기록은 그대로 (P3-3b)
+ * - responseDelay (P6-1): 모든 응답을 이만큼 늦춘다 (띄운 뒤에도 바꿀 수 있다). 그동안 "동시에 응답을 기다리는 요청 수" 의 최댓값을 센다 — 테스트는 [peakPendingResponses], 측정은 로그
  * - bankFiles (P5-1): 처리한 이체를 일자별 거래 기록에 남기고, 기동할 때 처리한 거래번호를 되살리고, 매일 00:05(KST)에 전날 대사 파일을 만든다 ([BankJournal]).
  *   null(테스트 기본값)이면 지금처럼 메모리만 쓴다
  */
@@ -54,7 +55,7 @@ class MockBankServer(
     private val accounts: Map<String, String> = DEFAULT_ACCOUNTS,
     private val silentAccounts: Set<String> = emptySet(),
     private val silentAfterProcessingAccounts: Set<String> = DEFAULT_SILENT_AFTER_PROCESSING,
-    private val responseDelay: Duration = Duration.ZERO,
+    responseDelay: Duration = Duration.ZERO,
     /** 일자별 거래 기록 · 대사 파일 디렉터리 (P5-1). null 이면 기록하지 않는다. */
     bankFiles: Path? = null,
     private val clock: Clock = Clock.systemUTC(),
@@ -66,6 +67,14 @@ class MockBankServer(
     private val deposits = ConcurrentHashMap<String, MutableList<TransferRequest>>()
     private val processedReferences: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val pollCounter = AtomicInteger()
+
+    /** 응답 지연 (P6-1: 측정 · 테스트가 바꾼다). 범위 검사는 실행 인자(MockBankOptions)가 한다. */
+    @Volatile
+    var responseDelay: Duration = responseDelay
+
+    /** 응답을 쓰려고 기다리는 요청 수와 그 최댓값 (폴링은 세지 않는다). 은행 쪽에서 본 "동시에 붙잡힌 출금 수" 다. */
+    private val pendingResponses = AtomicInteger()
+    private val peakPending = AtomicInteger()
     private lateinit var serverChannel: Channel
     private val clients = DefaultChannelGroup(GlobalEventExecutor.INSTANCE)
     private val journal: BankJournal? = bankFiles?.let { BankJournal(it, clock) }
@@ -127,6 +136,12 @@ class MockBankServer(
 
     fun hasProcessed(reference: String): Boolean = reference in processedReferences
 
+    /** 지금까지(또는 마지막 [resetPeakPendingResponses] 뒤) 동시에 응답을 기다린 요청 수의 최댓값 (P6-1). */
+    fun peakPendingResponses(): Int = peakPending.get()
+
+    /** 최댓값을 지금 기다리는 수로 되돌린다 (공유 테스트 은행에서 한 테스트의 값만 보려고). */
+    fun resetPeakPendingResponses() = peakPending.set(pendingResponses.get())
+
     private fun scheduleDailyClose() {
         val executor = closer ?: return
         executor.schedule({
@@ -146,6 +161,7 @@ class MockBankServer(
     }
 
     override fun close() {
+        log.info("mock bank peak pending responses: {} (closing)", peakPending.get())
         closer?.shutdownNow()
         if (::serverChannel.isInitialized) serverChannel.close().awaitUninterruptibly(1, TimeUnit.SECONDS)
         boss.shutdownGracefully(0, 1, TimeUnit.SECONDS)
@@ -196,11 +212,23 @@ class MockBankServer(
     private inner class BankHandler : SimpleChannelInboundHandler<BankMessage>() {
         override fun channelRead0(ctx: ChannelHandlerContext, msg: BankMessage) {
             val reply = respond(msg) ?: return
-            if (responseDelay.isZero) {
+            val counted = msg !is PollRequest   // 회선 확인은 출금이 아니다
+            if (counted) markPending()
+            val send = Runnable {
+                if (counted) pendingResponses.decrementAndGet()
                 ctx.writeAndFlush(reply)
-            } else {
-                ctx.executor().schedule({ ctx.writeAndFlush(reply) }, responseDelay.toMillis(), TimeUnit.MILLISECONDS)
             }
+            val delay = responseDelay
+            if (delay.isZero) send.run() else ctx.executor().schedule(send, delay.toMillis(), TimeUnit.MILLISECONDS)
+        }
+
+        /**
+         * 최댓값이 바뀔 때마다 한 줄 남긴다 (값이 늘 때만이라 줄 수는 최댓값 이하다).
+         * 측정 스크립트가 Windows 에서 프로세스를 내리면 종료 로그(close)가 남지 않을 수 있어 이것에 기댄다.
+         */
+        private fun markPending() {
+            val now = pendingResponses.incrementAndGet()
+            if (now > peakPending.getAndAccumulate(now) { a, b -> maxOf(a, b) }) log.info("mock bank peak pending responses: {}", now)
         }
 
         override fun exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable) {
@@ -230,7 +258,12 @@ fun main(args: Array<String>) {
         println("Recon file for $day: ${BankJournal(options.bankFiles).closeDay(day).toAbsolutePath()}")
         return
     }
-    MockBankServer(options.port, bankFiles = options.bankFiles).start()
-    println("Mock bank FEP started on port ${options.port}. Accounts: ${MockBankServer.DEFAULT_ACCOUNTS}. Bank files: ${options.bankFiles.toAbsolutePath()}")
+    val server = MockBankServer(options.port, responseDelay = options.responseDelay, bankFiles = options.bankFiles).start()
+    // 정상 종료(Ctrl+C) 때 동시 대기 최댓값을 남긴다 (측정용). 강제 종료면 남지 않는다 — 최댓값이 바뀔 때마다 남기는 줄이 대신한다
+    Runtime.getRuntime().addShutdownHook(Thread { server.close() })
+    println(
+        "Mock bank FEP started on port ${options.port}. Accounts: ${MockBankServer.DEFAULT_ACCOUNTS}. " +
+            "Bank files: ${options.bankFiles.toAbsolutePath()}. Response delay: ${options.responseDelay.toMillis()}ms",
+    )
     Thread.currentThread().join()
 }

@@ -198,5 +198,38 @@ class BankGatewayClientTest {
         assertEquals(ResponseCodes.ORIGINAL_NOT_FOUND, client.inquire("T261028MAINTENANCE01").get(3, TimeUnit.SECONDS).result)
     }
 
+    @Test
+    fun `돌려받은 future 를 취소해도 대기 표의 항목은 응답 시간 초과 뒤 지워진다 (P6-1 - 코루틴 취소 때 await 가 하는 일)`() {
+        val bank = MockBankServer(silentAccounts = setOf("9990000000001")).start().closeLater()
+        val client = client(bank.boundPort, timeout = Duration.ofMillis(500)).start()
+        waitUntil { client.isConnected }
+
+        val future = client.transfer("090", "9990000000001", 1_000, "m", "T2611040000000000001")
+        waitUntil { client.pendingCount == 1 }
+        assertTrue(future.cancel(false))
+
+        // 취소는 돌려준 future(thenApply 단계)에만 닿는다. 대기 표의 원래 future 에는 orTimeout 이 걸려 있어 시간 초과 때 handle 이 항목을 지운다 — 무한히 남지 않는다
+        assertEquals(1, client.pendingCount)
+        waitUntil(timeoutMs = 3_000) { client.pendingCount == 0 }
+    }
+
+    @Test
+    fun `모의 은행은 응답 지연 중 동시에 응답을 기다린 요청 수의 최댓값을 센다 - 지연은 띄운 뒤에도 바꿀 수 있다 (P6-1)`() {
+        val bank = MockBankServer().start().closeLater()
+        val client = client(bank.boundPort).start()
+        waitUntil { client.isConnected }
+        fun reference(i: Int) = "P61PEAK" + "%013d".format(i)
+
+        client.transfer("090", "1002123456789", 1, "seq", reference(0)).get(3, TimeUnit.SECONDS)
+        assertEquals(1, bank.peakPendingResponses())   // 지연 없음: 받자마자 응답한다
+
+        bank.responseDelay = Duration.ofMillis(300)
+        bank.resetPeakPendingResponses()
+        val futures = (1..20).map { i -> client.transfer("090", "1002123456789", i.toLong(), "P$i", reference(i)) }
+        futures.forEach { it.get(5, TimeUnit.SECONDS) }
+
+        assertEquals(20, bank.peakPendingResponses())   // 20건이 300ms 동안 함께 응답을 기다렸다
+    }
+
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }
 }
