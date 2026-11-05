@@ -80,7 +80,7 @@ class RetryTopicFlowTest : ApiIntegrationTest() {
             for ((topic, group) in stages) {
                 val record = consumerFactory.readAll(topic).single { it.key() == key }
                 val partition = TopicPartition(topic, record.partition())
-                await.atMost(Duration.ofSeconds(15)) untilAsserted {
+                await.atMost(Duration.ofSeconds(15)).ignoreExceptions() untilAsserted {
                     val committed = kafkaAdmin.committedOffset(group, partition)
                     assertTrue(committed != null && committed > record.offset(), "$group 가 $topic@${record.offset()} 를 커밋하지 않았다: $committed")
                 }
@@ -107,7 +107,7 @@ class RetryTopicFlowTest : ApiIntegrationTest() {
                 .get(5, TimeUnit.SECONDS).recordMetadata
 
             // 벽시계 3초 안에 끝나는지가 아니라 "앞 메시지가 포기(DLT)되기 전에 끝났는지" 를 본다: 느린 CI 에서도 흔들리지 않게 넉넉히 기다린 뒤 순서만 비교한다
-            await.atMost(Duration.ofSeconds(10)) untilAsserted {
+            await.atMost(Duration.ofSeconds(10)).ignoreExceptions() untilAsserted {
                 val committed = kafkaAdmin.committedOffset(GROUP, TopicPartition(TransferTopics.REQUESTED, partition))
                 assertTrue(committed != null && committed > next.offset(), "뒤 메시지(offset ${next.offset()})가 아직 처리되지 않았다: $committed")
             }
@@ -130,7 +130,7 @@ class RetryTopicFlowTest : ApiIntegrationTest() {
 
         assertTrue(InvalidTransferKeyException::class.java.name in dlt.exceptionClassNames(), dlt.exceptionClassNames().toString())
         assertTrue(consumerFactory.readAll(TransferTopics.RETRY_0).none { it.key() == key })   // 재시도 토픽을 거치지 않았다
-        await.atMost(Duration.ofSeconds(15)) untilAsserted {
+        await.atMost(Duration.ofSeconds(15)).ignoreExceptions() untilAsserted {
             val committed = kafkaAdmin.committedOffset(GROUP, TopicPartition(TransferTopics.REQUESTED, sent.partition()))
             assertTrue(committed != null && committed > sent.offset())   // 원래 토픽도 막히지 않고 넘어갔다
         }

@@ -1,6 +1,6 @@
 # ADR-0012 출금 컨슈머의 은행 대기를 suspend 리스너로도 만든다 — 설정으로 고르고, 판정은 한 곳, DB 는 IO 디스패처에서
 
-- 상태: 제안 (2026-11-04)
+- 상태: 채택 (2026-11-05, [#19](https://github.com/hyeokjinON/bank-transfer/pull/19)) · 제안 2026-11-04
 - 단계: P6-1 · 설계: [P6-1 설계](../superpowers/specs/2026-11-04-p6-1-consumer-coroutines-design.md) · [ADR-0005](0005-kafka-delivery-and-consumer-idempotency.md) (컨슈머 · 조건부 전이) · [ADR-0007](0007-retry-topic-and-bounded-republish.md) (재시도 토픽) · [측정 결과](../perf/p6-1-consumer-coroutines.md)
 
 ## 맥락
@@ -19,7 +19,7 @@
 7. **취소는 분류하지 않고 다시 던진다.** 은행 응답을 기다리는 중 코루틴이 취소되면(앱 종료 등) 보냈는지 모른다. 아무것도 기록하지 않아 출금은 `SENDING` 으로 남고, 정리 작업이 30초 뒤 `UNKNOWN` → 결과조회로 확정한다. `NotSent` 로 분류하면 `RECEIVED` 로 되돌아가 다시 보내져 이중 지급이다. `CancellationException` 이 한 겹 더 싸여 올 때도 `ResultUnknown`(안전한 쪽)으로 분류한다. `await()` 가 취소한 게이트웨이 future 의 대기 표 항목은 응답 시간 초과(3초) 뒤 지워진다 — 대기 표의 원래 future 에 `orTimeout` 이 걸려 있어서다 (게이트웨이는 바꾸지 않고 `BankGatewayClientTest` 로 고정).
    - **중단 지점마다의 결과**: `begin` 커밋 뒤 취소 → `SENDING` 인데 은행은 부르지 않았다 → 정리 작업의 결과조회가 "미처리"(2001) → `FAILED` + 환불 (안전). `finish` 뒤 취소 → 결과 마무리(`conclude`)를 건너뛴다 → CONFLICT 알림이 빠질 수 있고, 일마감 대사가 잡는다. Spring Kafka 가 실행 중인 리스너 코루틴을 취소하지는 않을 것으로 본다 (추정 — 앱 종료 때의 취소는 위와 같이 안전한 쪽).
 8. **알려 두는 차이 — 같은 파티션 안 처리 순서를 지키지 않는다.** 출금은 서로 독립이고 상태 전이가 조건부라 영향이 없다 (같은 출금의 중복 메시지는 `begin` 의 조건부 전이가 한 번만 통과시킨다). 처리 중 앱이 죽으면 ack 하지 않은 레코드는 다시 오고, 이미 `SENDING` 인 건은 `AlreadyHandled` 로 걸러져 은행에 다시 가지 않는다 (블로킹 장애와 같은 길).
-   - **실패 경로의 ack 순서**: 비동기 실패 경로는 레코드를 **먼저 ack 하고 나중에** 재시도 토픽으로 발행한다 (바이트코드로 확인). 그 사이에 죽거나 발행이 실패하면 재시도 메시지를 잃을 수 있다. `RETRY_LATER` 로 끝난 건은 `sending_at` 이 있어 정리 작업이 다시 발행하지만, `begin` 의 DB 예외(`sending_at` NULL)는 `RECEIVED` 로 남고 DLT 알림이 가지 않는다. "블로킹 판의 수동 ack 와 같은 결과" 는 **정상 경로에서만** 맞다.
+   - **실패 경로의 ack 순서**: 비동기 실패 경로는 레코드를 **먼저 ack 하고 나중에** 재시도 토픽으로 발행한다 (바이트코드로 확인). 그 사이에 죽거나 발행이 실패하면 재시도 메시지를 잃을 수 있다. 그렇게 잃었을 때 `RETRY_LATER` 로 끝난 건은 `sending_at` 이 있어 정리 작업이 다시 발행하지만, `begin` 의 DB 예외(`sending_at` NULL)는 `RECEIVED` 로 남고 DLT 알림이 가지 않는다. "블로킹 판의 수동 ack 와 같은 결과" 는 **정상 경로에서만** 맞다.
 9. **측정 방법**: "밀린 N건 비우기" (은행 장애 복구 뒤 쌓인 출금을 처리하는 상황) — 발행을 먼저 끝내고 처리만 따로 띄워, 처리량을 DB 시각(N ÷ (마지막 `updated_at` − 첫 `sending_at`))으로 잰다. API 기동 시간이 섞이지 않는다. 측정 전용 컨슈머 그룹 · 별도 은행 거래 기록 · 정확성 확인(N건 모두 `COMPLETED`, 거래번호마다 은행 한 번, 잔고 = 원장 합)은 [OPERATION §11](../../OPERATION.md).
 
 ## 결과

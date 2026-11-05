@@ -9,7 +9,7 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
-## [P6-1] 컨슈머 코루틴 — (머지 전)
+## [P6-1] 컨슈머 코루틴 — 2026-11-05 ([#19](https://github.com/hyeokjinON/bank-transfer/pull/19), 머지 후 정리 [#20](https://github.com/hyeokjinON/bank-transfer/pull/20))
 ### Added
 - 출금 컨슈머의 코루틴 판 `SuspendingTransferRequestedListener` (Spring Kafka suspend 리스너): 은행은 `await`, DB 는 IO 디스패처, 은행 동시 호출 상한 `Semaphore` (퍼밋을 받은 뒤 `begin`).
 - 설정 `transfer.consumer.mode`(`blocking` 기본 · `coroutine`, 소문자만) · `transfer.consumer.coroutine.max-in-flight-bank-calls`(64, 1 ~ 1024), 범위를 벗어나면 기동 실패. `/actuator/info` 에 모드 · 상한 · 풀 크기.
@@ -21,6 +21,9 @@
 - `TransferProcessor.process` 를 `begin` · `finish` 로 나눴다 (동작 변화 없음). 리스너의 key · 결과 마무리 · DLT 를 `TransferRequestedHandling` 으로, 예외 분류를 `classifyBankFailure` 로 뽑아 두 판이 같이 쓴다. 블로킹 리스너 빈은 `ConsumerConfiguration` 으로 옮겼다.
 ### Fixed
 - `OutboxRelayTest` 의 발행 확인이 가끔 깨지던 것: Awaitility `untilAsserted` 는 `AssertionError` 만 다시 시도하는데 `single{}` 이 `NoSuchElementException` 을 던져 사실상 poll 한 번이었다. 토픽 끝 오프셋까지 읽는 방식으로 고쳤다.
+### Fixed (머지 후 정리)
+- `RetryTopicFlowTest` 의 커밋 오프셋 대기 3곳에 `ignoreExceptions()` — 그룹 코디네이터가 아직 준비되지 않아 조회가 예외를 던지면 기다림이 바로 끝나던 것 (`OutboxRelayTest` 와 같은 종류).
+- ADR-0012 채택. 코루틴 리스너 주석 · ADR 의 "`begin` 의 DB 예외는 `RECEIVED` 로 남는다" 에 전제(ack 와 재시도 발행 사이에 죽었을 때)를 붙이고, 결과 문서 §7-2 제목에 확인 · 추정 구분을 붙였다.
 
 ## [P5-2] 보존 배치 — 2026-11-04 ([#17](https://github.com/hyeokjinON/bank-transfer/pull/17), 머지 후 정리 [#18](https://github.com/hyeokjinON/bank-transfer/pull/18))
 ### Added
