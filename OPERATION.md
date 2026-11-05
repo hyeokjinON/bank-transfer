@@ -481,7 +481,7 @@ bash load/consumer/summarize.sh                       # 비교 · 용량 탐색 
 - CI 에서는 돌리지 않는다 (CI 는 두 모드의 정확성 테스트만).
 
 ## 12. 웹 1원인증 판 · WebFlux 측정 (P6-2)
-1원인증 요청은 네 판이 있다 ([ADR-0013](docs/adr/0013-web-verification-webflux-comparison.md)). 결과는 `docs/perf/p6-2-web-reactive.md` (측정 전에는 없다).
+1원인증 요청은 네 판이 있다 ([ADR-0013](docs/adr/0013-web-verification-webflux-comparison.md)). 결과는 [측정 결과](docs/perf/p6-2-web-reactive.md) (2026-11-05).
 
 ### 12-1. 판 고르기
 - `apps/api` (8080): `--account.verification.web-mode=async` (기본, 서블릿 비동기) | `blocking` (Tomcat 스레드가 끝까지 기다리는 대조군 — **측정 전용, 운영에서 쓰지 않는다**). 실행 구성 `10. API (1원인증 블로킹)`.

@@ -1,0 +1,10 @@
+{
+  "run": "reactor-d500-r100-1", "mode": "reactor", "app": "api-reactive", "delay_ms": 500, "rate": 100, "tomcat_threads": 200, "round": "1",
+  "rps_201": 100.03333333333333, "p50_201": 1014.962772, "p95_201": 1024.624796, "p99_201": 1035.006004,
+  "status_201": 3001, "status_4xx": 0, "status_5xx": 0, "timeouts": 0,
+  "dropped_iterations": 30, "vus_max": 130,
+  "created_all": 3971, "timeouts_all": 0, "rows": 3971, "one_won": 3971,
+  "rows_minus_created": 0, "one_won_minus_rows": 0,
+  "threads_max": 88.0, "sys_cpu_avg": 21.6, "sys_cpu_max": 32.9, "app_cpu_avg": 2.8, "app_cpu_max": 5.8,
+  "samples": 20, "app_warn_error_lines": 0, "code": "cccdb0a"
+}

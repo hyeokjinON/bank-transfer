@@ -1,0 +1,10 @@
+{
+  "run": "blocking-d500-r200-3", "mode": "blocking", "app": "api", "delay_ms": 500, "rate": 200, "tomcat_threads": 200, "round": "3",
+  "rps_201": 196.93333333333334, "p50_201": 1549.9805175000001, "p95_201": 1816.47874095, "p99_201": 1873.4503913,
+  "status_201": 5908, "status_4xx": 0, "status_5xx": 0, "timeouts": 0,
+  "dropped_iterations": 174, "vus_max": 374,
+  "created_all": 7826, "timeouts_all": 0, "rows": 7826, "one_won": 7826,
+  "rows_minus_created": 0, "one_won_minus_rows": 0,
+  "threads_max": 226.0, "sys_cpu_avg": 26.0, "sys_cpu_max": 34.6, "app_cpu_avg": 3.7, "app_cpu_max": 5.9,
+  "samples": 11, "app_warn_error_lines": 5, "code": "cccdb0a"
+}

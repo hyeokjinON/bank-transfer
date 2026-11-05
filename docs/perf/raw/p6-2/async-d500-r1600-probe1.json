@@ -1,0 +1,10 @@
+{
+  "run": "async-d500-r1600-probe1", "mode": "async", "app": "api", "delay_ms": 500, "rate": 1600, "tomcat_threads": 200, "round": "probe1",
+  "rps_201": 434.93333333333334, "p50_201": 4574.1517134999995, "p95_201": 4627.01257075, "p99_201": 4644.170913450001,
+  "status_201": 13048, "status_4xx": 0, "status_5xx": 0, "timeouts": 0,
+  "dropped_iterations": 46049, "vus_max": 2000,
+  "created_all": 17953, "timeouts_all": 0, "rows": 17953, "one_won": 17953,
+  "rows_minus_created": 0, "one_won_minus_rows": 0,
+  "threads_max": 226.0, "sys_cpu_avg": 37.4, "sys_cpu_max": 52.3, "app_cpu_avg": 5.3, "app_cpu_max": 13.7,
+  "samples": 19, "app_warn_error_lines": 5, "code": "cccdb0a"
+}

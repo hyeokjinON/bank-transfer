@@ -18,7 +18,7 @@
 - 진행 조건 실험 E1 ~ E4 (스레드 · 끊김 취소 · 예외), 끊김 테스트, 변이 검사 4종 (모두 테스트가 잡음), 오류 계약 테스트.
 - 측정 도구 `load/verification/` (k6 열린 모델 · 측정용 포트 18080 · 18081 · 9190 · 시간 초과를 포함한 정확성 규칙 · `summarize.sh` · `cleanup`).
 - IntelliJ 실행 구성 `8. API 리액티브 (코루틴)` · `9. API 리액티브 (Reactor)` · `10. API (1원인증 블로킹)`, `http/account-verification.http` 와 Postman `1-1R` 요청 (`reactiveBaseUrl`).
-- ADR-0013 (제안), OPERATION §12. 측정 결과 문서는 측정 뒤.
+- ADR-0013 (제안), OPERATION §12, [측정 결과](docs/perf/p6-2-web-reactive.md) (82회: 본 72 · 원인 확인 3 · 한계 탐색 6 · 실행기 확인 1 — 원자료 `docs/perf/raw/p6-2/`).
 ### Changed
 - 1원인증 JPA 저장소 · 은행 응답 해석을 `apps/api` 에서 `modules/account-infra` 로 이동 (동작 변화 없음). 이동한 패키지의 엔티티 스캔은 `@AutoConfigurationPackage(basePackageClasses = [앱 클래스], basePackages = …)`.
 - `BankMaintenanceGuard` · `BankMaintenanceException` 을 `apps/api` 에서 `modules/bank-gateway` 로 이동 (두 앱 공유).
