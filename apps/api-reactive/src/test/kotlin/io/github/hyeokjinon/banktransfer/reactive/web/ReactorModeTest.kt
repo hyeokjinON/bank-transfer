@@ -1,5 +1,6 @@
 package io.github.hyeokjinon.banktransfer.reactive.web
 
+import io.github.hyeokjinon.banktransfer.reactive.flow.ReactorVerificationFlow
 import io.github.hyeokjinon.banktransfer.reactive.support.VerificationSuite
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.context.ApplicationContext
@@ -18,6 +19,8 @@ import kotlin.test.assertTrue
 @TestPropertySource(properties = ["account.verification.web-mode=reactor"])
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class ReactorModeTest : VerificationSuite() {
+
+    override val flowLoggerName: String = ReactorVerificationFlow::class.java.name
 
     @Autowired private lateinit var context: ApplicationContext
 

@@ -1,5 +1,6 @@
 package io.github.hyeokjinon.banktransfer.reactive.web
 
+import io.github.hyeokjinon.banktransfer.reactive.flow.CoroutineVerificationFlow
 import io.github.hyeokjinon.banktransfer.reactive.support.VerificationSuite
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.context.ApplicationContext
@@ -14,6 +15,8 @@ import kotlin.test.assertTrue
 
 /** 기본 판(코루틴)의 조립 · 요청 · 점검 + 공통(VerificationSuite). */
 class CoroutineModeTest : VerificationSuite() {
+
+    override val flowLoggerName: String = CoroutineVerificationFlow::class.java.name
 
     @Autowired private lateinit var context: ApplicationContext
 
