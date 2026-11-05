@@ -1,0 +1,8 @@
+spring:
+  application:
+    name: bank-transfer-reactive
+  main:
+    web-application-type: reactive   # 명시: 클래스패스에 spring-web(RestClient 등)도 있어 서블릿으로 오인되지 않게
+
+server:
+  port: 8081                          # apps/api(8080)와 나란히 띄운다

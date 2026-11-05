@@ -8,4 +8,5 @@ include(":modules:transfer")        // 출금이체 도메인 (Spring·JPA·Kafk
 
 // 실행 모듈
 include(":apps:api")                // Spring Boot REST API
+include(":apps:api-reactive")       // 1원인증 요청만 하는 WebFlux 앱 (P6-2 — MVC 와 비교용, 운영 기본 아님)
 include(":apps:mock-bank")          // 모의 은행 FEP 서버 (Netty)
