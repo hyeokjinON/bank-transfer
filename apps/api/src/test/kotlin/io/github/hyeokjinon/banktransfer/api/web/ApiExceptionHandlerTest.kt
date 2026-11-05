@@ -3,6 +3,7 @@ package io.github.hyeokjinon.banktransfer.api.web
 import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconAlreadyCompletedException
 import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconDateNotClosedException
 import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconRunningException
+import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceException
 import io.github.hyeokjinon.banktransfer.transfer.TransferException
 import org.springframework.http.HttpHeaders
 import org.springframework.http.ProblemDetail

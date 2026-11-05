@@ -1,4 +1,4 @@
-package io.github.hyeokjinon.banktransfer.api.persistence
+package io.github.hyeokjinon.banktransfer.account.infra
 
 import io.github.hyeokjinon.banktransfer.account.AccountVerification
 import io.github.hyeokjinon.banktransfer.account.VerificationRepository
@@ -20,8 +20,11 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
-/** DATETIME(6) 은 마이크로초까지만 담는다. 저장 전에 맞춰 잘라야 저장한 값과 다시 읽은 값이 같다. */
-internal fun Instant.toDbPrecision(): Instant = truncatedTo(ChronoUnit.MICROS)
+/**
+ * DATETIME(6) 은 마이크로초까지만 담는다. 저장 전에 맞춰 잘라야 저장한 값과 다시 읽은 값이 같다.
+ * apps/api 의 다른 저장소는 api/persistence/DbPrecision.kt 의 같은 함수를 쓴다 — 두 모듈이 서로 의존하지 않게 한 줄을 따로 둔다.
+ */
+private fun Instant.toDbPrecision(): Instant = truncatedTo(ChronoUnit.MICROS)
 
 @Entity
 @Table(name = "account_verification")

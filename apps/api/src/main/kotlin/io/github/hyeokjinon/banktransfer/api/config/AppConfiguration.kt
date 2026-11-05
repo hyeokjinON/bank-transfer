@@ -4,18 +4,19 @@ import io.github.hyeokjinon.banktransfer.account.AccountVerificationService
 import io.github.hyeokjinon.banktransfer.account.BankPort
 import io.github.hyeokjinon.banktransfer.account.RandomCodeGenerator
 import io.github.hyeokjinon.banktransfer.account.VerificationRepository
-import io.github.hyeokjinon.banktransfer.api.persistence.AccountVerificationJpaRepository
+import io.github.hyeokjinon.banktransfer.account.infra.AccountVerificationJpaRepository
+import io.github.hyeokjinon.banktransfer.account.infra.JpaVerificationRepository
+import io.github.hyeokjinon.banktransfer.account.infra.holderNameOf
+import io.github.hyeokjinon.banktransfer.account.infra.requireOk
 import io.github.hyeokjinon.banktransfer.api.persistence.JpaTransferStore
-import io.github.hyeokjinon.banktransfer.api.persistence.JpaVerificationRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.OutboxEventJpaRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.TransferJpaRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletDebit
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletLedger
-import io.github.hyeokjinon.banktransfer.api.web.BankMaintenanceGuard
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
+import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceGuard
 import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceWindow
-import io.github.hyeokjinon.banktransfer.protocol.ResponseCodes
 import io.github.hyeokjinon.banktransfer.transfer.RandomReferenceGenerator
 import io.github.hyeokjinon.banktransfer.transfer.ReferenceGenerator
 import io.github.hyeokjinon.banktransfer.transfer.TransferService
@@ -63,9 +64,6 @@ data class VerificationProperties(
     val maxAttempts: Int = 5,
 )
 
-/** 은행이 처리를 거절한 경우(응답코드가 0000 이 아님). */
-class BankRejectedException(val responseCode: String) : RuntimeException("bank rejected with code $responseCode")
-
 /**
  * 조립(wiring)은 여기서만 한다. account 모듈은 BankPort 인터페이스만 알고,
  * 실제로 Netty 게이트웨이를 붙이는 건 이 어댑터다 (포트-어댑터 구조).
@@ -80,18 +78,10 @@ class BankGatewayAdapter(
     private val references: ReferenceGenerator = RandomReferenceGenerator(prefix = 'V'),
 ) : BankPort {
     override fun inquireHolderName(bankCode: String, accountNo: String): CompletableFuture<String?> =
-        client.inquireName(bankCode, accountNo).thenApplyAsync({ res ->
-            when (res.header.responseCode) {
-                ResponseCodes.OK -> res.holderName
-                ResponseCodes.ACCOUNT_NOT_FOUND -> null
-                else -> throw BankRejectedException(res.header.responseCode)
-            }
-        }, executor)
+        client.inquireName(bankCode, accountNo).thenApplyAsync({ res -> holderNameOf(res) }, executor)
 
     override fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String): CompletableFuture<Unit> =
-        client.transfer(bankCode, accountNo, amount, memo, references.next()).thenApplyAsync({ res ->
-            if (!res.header.isOk) throw BankRejectedException(res.header.responseCode)
-        }, executor)
+        client.transfer(bankCode, accountNo, amount, memo, references.next()).thenApplyAsync({ res -> requireOk(res) }, executor)
 }
 
 @Configuration(proxyBeanMethods = false)

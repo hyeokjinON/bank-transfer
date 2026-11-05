@@ -1,13 +1,14 @@
 package io.github.hyeokjinon.banktransfer.api.web
 
 import io.github.hyeokjinon.banktransfer.account.AccountVerificationException
-import io.github.hyeokjinon.banktransfer.api.config.BankRejectedException
+import io.github.hyeokjinon.banktransfer.account.infra.BankRejectedException
 import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconAlreadyCompletedException
 import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconDateNotClosedException
 import io.github.hyeokjinon.banktransfer.api.dailyrecon.ReconRunningException
 import io.github.hyeokjinon.banktransfer.api.retention.RetentionAlreadyCompletedException
 import io.github.hyeokjinon.banktransfer.api.retention.RetentionDateInFutureException
 import io.github.hyeokjinon.banktransfer.api.retention.RetentionRunningException
+import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceException
 import io.github.hyeokjinon.banktransfer.gateway.BankTimeoutException
 import io.github.hyeokjinon.banktransfer.gateway.BankUnavailableException
 import io.github.hyeokjinon.banktransfer.transfer.TransferException
