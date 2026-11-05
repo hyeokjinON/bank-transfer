@@ -10,6 +10,7 @@ import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
 import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceGuard
 import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceWindow
 import io.github.hyeokjinon.banktransfer.reactive.flow.CoroutineVerificationFlow
+import io.github.hyeokjinon.banktransfer.reactive.flow.ReactorVerificationFlow
 import io.github.hyeokjinon.banktransfer.transfer.RandomReferenceGenerator
 import io.github.hyeokjinon.banktransfer.transfer.ReferenceGenerator
 import org.springframework.context.annotation.Bean
@@ -57,4 +58,12 @@ class ReactiveConfiguration {
         repository: VerificationRepository,
         references: ReferenceGenerator,
     ) = CoroutineVerificationFlow(client, rules, repository, references)
+
+    @Bean
+    fun reactorVerificationFlow(
+        client: BankGatewayClient,
+        rules: VerificationRequestRules,
+        repository: VerificationRepository,
+        references: ReferenceGenerator,
+    ) = ReactorVerificationFlow(client, rules, repository, references)
 }
