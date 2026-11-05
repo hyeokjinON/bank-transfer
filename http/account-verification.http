@@ -63,3 +63,19 @@ X-User-Id: user-1
   "accountNo": "abc",
   "holderName": ""
 }
+
+### P6-2 — 리액티브 앱(8081)에 같은 요청 (실행 구성 8 · 9). 확인(/confirm)은 apps/api(8080)로 — 같은 DB 다
+POST http://localhost:8081/api/v1/account-verifications
+Content-Type: application/json
+X-User-Id: user-1
+
+{
+  "bankCode": "090",
+  "accountNo": "1002123456789",
+  "holderName": "홍길동"
+}
+
+> {%
+    client.global.set("verificationId", response.body.id);
+    client.log("verificationId = " + response.body.id);
+%}

@@ -59,7 +59,9 @@ flowchart LR
 | `modules/bank-gateway` | 은행 접속 클라이언트: 폴링, 재접속(지수 백오프), 전문번호 기반 응답 매칭, 타임아웃 | `bank-protocol` (api) | Netty |
 | `modules/account` | 1원 계좌인증 도메인 + 포트(`BankPort`, `VerificationRepository`, `CodeGenerator`) | **없음** | 없음 |
 | `modules/transfer` | 출금이체 도메인: 상태 전이, 사용자 범위 멱등 접수, 실패 확정 포트 `fail()`, 거래번호, 처리(`TransferProcessor` — begin · finish 로 나뉨, P6-1), 정리 작업(`TransferReconciler`) + 포트(`TransferStore`, `VerifiedAccounts`, `ReferenceGenerator`, `BankTransferPort` · `SuspendBankTransferPort`(P6-1), `BankInquiryPort`) | **없음** | 없음 |
+| `modules/account-infra` | 1원인증의 바깥 어댑터를 두 앱이 같이 쓰도록 모았다 (P6-2): JPA 엔티티 · 저장소(`JpaVerificationRepository`), 은행 응답 해석(`holderNameOf` · `requireOk` · `BankRejectedException`), 오류 계약 기대표(test fixtures). 테이블 소유(Flyway)는 `apps/api` 그대로 | `account`, `bank-gateway` | Spring Data JPA |
 | `apps/api` | REST API, 예외 → HTTP 매핑, 조립(`AppConfiguration`), 어댑터, 잔고 SQL(`WalletLedger` · 차감 전략 `WalletDebit`), JPA 저장소(`persistence/`), Kafka 발행 · 소비(`messaging/`) | `account`, `transfer`, `bank-gateway` | Spring Boot 4 (MVC, JPA, Kafka) |
+| `apps/api-reactive` | WebFlux(Reactor Netty) 별도 앱, 포트 8081. 1원인증 요청 `POST /api/v1/account-verifications` 하나만 (코루틴 · Reactor 두 판). Kafka · 스케줄러 · 배치 · Flyway 없음 (P6-2, [ADR-0013](docs/adr/0013-web-verification-webflux-comparison.md)) | `account`, `account-infra`, `bank-gateway` | Spring WebFlux |
 | `apps/mock-bank` | 모의 은행 FEP 서버. 실행 가능 + 테스트 픽스처 | `bank-protocol` (api) | Netty |
 
 의존 방향 (화살표 = "의존한다"):
@@ -70,6 +72,8 @@ apps/api ──▶ modules/account            (도메인, 의존 없음)
    ├──────▶ modules/transfer           (도메인, 의존 없음)
    │
    └──────▶ modules/bank-gateway ──▶ modules/bank-protocol ──▶ netty
+apps/api ──▶ modules/account-infra     (1원인증 JPA 저장소 · 은행 응답 해석)
+apps/api-reactive ──▶ modules/account, modules/account-infra, modules/bank-gateway
 apps/mock-bank ─────────────────────▶ modules/bank-protocol
 (test) bank-gateway, apps/api ──▶ apps/mock-bank
 ```
@@ -170,6 +174,7 @@ sequenceDiagram
 
 - 인증코드는 원문 대신 `SHA-256(id + code)` 로 저장. 유효시간 5분, 실패 5회면 잠금. 시도 횟수는 저장소의 원자적 `update` 로 갱신.
 - 상태: `SENT → VERIFIED | EXPIRED | LOCKED`.
+- 요청 흐름은 네 판이 있다 (P6-2): MVC 비동기(위 그림, 기본) · MVC 블로킹(대조군) · WebFlux 코루틴 · WebFlux Reactor. 판정은 한 벌, 다른 것은 기다리는 방법과 JDBC 를 도는 스레드 — [ADR-0013](docs/adr/0013-web-verification-webflux-comparison.md).
 
 ## 4. 은행 연동 (bank-gateway · bank-protocol)
 
@@ -223,7 +228,7 @@ sequenceDiagram
 - 중복 메시지는 `RECEIVED → SENDING` 조건부 UPDATE 가 막는다(0건이면 은행에 보내지 않고 ack). 결과를 모르면 `UNKNOWN` 으로 두고 다시 보내지 않는다.
 - 미전송이면 `RECEIVED` 로 되돌리고 컨슈머가 예외를 던진다 → 재시도 토픽(5s · 30s · 60s) → DLT (P3-3b, 아래).
 - 은행 응답 뒤 DB 기록이 실패하면 `SENDING` 으로 남는다 (아래 P3-3a 정리 작업 대상).
-- 컨슈머는 두 판이 있다 (P6-1, [ADR-0012](docs/adr/0012-consumer-coroutines.md)): 위 그림은 기본인 블로킹 판이다. `transfer.consumer.mode=coroutine` 이면 `SuspendingTransferRequestedListener` 가 은행 동시 호출 상한(세마포어) 퍼밋을 받은 뒤 `begin`(DB, IO 디스패처) → 은행 `await`(스레드를 잡지 않음) 을 하고, 퍼밋을 놓은 다음 `finish`(DB, IO 디스패처) 로 같은 판정을 부른다. 퍼밋을 `begin` 보다 먼저 받는 것은 `SENDING` 인 채 퍼밋을 기다리다 정리 작업이 환불한 뒤 송금되는 일을 막으려는 것이다. 은행 응답 뒤 코드는 Netty 이벤트 루프에서 이어지므로 DB 호출을 거기서 옮긴다. 같은 파티션 안 처리 순서는 지키지 않는다.
+- 컨슈머는 두 판이 있다 (P6-1, [ADR-0012](docs/adr/0012-consumer-coroutines.md)): 위 그림은 기본인 블로킹 판이다. `transfer.consumer.mode=coroutine` 이면 `SuspendingTransferRequestedListener` 가 은행 호출 자리(세마포어 permit)를 잡은 뒤 `begin`(DB, IO 디스패처) → 은행 `await`(스레드를 잡지 않음) 을 하고, 자리를 비운 다음 `finish`(DB, IO 디스패처) 로 같은 판정을 부른다. 자리를 `begin` 보다 먼저 잡는 것은 `SENDING` 인 채 자리를 기다리다 정리 작업이 환불한 뒤 송금되는 일을 막으려는 것이다. 은행 응답 뒤 코드는 Netty 이벤트 루프에서 이어지므로 DB 호출을 거기서 옮긴다. 같은 파티션 안 처리 순서는 지키지 않는다.
 - 근거와 한계: [ADR-0005](docs/adr/0005-kafka-delivery-and-consumer-idempotency.md)
 
 ### P3-3a 정리 작업 흐름
@@ -395,3 +400,4 @@ flowchart TB
 | [0010](docs/adr/0010-daily-reconciliation.md) | 일마감 대사는 은행 대사 파일과 맞추고 결과를 모르는 출금만 자동 확정, 점검 시간으로 날짜 경계, API 앱 안의 Spring Batch |
 | [0011](docs/adr/0011-data-retention.md) | 보존 배치는 일회성 데이터 두 종류만 READ COMMITTED 로 나눠 지우고, 금융 기록은 지우지 않는다 |
 | [0012](docs/adr/0012-consumer-coroutines.md) | 출금 컨슈머의 은행 대기를 suspend 리스너로도 만들어 설정으로 고르고, 판정은 한 곳, DB 는 IO 디스패처, 은행 동시 호출 상한 (제안) |
+| [0013](docs/adr/0013-web-verification-webflux-comparison.md) | 웹 1원인증 경로는 네 판(MVC 블로킹 · 비동기, WebFlux 코루틴 · Reactor)을 같은 도구로 비교하고, WebFlux 는 별도 앱, 판정 · 어댑터는 한 벌, 끊기면 취소 (제안) |

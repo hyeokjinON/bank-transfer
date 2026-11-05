@@ -16,6 +16,7 @@ description: |-
   대응 파일: http/account-verification.http, http/transfer.http, http/daily-recon.http, http/data-retention.http (IntelliJ Ultimate 용)
 variables:
   baseUrl: http://localhost:8080
+  reactiveBaseUrl: http://localhost:8081
   userId: user-1
   accountNo: "1002123456789"
   code: ""

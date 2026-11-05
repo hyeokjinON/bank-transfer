@@ -23,7 +23,7 @@ cd bank-transfer
 
 ### 2-2. 빌드 · 테스트
 ```bash
-./gradlew build      # 첫 실행은 의존성 다운로드로 몇 분 걸린다. 테스트 465개 통과해야 정상
+./gradlew build      # 첫 실행은 의존성 다운로드로 몇 분 걸린다. 테스트 514개 통과해야 정상
 ```
 테스트는 Testcontainers 로 MySQL · Kafka · Redis 를 띄우므로 Docker Desktop 이 켜져 있어야 한다 (설치는 2-4).
 
@@ -71,6 +71,15 @@ cd bank-transfer
 6. 확인: [`http/daily-recon.http`](http/daily-recon.http) 의 2) 대사를 돌리면 휴대폰에 요약이 온다. 알림은 대사가 끝나거나 실패했을 때 · `CONFLICT` · DLT · 결과조회 한도 소진 때만 간다 — API 기동, 409 `RECON_ALREADY_COMPLETED`, 400 `RECON_DATE_NOT_CLOSED` 로는 오지 않는다 (API 는 실행 구성 `6. API (대사 손 확인)` 으로 — 오늘 날짜 대사는 그 구성의 `daily-recon.allow-today=true` 일 때만 받는다).
 
 토큰이 새었다면 `@BotFather` → `/revoke` 로 바로 폐기하고 새 토큰으로 4번을 다시 한다. 끄려면 두 환경 변수를 지운다.
+
+### 2-7. 쓰는 포트 (P6-2 에서 정리)
+| 포트 | 무엇 |
+|---|---|
+| 8080 | `apps/api` (개발용) |
+| 8081 | `apps/api-reactive` (개발용, WebFlux 별도 앱 — 실행 구성 8 · 9) |
+| 9090 | 모의 은행 (개발용) |
+| 18080 · 18081 · 9190 | 측정 전용 `apps/api` · `apps/api-reactive` · 모의 은행 (`load/verification/run.sh` 가 띄우고 내린다, 평소엔 비어 있어야 한다. [OPERATION §12](OPERATION.md#12-웹-1원인증-판--webflux-측정-p6-2)) |
+| 3306 · 6379 · Kafka | MySQL · Redis · Kafka (`infra/`) |
 
 ## 3. Windows 에서 알아둘 것
 | 상황 | 해결 |

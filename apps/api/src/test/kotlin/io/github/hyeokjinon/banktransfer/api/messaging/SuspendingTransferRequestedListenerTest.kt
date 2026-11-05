@@ -283,7 +283,7 @@ class SuspendingTransferRequestedListenerTest {
     }
 
     @Test
-    fun `퍼밋을 기다리는 동안 행은 RECEIVED 로 남는다 - SENDING 이면 정리 작업이 먼저 환불하고 뒤늦게 송금될 수 있다`() {
+    fun `자리를 기다리는 동안 행은 RECEIVED 로 남는다 - SENDING 이면 정리 작업이 먼저 환불하고 뒤늦게 송금될 수 있다`() {
         val gate = CompletableDeferred<Unit>()
         val firstInBank = CompletableDeferred<Unit>()
         val bank = object : SuspendBankTransferPort {
@@ -302,12 +302,12 @@ class SuspendingTransferRequestedListenerTest {
             withTimeout(5_000) { firstInBank.await() }
             store.callThreads.clear()
             val job2 = launch(Dispatchers.Unconfined) { listener.on(record(second.id)) }
-            delay(300)   // 두 번째가 퍼밋을 기다리는 시간
+            delay(300)   // 두 번째가 은행 호출 자리(세마포어 permit)를 기다리는 시간
 
             val waiting = store.transfers.getValue(second.id)
             assertEquals(TransferStatus.RECEIVED, waiting.status)
             assertNull(waiting.sendingAt)
-            assertTrue(store.callThreads.isEmpty(), "퍼밋 전에 DB 를 불렀다: ${store.callThreads}")
+            assertTrue(store.callThreads.isEmpty(), "자리 전에 DB 를 불렀다: ${store.callThreads}")
             assertEquals(TransferStatus.SENDING, store.transfers.getValue(first.id).status)
 
             gate.complete(Unit)

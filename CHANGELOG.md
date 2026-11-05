@@ -9,9 +9,29 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
+## [P6-2] 웹 1원인증 WebFlux 비교 — (머지 전)
+### Added
+- 신규 앱 `apps/api-reactive` (WebFlux, 포트 8081): 1원인증 요청 `POST /api/v1/account-verifications` 하나만, 코루틴 판(`withContext(io)`)과 Reactor 판(`fromFuture` · `publishOn(boundedElastic())`). 클라이언트가 끊으면 취소, 1원 이체 대기 중 끊김은 마스킹한 경고. 설정 `account.verification.web-mode`(`coroutine` 기본 · `reactor`).
+- 신규 모듈 `modules/account-infra`: 1원인증 JPA 저장소 · 은행 응답 해석 · 오류 계약 기대표(`VerificationErrorContract`, test fixtures).
+- `apps/api` 1원인증 `web-mode`(`async` 기본 · `blocking` 측정용 대조군), `/actuator/info` 에 판 · Tomcat 최대 스레드.
+- 판정 순수 함수 `VerificationRequestRules`(`modules/account`).
+- 진행 조건 실험 E1 ~ E4 (스레드 · 끊김 취소 · 예외), 끊김 테스트, 변이 검사 4종 (모두 테스트가 잡음), 오류 계약 테스트.
+- 측정 도구 `load/verification/` (k6 열린 모델 · 측정용 포트 18080 · 18081 · 9190 · 시간 초과를 포함한 정확성 규칙 · `summarize.sh` · `cleanup`).
+- IntelliJ 실행 구성 `8. API 리액티브 (코루틴)` · `9. API 리액티브 (Reactor)` · `10. API (1원인증 블로킹)`, `http/account-verification.http` 와 Postman `1-1R` 요청 (`reactiveBaseUrl`).
+- ADR-0013 (제안), OPERATION §12. 측정 결과 문서는 측정 뒤.
+### Changed
+- 1원인증 JPA 저장소 · 은행 응답 해석을 `apps/api` 에서 `modules/account-infra` 로 이동 (동작 변화 없음). 이동한 패키지의 엔티티 스캔은 `@AutoConfigurationPackage(basePackageClasses = [앱 클래스], basePackages = …)`.
+- `BankMaintenanceGuard` · `BankMaintenanceException` 을 `apps/api` 에서 `modules/bank-gateway` 로 이동 (두 앱 공유).
+- `apps/api` 1원인증 컨트롤러를 셋으로 나눔: 확인만(`AccountVerificationController`) · 비동기 요청 · 블로킹 요청 (경로 · 응답 그대로).
+- 모의 은행 입금 기록을 `CopyOnWriteArrayList` 에서 `ConcurrentLinkedQueue` 로 (O(1) 추가, 순서 · `depositsOf()` 그대로).
+- 용어 정리: "퍼밋" → "은행 호출 자리(세마포어 permit)" (ADR-0012 · P6-1 결과 문서 · ARCHITECTURE · HANDOVER · 코루틴 리스너 주석 · 테스트 이름).
+- 전체 테스트 514개.
+### Fixed
+- 없음.
+
 ## [P6-1] 컨슈머 코루틴 — 2026-11-05 ([#19](https://github.com/hyeokjinON/bank-transfer/pull/19), 머지 후 정리 [#20](https://github.com/hyeokjinON/bank-transfer/pull/20))
 ### Added
-- 출금 컨슈머의 코루틴 판 `SuspendingTransferRequestedListener` (Spring Kafka suspend 리스너): 은행은 `await`, DB 는 IO 디스패처, 은행 동시 호출 상한 `Semaphore` (퍼밋을 받은 뒤 `begin`).
+- 출금 컨슈머의 코루틴 판 `SuspendingTransferRequestedListener` (Spring Kafka suspend 리스너): 은행은 `await`, DB 는 IO 디스패처, 은행 동시 호출 상한 `Semaphore` (은행 호출 자리(세마포어 permit)를 잡은 뒤 `begin`).
 - 설정 `transfer.consumer.mode`(`blocking` 기본 · `coroutine`, 소문자만) · `transfer.consumer.coroutine.max-in-flight-bank-calls`(64, 1 ~ 1024), 범위를 벗어나면 기동 실패. `/actuator/info` 에 모드 · 상한 · 풀 크기.
 - `SuspendBankTransferPort` · `SuspendBankTransferAdapter`(취소는 분류하지 않고 다시 던짐), 모의 은행 `--response-delay=<0~2999>ms` · 동시 대기 최댓값.
 - Spring Kafka suspend 리스너 실험 테스트(재시도 토픽 · poll 묶음 정지 · await 뒤 스레드), 코루틴 모드 흐름 테스트, 측정 도구 `load/consumer/`(개발 데이터가 섞여 있으면 시작하지 않는 사전 확인 포함), 실행 구성 `7. API (코루틴 컨슈머)`, ADR-0012, OPERATION §11. 테스트 411 → 465개.
