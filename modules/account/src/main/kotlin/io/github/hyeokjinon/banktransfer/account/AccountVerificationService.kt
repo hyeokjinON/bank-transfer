@@ -1,10 +1,8 @@
 package io.github.hyeokjinon.banktransfer.account
 
-import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.Clock
 import java.time.Duration
-import java.util.HexFormat
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -21,21 +19,22 @@ import java.util.concurrent.ConcurrentHashMap
 class AccountVerificationService(
     private val bank: BankPort,
     private val repository: VerificationRepository,
-    private val codeGenerator: CodeGenerator = RandomCodeGenerator(),
+    codeGenerator: CodeGenerator = RandomCodeGenerator(),
     private val clock: Clock = Clock.systemUTC(),
-    private val ttl: Duration = Duration.ofMinutes(5),
+    ttl: Duration = Duration.ofMinutes(5),
     private val maxAttempts: Int = 5,
-    private val memoPrefix: String = "BT",
+    memoPrefix: String = "BT",
 ) {
+    /** 판정은 네 판이 같이 쓰는 [VerificationRequestRules] 에 있다 (P6-2). 여기는 CompletableFuture 로 이어 붙이기만 한다. */
+    private val rules = VerificationRequestRules(codeGenerator, clock, ttl, memoPrefix)
 
+    /** 없는 계좌 · 이름 불일치는 checkHolder 가 던진다 → 이 future 가 그 예외로 끝나고 1원은 보내지 않는다. */
     fun request(command: RequestVerification): CompletableFuture<AccountVerification> =
-        bank.inquireHolderName(command.bankCode, command.accountNo).thenCompose { holderName ->
-            when {
-                holderName == null ->
-                    CompletableFuture.failedFuture(AccountVerificationException.AccountNotFound())
-                normalize(holderName) != normalize(command.holderName) ->
-                    CompletableFuture.failedFuture(AccountVerificationException.HolderNameMismatch())
-                else -> sendOneWon(command, holderName)
+        bank.inquireHolderName(command.bankCode, command.accountNo).thenCompose { found ->
+            val holderName = rules.checkHolder(found, command.holderName)
+            val draft = rules.newDraft()
+            bank.transfer(command.bankCode, command.accountNo, 1, draft.memo).thenApply {
+                repository.save(rules.issue(draft, command, holderName))
             }
         }
 
@@ -50,7 +49,7 @@ class AccountVerificationService(
                 v.userId != userId -> v   // 남의 건: 아무것도 바꾸지 않는다
                 v.status != VerificationStatus.SENT -> v
                 !now.isBefore(v.expiresAt) -> v.copy(status = VerificationStatus.EXPIRED)
-                hash(v.id, code) == v.codeHash -> v.copy(status = VerificationStatus.VERIFIED, verifiedAt = now)
+                verificationCodeHash(v.id, code) == v.codeHash -> v.copy(status = VerificationStatus.VERIFIED, verifiedAt = now)
                 else -> {
                     val failed = v.failedAttempts + 1
                     v.copy(
@@ -70,30 +69,6 @@ class AccountVerificationService(
         }
     }
 
-    private fun sendOneWon(command: RequestVerification, holderName: String): CompletableFuture<AccountVerification> {
-        val id = UUID.randomUUID()
-        val code = codeGenerator.generate()
-        return bank.transfer(command.bankCode, command.accountNo, 1, memoPrefix + code).thenApply {
-            repository.save(
-                AccountVerification(
-                    id = id,
-                    userId = command.userId,
-                    bankCode = command.bankCode,
-                    accountNo = command.accountNo,
-                    holderName = holderName,
-                    codeHash = hash(id, code),
-                    status = VerificationStatus.SENT,
-                    failedAttempts = 0,
-                    expiresAt = clock.instant().plus(ttl),
-                ),
-            )
-        }
-    }
-
-    private fun normalize(name: String) = name.filterNot { it.isWhitespace() }
-
-    private fun hash(id: UUID, code: String): String =
-        HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest("$id:$code".toByteArray()))
 }
 
 /** 4자리 숫자. 예측할 수 없도록 SecureRandom 을 쓴다. */
