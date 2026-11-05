@@ -8,6 +8,7 @@ plugins {
 dependencies {
     implementation(project(":modules:account"))
     implementation(project(":modules:bank-gateway"))
+    implementation(project(":modules:account-infra"))   // 1원인증 JPA 저장소 · 은행 응답 해석 — apps/api 와 같은 코드 (P6-2)
     implementation(project(":modules:transfer"))   // RandomReferenceGenerator — 1원인증 거래번호(V 접두)를 apps/api 와 같은 생성기로
 
     implementation("org.springframework.boot:spring-boot-starter-webflux")
@@ -21,6 +22,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
     runtimeOnly("com.mysql:mysql-connector-j")
 
+    testImplementation(testFixtures(project(":modules:account-infra")))   // 오류 계약 기대표
     testImplementation(project(":apps:mock-bank"))
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
