@@ -62,7 +62,22 @@ data class BankMaintenanceProperties(
 data class VerificationProperties(
     val ttl: Duration = Duration.ofMinutes(5),
     val maxAttempts: Int = 5,
-)
+    /**
+     * 1원인증 요청 판 (P6-2, ADR-0013): async(기본, 서블릿 비동기) | blocking(대조군 — 요청 스레드가 은행을 끝까지 기다린다, 측정 전용).
+     * 소문자 그대로만 받는다: @ConditionalOnProperty 는 대소문자를 무시해 "Blocking" 도 블로킹 컨트롤러를 띄우지만, info · 측정 이름과 어긋난다.
+     */
+    val webMode: String = ASYNC,
+) {
+    init {
+        require(webMode in WEB_MODES) { "account.verification.web-mode must be one of $WEB_MODES (lower case): '$webMode'" }
+    }
+
+    companion object {
+        const val ASYNC = "async"
+        const val BLOCKING = "blocking"
+        val WEB_MODES = listOf(ASYNC, BLOCKING)
+    }
+}
 
 /**
  * 조립(wiring)은 여기서만 한다. account 모듈은 BankPort 인터페이스만 알고,

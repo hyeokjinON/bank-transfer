@@ -64,6 +64,7 @@ account:
   verification:
     ttl: 5m
     max-attempts: 5
+    web-mode: async            # 1원인증 요청 판 (P6-2): async(기본) | blocking(대조군, 측정 전용). 소문자만, 그 밖은 기동 실패
 
 management:
   endpoints:
@@ -138,6 +139,13 @@ alert:
     base-url: https://api.telegram.org
 
 info:
+  account:
+    verification:
+      web-mode: ${account.verification.web-mode}   # 지금 1원인증 요청 판 (P6-2, load/verification/run.sh 가 측정 전에 확인)
+  server:
+    tomcat:
+      threads:
+        max: ${server.tomcat.threads.max:200}       # 블로킹 판의 천장 = 이 수 (원인 확인 실험에서 400 으로 띄운다)
   wallet:
     debit-strategy: ${wallet.debit-strategy}   # /actuator/info 로 지금 전략을 본다 (load/run.sh 가 측정 전에 확인)
   transfer:
