@@ -26,7 +26,7 @@
 - 모의 은행 입금 기록을 `CopyOnWriteArrayList` 에서 `ConcurrentLinkedQueue` 로 (O(1) 추가, 순서 · `depositsOf()` 그대로).
 - 용어 정리: "퍼밋" → "은행 호출 자리(세마포어 permit)" (ADR-0012 · P6-1 결과 문서 · ARCHITECTURE · HANDOVER · 코루틴 리스너 주석 · 테스트 이름).
 - 예상 못 한 예외의 500 응답이 Boot 기본 모양에서 ProblemDetail + code `INTERNAL_ERROR` 로 (두 앱 · 네 판 같게). 처리기에 `Exception::class` 를 더했고, 리액티브 처리기는 취소(`CancellationException`)를 응답으로 바꾸지 않고 다시 던진다. 계약 테스트가 처리기 라우팅까지 확인.
-- 전체 테스트 514개.
+- 전체 테스트 515개.
 ### Fixed
 - 없음.
 
