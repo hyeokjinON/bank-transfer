@@ -66,6 +66,7 @@ ls apps/mock-bank/build/install/mock-bank/lib/*.jar >/dev/null 2>&1 || die "모�
 
 # --- 프로세스 · 정리 ---
 APP_PID=; BANK_PID=; SAMPLER=
+OWN_APP=0; OWN_BANK=0   # 이 실행이 그 포트에서 프로세스를 띄운 뒤에만 1 — 사전 확인에서 멈출 때 남의 프로세스를 강제 종료하지 않게
 OK=0
 STARTED=0   # 이전 결과를 지우는 지점부터 1 — 그 앞에서 멈추면 이전 회차 결과를 .invalid 로 바꾸지 않는다
 stop_pid() { [ -n "${1:-}" ] || return 0; kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
@@ -78,7 +79,9 @@ free_port() {   # 그 포트를 쥔 프로세스가 끝날 때까지 (최대 15�
 finish() {
   [ -n "$SAMPLER" ] && kill "$SAMPLER" 2>/dev/null || true
   stop_pid "$APP_PID"; stop_pid "$BANK_PID"
-  free_port "$PORT" >/dev/null 2>&1 || true; free_port "$BANK_PORT" >/dev/null 2>&1 || true
+  # 우리가 띄운 포트만 비운다 (사전 확인에서 멈췄다면 그 포트는 남의 것이다 — free_port 의 taskkill 이 닿으면 안 된다)
+  [ "$OWN_APP" = 1 ] && { free_port "$PORT" >/dev/null 2>&1 || true; }
+  [ "$OWN_BANK" = 1 ] && { free_port "$BANK_PORT" >/dev/null 2>&1 || true; }
   if [ "$OK" != 1 ] && [ "$STARTED" = 1 ] && [ -f "$OUT" ]; then mv -f "$OUT" "$OUT.invalid"; echo "[$RUN] 확인을 통과하지 못해 $OUT.invalid 로 바꿨다 — 이 회차 숫자는 쓰지 않는다" >&2; fi
   return 0
 }
@@ -105,7 +108,7 @@ LEFT=$(echo "SELECT COUNT(*) FROM account_verification WHERE $USERS" | sql)
 echo "[$RUN] 2/6 모의 은행 :$BANK_PORT 지연 ${DELAY}ms"
 java -Dstdout.encoding=UTF-8 -cp "$BANK_CP" io.github.hyeokjinon.banktransfer.mockbank.MockBankServerKt "$BANK_PORT" \
   --bank-files="$BANK_FILES" --response-delay="${DELAY}ms" > "$WORK/mock-bank.log" 2>&1 &
-BANK_PID=$!
+BANK_PID=$!; OWN_BANK=1
 for _ in $(seq 30); do
   grep -q "mock bank listening on" "$WORK/mock-bank.log" && break
   kill -0 "$BANK_PID" 2>/dev/null || die "모의 은행이 기동 중에 끝났다 — $WORK/mock-bank.log"
@@ -124,7 +127,7 @@ if [ "$APP" = api ]; then
     --daily-recon.schedule.enabled=false --data-retention.schedule.enabled=false --server.tomcat.threads.max="$TOMCAT")
 fi
 java -Xms1g -Xmx1g -Dstdout.encoding=UTF-8 -jar "$JAR" "${ARGS[@]}" > "$WORK/app.log" 2>&1 &
-APP_PID=$!
+APP_PID=$!; OWN_APP=1
 for _ in $(seq 120); do
   curl -sf "$API/actuator/health" >/dev/null 2>&1 && break
   kill -0 "$APP_PID" 2>/dev/null || die "앱이 기동 중에 끝났다 — $WORK/app.log"
