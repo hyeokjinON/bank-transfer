@@ -36,7 +36,8 @@ fun ConsumerFactory<String, String>.awaitRecords(
     timeout: Duration = Duration.ofSeconds(30),
 ): List<ConsumerRecord<String, String>> {
     var found = emptyList<ConsumerRecord<String, String>>()
-    await.atMost(timeout).pollInterval(Duration.ofMillis(200)) untilAsserted {
+    // readAll 의 check · partitionsFor 는 AssertionError 가 아닌 예외(토픽이 아직 없거나 코디네이터 로딩 중)를 던질 수 있다 → 같이 다시 본다
+    await.atMost(timeout).pollInterval(Duration.ofMillis(200)).ignoreExceptions() untilAsserted {
         found = readAll(topic).filter { it.key() == key }
         assertTrue(found.size >= count, "$topic 에 key=$key 가 ${found.size}개 (기다리는 수 $count)")
     }

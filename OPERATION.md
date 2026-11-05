@@ -40,6 +40,8 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 | `transfer.reconcile.batch-size` | `100` | 한 번에 처리하는 최대 건수 |
 | `transfer.reconcile.republish-after` | `5m` | 마지막 변경 후 이만큼 지난 `RECEIVED` 를 재발행한다 (재시도 토픽 체인 약 95초가 끝난 뒤) |
 | `transfer.reconcile.max-republish` | `3` | 재발행 한도. 다 쓰고도 은행에 못 보내면 `FAILED` `E001` |
+| `transfer.consumer.mode` | `blocking` | 출금 컨슈머 (P6-1, [ADR-0012](docs/adr/0012-consumer-coroutines.md)): `blocking` · `coroutine` (소문자 그대로). 그 밖의 값은 기동 실패. 지금 값은 `GET /actuator/info` (§11) |
+| `transfer.consumer.coroutine.max-in-flight-bank-calls` | `64` | `coroutine` 에서 은행에 동시에 보내는 최대 수. 1 ~ 1024 밖이면 기동 실패 |
 | `spring.task.scheduling.pool.size` | `4` | 스케줄러 스레드. 발행기(0.5초) · 정리 작업(10초) · 일마감 대사(01 ~ 06시) · 보존 배치(06:30)가 서로 막지 않게 한다 (P5-2 에서 3 → 4) |
 | `spring.datasource.hikari.maximum-pool-size` | `20` | 커넥션 풀 (P4-2 에서 명시, `minimum-idle` = 최대) |
 | `spring.datasource.hikari.connection-init-sql` | `SET SESSION innodb_lock_wait_timeout = 5` | 행 락 대기 한도 5초 (MySQL 기본 50초). 넘으면 503 `WALLET_BUSY`. 풀의 모든 커넥션에 적용 — 발행기 · 정리 작업 트랜잭션도 (지금은 짧다) |
@@ -241,7 +243,7 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env down -v        
 `main` push 와 모든 PR 에서 실행된다. PR 은 두 잡이 모두 초록이어야 머지한다.
 
 ## 8. 부하 측정 (P4-2, k6)
-네 차감 전략의 처리량 · 지연 · 실패율을 같은 조건에서 잰다 (핫스팟 `load-hot` 1명 / 분산 `load-u001` ~ `load-u500`, 50 VU, 워밍업 10초 + 측정 60초). 결과는 [docs/perf/p4-2-lock-comparison.md](docs/perf/p4-2-lock-comparison.md).
+네 차감 전략의 처리량 · 지연 · 실패율을 같은 조건에서 잰다 (핫스팟 `load-hot` 1명 / 분산 `load-u001` ~ `load-u500`, 50 VU, 워밍업 10초 + 측정 60초). 결과는 [docs/perf/p4-2-lock-comparison.md](docs/perf/p4-2-lock-comparison.md). 컨슈머 처리량 측정(P6-1)은 [§11](#11-컨슈머-모드--코루틴-측정-p6-1).
 
 **준비** (이 PC 에서 앱 · MySQL · Redis · k6 가 CPU 를 나눠 쓰므로 측정 중에는 다른 무거운 작업을 하지 않는다. 다른 API 인스턴스(예: IntelliJ 로 띄운 것)는 모두 끈다 — 같은 DB 를 쓰는 발행기와 컨슈머가 측정용 출금을 은행으로 보내 버린다):
 ```bash
@@ -435,3 +437,45 @@ UPDATE BATCH_JOB_EXECUTION SET STATUS='FAILED', EXIT_CODE='FAILED', END_TIME=NOW
 - 만료 후 30일이 지난 인증을 확인하면 "만료"(410) 대신 404 `VERIFICATION_NOT_FOUND` 다. 잠긴(`LOCKED`) 인증도 같다 — "잠김"(423 `VERIFICATION_LOCKED`) 대신 404.
 - 한 번도 쓰지 않는 `VERIFIED` 는 영원히 남는다 — 인증에 만료 정책이 생길 때 다룬다.
 - 손 확인은 [`http/data-retention.http`](http/data-retention.http), Postman 7 폴더. **손 확인의 실행(1) · 7-1)도 시드만이 아니라 그 DB 의 정책에 맞는 모든 행을 영구히 지운다.** 먼저 §10-1 의 `SELECT COUNT(*)` 로 대상을 보고, 옛 행이 소중하면 버려도 되는 별도 DB 에서 한다. 1-1) · 7-2 는 앞 실행이 끝난 뒤에만 보낸다.
+
+## 11. 컨슈머 모드 · 코루틴 측정 (P6-1)
+출금 컨슈머는 두 판이 있다 ([ADR-0012](docs/adr/0012-consumer-coroutines.md)). 결과는 [docs/perf/p6-1-consumer-coroutines.md](docs/perf/p6-1-consumer-coroutines.md).
+
+### 11-1. 모드 전환
+- `blocking` (기본): 컨슈머 스레드 3개가 은행 응답을 기다린다 — 동시에 기다리는 출금 ≤ 3.
+- `coroutine`: suspend 리스너. 은행은 `await`, DB 는 IO 디스패처. 은행에 동시에 보내는 수 ≤ `max-in-flight-bank-calls`(64), 처리 중 메시지 ≤ 컨슈머 3 × `max-poll-records` 50.
+- 띄우기: IntelliJ 실행 구성 `7. API (코루틴 컨슈머)` 또는 `./gradlew :apps:api:bootRun --args="--transfer.consumer.mode=coroutine"`. 확인: `curl -s localhost:8080/actuator/info` → `"consumer":{"mode":"coroutine", …}` (`max-in-flight-bank-calls` · `datasource.maximum-pool-size` 도 함께 나온다).
+- 알아 둘 것: 같은 파티션 안 처리 순서를 지키지 않는다 (출금은 독립이라 무해). 재시도 토픽 · DLT · 알림 · 로그 문구는 블로킹과 같고, 로그 이름만 `SuspendingTransferRequestedListener` 다. 두 판을 동시에 띄우지 않는다 — 같은 그룹이면 메시지를 나눠 가진다.
+- 은행 응답을 기다리는 중 앱을 내리면 그 출금은 `SENDING` 또는 `UNKNOWN` 으로 남고(내릴 때 게이트웨이가 대기 중인 요청을 `ResultUnknown` 으로 실패시키면 `UNKNOWN`) 정리 작업이 30초 뒤 `UNKNOWN` → 결과조회로 확정한다 (다시 보내지 않는다).
+
+### 11-2. 측정 절차
+"밀린 N건 비우기" 를 한 회씩 잰다: 정리 · 시드 → 측정 그룹 오프셋을 끝으로 → 발행만(리스너 끔) → 처리만(그 모드 · 그 은행 지연) → DB 시각으로 처리량 · p50 · p95 → 정확성 확인. 스크립트가 API 와 모의 은행을 직접 띄우고 내린다.
+
+**준비** (측정 중에는 빌드 · 테스트 · IDE 인덱싱 같은 무거운 작업을 하지 않는다. 개발용 API · 모의 은행(9090) · IntelliJ 실행은 모두 끈다):
+```bash
+docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait
+./gradlew :apps:api:bootJar :apps:mock-bank:installDist
+```
+
+**회차 실행** (Git Bash): `bash load/consumer/run.sh <blocking|coroutine> <지연ms 0~2999> <회차> [상한=64] [hikari=20]`
+```bash
+bash load/consumer/run.sh blocking 100 1
+bash load/consumer/run.sh coroutine 100 1             # 상한 64 · Hikari 20
+bash load/consumer/run.sh coroutine 100 1 3           # 대조 실험: 상한 3
+N=20000 bash load/consumer/run.sh coroutine 100 sweep1 128 20   # 용량 탐색
+bash load/consumer/summarize.sh                       # 비교 · 용량 탐색 중앙값 표
+```
+- N 기본값: 5,000, blocking 100ms 1,500, blocking 500ms 400 (대조 실험은 blocking 과 같은 값). 처리 시간이 20초보다 짧으면 스크립트가 알린다 — 그 칸은 `N=…` 을 늘려 다시 잰다.
+- 측정 API 는 발행기(처리 단계) · 정리 작업 · 일마감 대사 · 보존 배치 스케줄 · 은행 점검 시간을 끄고, 측정 전용 컨슈머 그룹 `transfer-processor-p61` 을 쓴다 (개발용 그룹 `transfer-processor` 의 오프셋은 건드리지 않는다). 모의 은행은 포트 9190, 회차마다 새 거래 기록 디렉터리(`build/load-p61/<이름>/bank-files`).
+- 정확성: N건 모두 `COMPLETED`, 모의 은행 거래 기록에 거래번호마다 정확히 한 번, 환불 0, 잔고 = 원장 합, 미발행 아웃박스 0. 하나라도 어긋나면 결과가 `.json.invalid` 로 바뀌어 표에서 빠진다. 원본은 `docs/perf/raw/p6-1/`, 로그 · CPU 표본은 `build/load-p61/<이름>/`.
+- 스크립트는 띄운 앱의 모드 · 상한 · 풀 크기를 `/actuator/info` 로 확인한 뒤에만 잰다. 8080 · 9190 이 이미 쓰이거나 개발용 그룹에 붙은 컨슈머가 있으면 시작하지 않는다.
+- 이전 회차에서 죽은 API 의 컨슈머 그룹 멤버가 남아 있으면 새 API 가 파티션을 배정받기까지 최대 약 45초 걸린다 — 스크립트가 기다린다.
+
+> **끝나면 반드시** `bash load/consumer/run.sh cleanup`. 측정 출금은 `COMPLETED` 로 남는데, 개발용 은행 대사 파일에는 없어 다음 날 개발용 API 의 일마감 대사가 어긋남으로 잡는다. 이 명령은 측정 사용자 정확히 100명(`load-p61-u001` ~ `u100`)의 데이터만 지운다.
+>
+> **개발용 그룹의 밀린 메시지**: 측정이 발행한 메시지는 측정 그룹뿐 아니라 개발용 그룹 `transfer-processor` 에도 밀린 메시지(lag)로 쌓인다. 다음에 개발용 API 를 띄우면 그걸 다 읽어(사용자가 없어 `NOT_FOUND` 로 지나간다) 수십만 건이면 새 개발 출금이 `RECEIVED` 로 한참 멈춰 보인다. `cleanup` 은 이 그룹을 건드리지 않고, 밀린 게 있으면 안내만 한다. 그때 **개발용 API 를 끈 채로 사람이 직접** `bash load/consumer/run.sh reset-dev-group` — 읽기 전용 사전 확인(측정 사용자 밖의 미발행 아웃박스 0 · `RECEIVED`/`SENDING` 출금 0 · 8080 비어 있음 · 그룹에 컨슈머 없음)을 통과해야만 `transfer-processor` 를 `transfer.requested` 의 끝으로 옮긴다(재시도 · DLT 토픽은 그 그룹이 오프셋을 가졌을 때만). 묻지 않고, 조건이 안 맞으면 아무것도 바꾸지 않고 멈춘다. 전후 lag 를 출력한다.
+
+> **사고 기록 (첫 시험 실행)**: 발행 단계의 발행기는 측정 사용자의 행만이 아니라 **미발행 아웃박스 전부**를 릴레이한다. 첫 시험 실행에서 개발 DB 에 남아 있던 손 확인 출금 6건(`user-retention`)이 함께 발행돼 측정용 모의 은행으로 처리됐다. 지금은 `run.sh` 가 시작 전에 읽기 전용으로 검사해서, `load-p61-*` 가 아닌 미발행 아웃박스 행이나 `RECEIVED` · `SENDING` 인 다른 출금이 있으면 시작하지 않고 멈춘다. 멈추면 그 행을 먼저 정리한 뒤 다시 한다 — 검사를 우회하려고 스크립트를 고치지 않는다. 그 6건은 측정용 모의 은행으로 처리돼 개발용 은행 거래 기록에 없다 → 개발용 API 의 2026-11-04 일마감 대사가 `COMPLETED_NOT_AT_BANK` 6건을 보고할 수 있다 (시험 데이터라 예상된 결과, 조치 불필요).
+
+- 시험 실행(N=300, 지연 20ms, 워밍업 포함 짧은 실행이라 결과가 아니다): blocking 39.5 tps · p95 48ms · 은행 동시 대기 최댓값 3 / coroutine 상한 64 는 210.7 tps · p95 591ms · 최댓값 64. 스크립트가 끝까지 도는지 보는 용도다.
+- CI 에서는 돌리지 않는다 (CI 는 두 모드의 정확성 테스트만).

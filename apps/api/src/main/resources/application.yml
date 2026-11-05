@@ -80,6 +80,10 @@ transfer:
     delay-ms: 5000             # 첫 간격. 게이트웨이 재접속(1초 → 2초 …)보다 길게
     multiplier: 6.0            # 5s → 30s → 60s(최대)
     max-delay-ms: 60000
+  consumer:                    # 출금 컨슈머 (P6-1, ADR-0012)
+    mode: blocking             # blocking | coroutine (소문자 그대로). 그 밖의 값은 기동 실패. coroutine 은 측정 · 비교용 — 기본은 blocking
+    coroutine:
+      max-in-flight-bank-calls: 64   # coroutine 에서 은행에 동시에 보내는 최대 수. 1 ~ 1024 밖이면 기동 실패
   outbox:
     relay:
       enabled: true      # 폴링 퍼블리셔 스케줄 (테스트는 끄고 직접 부른다)
@@ -136,3 +140,9 @@ alert:
 info:
   wallet:
     debit-strategy: ${wallet.debit-strategy}   # /actuator/info 로 지금 전략을 본다 (load/run.sh 가 측정 전에 확인)
+  transfer:
+    consumer:                                  # 지금 컨슈머 조건 (P6-1, load/consumer/run.sh 가 측정 전에 확인)
+      mode: ${transfer.consumer.mode}
+      max-in-flight-bank-calls: ${transfer.consumer.coroutine.max-in-flight-bank-calls}
+  datasource:
+    maximum-pool-size: ${spring.datasource.hikari.maximum-pool-size}

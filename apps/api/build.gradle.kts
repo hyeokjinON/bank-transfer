@@ -28,6 +28,10 @@ dependencies {
     implementation("tools.jackson.module:jackson-module-kotlin")
     // Redis 분산락 (P4-2, redis 전략일 때만 클라이언트를 만든다). 스타터 없이 빈 하나만 필요하다. Netty 는 Boot BOM 버전(4.2.x)으로 맞춰진다
     implementation("org.redisson:redisson:4.8.0")
+    // 컨슈머 코루틴 (P6-1, ADR-0012). 버전은 Boot BOM (kotlinx-coroutines 1.10.2). WebFlux 는 넣지 않는다 —
+    // core: CompletionStage.await() · Semaphore · withContext. reactor: Spring 이 suspend 리스너를 Mono 로 감싸 부를 때 쓴다 (CoroutinesUtils)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
     runtimeOnly("com.mysql:mysql-connector-j")
 
     testImplementation(project(":apps:mock-bank"))
