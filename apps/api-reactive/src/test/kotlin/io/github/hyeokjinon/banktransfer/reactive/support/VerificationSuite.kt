@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
+import org.springframework.web.method.annotation.ExceptionHandlerMethodResolver
 import kotlin.test.Test
 import java.net.Socket
 import java.time.Duration
@@ -45,7 +46,10 @@ abstract class VerificationSuite : ReactiveIntegrationTest() {
     @Test
     fun `오류 계약 - 예외에서 상태 · code · Retry-After 로`() {
         val handler = ReactiveExceptionHandler()
+        // 직접 호출만으로는 실제 요청이 이 메서드로 오는지 모른다 — 프레임워크와 같은 해석기로 라우팅을 확인한다 (예상 못 한 예외가 Boot 기본 500 으로 새던 구멍)
+        val resolver = ExceptionHandlerMethodResolver(ReactiveExceptionHandler::class.java)
         for (case in VerificationErrorContract.exceptionCases) {
+            assertEquals("handle", resolver.resolveMethod(case.exception)?.name, case.exception.toString())
             val res = handler.handle(case.exception)
             assertEquals(case.status, res.statusCode.value(), case.exception.toString())
             assertEquals(case.code, res.body!!.properties?.get("code"), case.exception.toString())
@@ -72,7 +76,8 @@ abstract class VerificationSuite : ReactiveIntegrationTest() {
     }
 
     /**
-     * 변이 검사: 취소를 오류로 바꾸거나(코루틴) 안쪽 Mono 의 doOnCancel 을 잃으면(Reactor) 경고 개수가 어긋나 실패한다.
+     * 취소를 오류로 바꾸거나(코루틴) 안쪽 Mono 의 doOnCancel 을 잃으면(Reactor) 경고 개수가 어긋나 실패하여 잡을 것으로 본다
+     * (추정 — 변이로 확인하지 않음).
      */
     @Test
     fun `끊김 - 1원 이체 응답을 기다리는 중 끊으면 행이 없고, 마스킹한 경고가 남고, 대기 표가 비워진다`() {

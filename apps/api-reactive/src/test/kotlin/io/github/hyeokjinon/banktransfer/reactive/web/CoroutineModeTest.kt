@@ -33,7 +33,7 @@ class CoroutineModeTest : VerificationSuite() {
         assertEquals(1, context.getBeanNamesForType(CoroutineVerificationController::class.java).size)
         val info = client.get().uri("/actuator/info").retrieve().body(String::class.java)!!
         assertTrue("\"web-mode\":\"coroutine\"" in info, info)
-        assertTrue(Regex("\"maximum-pool-size\":\"?20\"?").containsMatchIn(info), info)
+        assertTrue(Regex("\"maximum-pool-size\":\"?20\"?[,}]").containsMatchIn(info), info)
     }
 
     @Test

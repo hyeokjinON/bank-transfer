@@ -21,6 +21,6 @@ class VerificationWebModeWiringTest : ApiIntegrationTest() {
         val info = client.get().uri("/actuator/info").retrieve().body(String::class.java)!!
 
         assertTrue("\"web-mode\":\"async\"" in info, info)
-        assertTrue(Regex("\"max\":\"?200\"?").containsMatchIn(info), info)
+        assertTrue(Regex("\"max\":\"?200\"?[,}]").containsMatchIn(info), info)
     }
 }

@@ -97,7 +97,11 @@ class CoroutineVerificationFlowTest {
         val before = bank.depositsOf("1002123456789").size
         // 테스트 스레드가 아래에서 busy-wait 하므로 runBlocking 이벤트 루프의 async 는 시작하지 못한다 — Default 에서 돌린다
         val job = async(Dispatchers.Default) { flow.request(command("1002123456789", "홍길동")) }
-        while (bank.depositsOf("1002123456789").size == before) Thread.sleep(5)   // 은행이 1원 이체를 받았다 = 응답 대기 중
+        val deadline = System.currentTimeMillis() + 5_000
+        while (bank.depositsOf("1002123456789").size == before) {
+            check(System.currentTimeMillis() < deadline) { "은행이 1원 이체를 받지 못했다" }
+            Thread.sleep(5)
+        }   // 은행이 1원 이체를 받았다 = 응답 대기 중
         job.cancel()
 
         assertFailsWith<CancellationException> { job.await() }

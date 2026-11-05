@@ -77,7 +77,11 @@ class ReactorVerificationFlowTest {
         bank.responseDelay = Duration.ofMillis(300)
         val before = bank.depositsOf("1002123456789").size
         val subscription = flow.request(command("1002123456789", "홍길동")).subscribe()
-        while (bank.depositsOf("1002123456789").size == before) Thread.sleep(5)
+        val deadline = System.currentTimeMillis() + 5_000
+        while (bank.depositsOf("1002123456789").size == before) {
+            check(System.currentTimeMillis() < deadline) { "은행이 1원 이체를 받지 못했다" }
+            Thread.sleep(5)
+        }
 
         subscription.dispose()
 

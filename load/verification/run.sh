@@ -140,9 +140,11 @@ grep -qE "\"maximum-pool-size\":\"?20\"?[,}]" <<<"$INFO" || die "앱의 Hikari �
 if [ "$APP" = api ]; then grep -qE "\"max\":\"?$TOMCAT\"?[,}]" <<<"$INFO" || die "앱의 톰캣 최대 스레드가 $TOMCAT 이 아니다: $INFO"; fi
 sleep 3   # 게이트웨이가 측정 은행에 붙을 시간 (첫 접속 · 재접속 1초) — 워밍업 첫 요청의 503 을 줄인다 (워밍업은 집계하지 않는다)
 
-# --- 4. 표본 (1초마다) ---
+# --- 4. 표본 ---
+# 1초 쉬고 지표 3개를 차례로 읽는다 (정확히 1초 간격이 아니다). 읽는 곳이 측정 대상 앱의 액추에이터라 앱이 포화되면
+# 같은 서버를 거쳐 표본이 크게 성겨진다 (P6-2: 포화 칸 1 ~ 5개) — 그래서 curl 에 시간 제한을 둔다. 관리 포트 분리는 범위 밖.
 metric() {   # 읽지 못하면 '-' — 빈 값이면 열이 밀린다
-  local x; x=$(curl -sf "$API/actuator/metrics/$1" | grep -o '"value":[-0-9.eE+]*' | head -1 | cut -d: -f2 || true)
+  local x; x=$(curl -sf --max-time 1 "$API/actuator/metrics/$1" | grep -o '"value":[-0-9.eE+]*' | head -1 | cut -d: -f2 || true)
   echo "${x:--}"
 }
 ( while :; do echo "$(date +%s%3N) $(metric system.cpu.usage) $(metric process.cpu.usage) $(metric jvm.threads.live)"; sleep 1; done ) > "$WORK/samples.txt" 2>/dev/null &

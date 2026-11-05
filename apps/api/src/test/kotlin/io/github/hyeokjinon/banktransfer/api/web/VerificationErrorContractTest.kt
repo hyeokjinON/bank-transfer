@@ -5,6 +5,7 @@ import io.github.hyeokjinon.banktransfer.api.support.ApiIntegrationTest
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
+import org.springframework.web.method.annotation.ExceptionHandlerMethodResolver
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -34,7 +35,10 @@ class VerificationErrorContractTest : ApiIntegrationTest() {
     @Test
     fun `예외에서 상태 · code · Retry-After 로 - 표와 같다`() {
         val handler = ApiExceptionHandler()
+        // 직접 호출만으로는 실제 요청이 이 메서드로 오는지 모른다 — 프레임워크와 같은 해석기로 라우팅을 확인한다 (예상 못 한 예외가 Boot 기본 500 으로 새던 구멍)
+        val resolver = ExceptionHandlerMethodResolver(ApiExceptionHandler::class.java)
         for (case in VerificationErrorContract.exceptionCases) {
+            assertEquals("handle", resolver.resolveMethod(case.exception)?.name, case.exception.toString())
             val res = handler.handle(case.exception)
             assertEquals(case.status, res.statusCode.value(), case.exception.toString())
             assertEquals(case.code, res.body!!.properties?.get("code"), case.exception.toString())

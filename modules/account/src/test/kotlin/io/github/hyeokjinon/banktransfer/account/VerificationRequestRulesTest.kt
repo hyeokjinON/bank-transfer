@@ -47,7 +47,8 @@ class VerificationRequestRulesTest {
     fun `초안의 문자열 표현에는 적요(인증코드)가 없다 - 로그에 새지 않게`() {
         val draft = rules.newDraft()
 
-        assertFalse("1234" in draft.toString(), draft.toString())
+        assertEquals("VerificationDraft(id=${draft.id})", draft.toString())
+        assertFalse(draft.memo in draft.toString(), draft.toString())
     }
 
     @Test

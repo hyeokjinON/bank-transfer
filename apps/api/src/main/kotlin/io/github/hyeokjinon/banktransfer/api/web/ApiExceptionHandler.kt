@@ -62,6 +62,10 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
         return response
     }
 
+    /**
+     * 목록 끝의 Exception::class 는 예상 못 한 예외를 아래 else(500 INTERNAL_ERROR)로 모으려는 것이다. 없으면 Boot 기본 오류 모양이 나간다.
+     * Spring 표준 예외는 부모 ResponseEntityExceptionHandler 의 더 구체적인 핸들러가 계속 받는다 (가까운 타입이 이긴다).
+     */
     @ExceptionHandler(
         CompletionException::class,
         AccountVerificationException::class,
@@ -77,6 +81,7 @@ class ApiExceptionHandler : ResponseEntityExceptionHandler() {
         RetentionAlreadyCompletedException::class,
         RetentionRunningException::class,
         RetentionDateInFutureException::class,
+        Exception::class,
     )
     fun handle(e: Exception): ResponseEntity<ProblemDetail> {
         val cause = if (e is CompletionException && e.cause != null) e.cause!! else e

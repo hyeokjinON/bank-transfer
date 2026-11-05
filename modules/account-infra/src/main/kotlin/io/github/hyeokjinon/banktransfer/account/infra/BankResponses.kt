@@ -4,7 +4,9 @@ import io.github.hyeokjinon.banktransfer.protocol.NameInquiryResponse
 import io.github.hyeokjinon.banktransfer.protocol.ResponseCodes
 import io.github.hyeokjinon.banktransfer.protocol.TransferResponse
 
-/** account-infra 의 엔티티 · 저장소 패키지. 두 앱이 @AutoConfigurationPackage 로 JPA 스캔에 더한다 (앱 패키지 밖이라). */
+/** account-infra 의 엔티티 · 저장소 패키지. 두 앱이 @AutoConfigurationPackage 로 JPA 스캔에 더한다 (앱 패키지 밖이라).
+ *
+ * @AutoConfigurationPackage 에 앱 클래스(basePackageClasses)도 같이 적을 것 — basePackages 만 쓰면 앱 패키지가 빠진다. */
 const val ACCOUNT_INFRA_PACKAGE = "io.github.hyeokjinon.banktransfer.account.infra"
 
 /** 은행이 처리를 거절한 경우(응답코드가 0000 이 아님). */

@@ -41,7 +41,7 @@ class BlockingVerificationRequestTest : ApiIntegrationTest() {
         assertEquals(0, context.getBeanNamesForType(AsyncVerificationRequestController::class.java).size)
         val info = client.get().uri("/actuator/info").retrieve().body(String::class.java)!!
         assertTrue("\"web-mode\":\"blocking\"" in info, info)
-        assertTrue(Regex("\"max\":\"?2\"?").containsMatchIn(info), info)
+        assertTrue(Regex("\"max\":\"?2\"?[,}]").containsMatchIn(info), info)
     }
 
     @Test

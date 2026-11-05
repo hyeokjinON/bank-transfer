@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.reactive.result.method.annotation.ResponseEntityExceptionHandler
 import org.springframework.web.server.ServerWebExchange
 import reactor.core.publisher.Mono
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletionException
 
 /**
@@ -50,6 +51,10 @@ class ReactiveExceptionHandler : ResponseEntityExceptionHandler() {
             response
         }
 
+    /**
+     * 목록 끝의 Exception::class 는 예상 못 한 예외를 아래 else(500 INTERNAL_ERROR)로 모으려는 것이다. 없으면 Boot 기본 오류 모양이 나간다.
+     * Spring 표준 예외는 부모 ResponseEntityExceptionHandler 의 더 구체적인 핸들러가 계속 받는다 (가까운 타입이 이긴다).
+     */
     @ExceptionHandler(
         CompletionException::class,
         AccountVerificationException::class,
@@ -58,8 +63,12 @@ class ReactiveExceptionHandler : ResponseEntityExceptionHandler() {
         BankRejectedException::class,
         BankMaintenanceException::class,
         UserIdRequiredException::class,
+        Exception::class,
     )
     fun handle(e: Exception): ResponseEntity<ProblemDetail> {
+        // Exception 을 받게 되면서 취소도 여기로 온다. 취소는 오류 응답으로 바꾸지 않고 그대로 다시 던진다 (설계 §4-3) —
+        // 500 으로 바꾸면 끊긴 요청이 오류로 집계되고 취소 전파가 끊긴다. CompletionException 에 싸여 온 취소도 같다.
+        if (e is CancellationException || (e is CompletionException && e.cause is CancellationException)) throw e
         val cause = if (e is CompletionException) e.cause ?: e else e
         val (status, code) = when (cause) {
             is AccountVerificationException.AccountNotFound -> HttpStatus.NOT_FOUND to "ACCOUNT_NOT_FOUND"
