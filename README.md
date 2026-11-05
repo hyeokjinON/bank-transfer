@@ -60,7 +60,7 @@ flowchart LR
 | `modules/transfer` | 출금이체 도메인: 상태 전이, 멱등 접수, 거래번호. **Spring·JPA 를 모른다** | 없음 |
 | `modules/account-infra` | 1원인증 JPA 저장소 · 은행 응답 해석 (두 앱이 같이 씀, P6-2) | account, bank-gateway |
 | `apps/api` | REST API, 조립(wiring), 예외 → HTTP 매핑 | account, transfer, bank-gateway |
-| `apps/api-reactive` | WebFlux 별도 앱(8081): 1원인증 요청 하나만, 코루틴 · Reactor 두 판 (P6-2) | account, account-infra, bank-gateway |
+| `apps/api-reactive` | WebFlux 별도 앱(8081): 1원인증 요청 하나만, 코루틴 · Reactor 두 판 (P6-2) | account, account-infra, bank-gateway, transfer (RandomReferenceGenerator) |
 | `apps/mock-bank` | 모의 은행 FEP 서버 (실행 가능, 테스트 픽스처) | bank-protocol |
 
 `account` 는 `BankPort` 인터페이스만 알고, Netty 로 실제 연결하는 어댑터는 `apps/api` 에 있습니다.
@@ -205,4 +205,4 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
 
 ## 기술 스택
 
-Kotlin 2.3 · Java 21 · Spring Boot 4.1 (Spring MVC, Validation, Actuator) · Spring Data JPA (Hibernate 7) · Flyway · MySQL 8.4 · Spring Kafka (Kafka 4.1) · Testcontainers · Netty 4.2 · Spring Batch 6 (일마감 대사) · Kotlin Coroutines 1.10 (컨슈머 suspend 리스너) · Redisson 4.8 (Redis 분산락) · k6 2.3 (부하 측정) · JUnit 5 · Gradle 9 (Kotlin DSL) · GitHub Actions
+Kotlin 2.3 · Java 21 · Spring Boot 4.1 (Spring MVC, WebFlux(Reactor Netty) — apps/api-reactive, Validation, Actuator) · Spring Data JPA (Hibernate 7) · Flyway · MySQL 8.4 · Spring Kafka (Kafka 4.1) · Testcontainers · Netty 4.2 · Spring Batch 6 (일마감 대사) · Kotlin Coroutines 1.10 (컨슈머 suspend 리스너 · WebFlux suspend 핸들러 + kotlinx-coroutines-reactor) · Redisson 4.8 (Redis 분산락) · k6 2.3 (부하 측정) · JUnit 5 · Gradle 9 (Kotlin DSL) · GitHub Actions

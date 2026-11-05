@@ -61,7 +61,7 @@ flowchart LR
 | `modules/transfer` | 출금이체 도메인: 상태 전이, 사용자 범위 멱등 접수, 실패 확정 포트 `fail()`, 거래번호, 처리(`TransferProcessor` — begin · finish 로 나뉨, P6-1), 정리 작업(`TransferReconciler`) + 포트(`TransferStore`, `VerifiedAccounts`, `ReferenceGenerator`, `BankTransferPort` · `SuspendBankTransferPort`(P6-1), `BankInquiryPort`) | **없음** | 없음 |
 | `modules/account-infra` | 1원인증의 바깥 어댑터를 두 앱이 같이 쓰도록 모았다 (P6-2): JPA 엔티티 · 저장소(`JpaVerificationRepository`), 은행 응답 해석(`holderNameOf` · `requireOk` · `BankRejectedException`), 오류 계약 기대표(test fixtures). 테이블 소유(Flyway)는 `apps/api` 그대로 | `account`, `bank-gateway` | Spring Data JPA |
 | `apps/api` | REST API, 예외 → HTTP 매핑, 조립(`AppConfiguration`), 어댑터, 잔고 SQL(`WalletLedger` · 차감 전략 `WalletDebit`), JPA 저장소(`persistence/`), Kafka 발행 · 소비(`messaging/`) | `account`, `transfer`, `bank-gateway` | Spring Boot 4 (MVC, JPA, Kafka) |
-| `apps/api-reactive` | WebFlux(Reactor Netty) 별도 앱, 포트 8081. 1원인증 요청 `POST /api/v1/account-verifications` 하나만 (코루틴 · Reactor 두 판). Kafka · 스케줄러 · 배치 · Flyway 없음 (P6-2, [ADR-0013](docs/adr/0013-web-verification-webflux-comparison.md)) | `account`, `account-infra`, `bank-gateway` | Spring WebFlux |
+| `apps/api-reactive` | WebFlux(Reactor Netty) 별도 앱, 포트 8081. 1원인증 요청 `POST /api/v1/account-verifications` 하나만 (코루틴 · Reactor 두 판). Kafka · 스케줄러 · 배치 · Flyway 없음 (P6-2, [ADR-0013](docs/adr/0013-web-verification-webflux-comparison.md)) | `account`, `account-infra`, `bank-gateway`, `transfer` (참조 번호 생성기 `RandomReferenceGenerator` 하나) | Spring WebFlux |
 | `apps/mock-bank` | 모의 은행 FEP 서버. 실행 가능 + 테스트 픽스처 | `bank-protocol` (api) | Netty |
 
 의존 방향 (화살표 = "의존한다"):
@@ -73,7 +73,7 @@ apps/api ──▶ modules/account            (도메인, 의존 없음)
    │
    └──────▶ modules/bank-gateway ──▶ modules/bank-protocol ──▶ netty
 apps/api ──▶ modules/account-infra     (1원인증 JPA 저장소 · 은행 응답 해석)
-apps/api-reactive ──▶ modules/account, modules/account-infra, modules/bank-gateway
+apps/api-reactive ──▶ modules/account, modules/account-infra, modules/bank-gateway, modules/transfer (RandomReferenceGenerator)
 apps/mock-bank ─────────────────────▶ modules/bank-protocol
 (test) bank-gateway, apps/api ──▶ apps/mock-bank
 ```
