@@ -28,7 +28,8 @@
 - 예상 못 한 예외의 500 응답이 Boot 기본 모양에서 ProblemDetail + code `INTERNAL_ERROR` 로 (두 앱 · 네 판 같게). 처리기에 `Exception::class` 를 더했고, 리액티브 처리기는 취소(`CancellationException`)를 응답으로 바꾸지 않고 다시 던진다. 계약 테스트가 처리기 라우팅까지 확인.
 - 전체 테스트 515개.
 ### Fixed (머지 후 정리)
-- 리액티브 처리기가 취소 예외를 다시 던지는지 지키는 테스트 `ReactiveExceptionHandlerTest` (2개). P6-1 `ConsumerModeWiringTest` 의 끝이 열린 정규식을 `[,}]` 로 막음. 전체 테스트 517개.
+- 리액티브 처리기가 취소 예외를 다시 던지는지 지키는 테스트 `ReactiveExceptionHandlerTest` (2개). P6-1 `ConsumerModeWiringTest` 의 끝이 열린 정규식을 `[,}]` 로 막음. 전체 테스트 518개.
+- 진행 조건 실험 E1 (`WebFluxExperimentTest`) 이 CI 에서 가끔 깨지던 것: 은행 응답이 `await` · 구독보다 먼저 오면 기다린 뒤 코드가 게이트웨이 루프가 아니라 부른 HTTP 루프에서 이어진다. 은행 지연을 둔 결정적 E1 둘 + 지연 없이 "이벤트 루프 중 하나" 인지 보는 E1 하나로 나눔. 흐름 KDoc · ADR-0013 · 결과 문서 §3-2 에 두 경우를 적음 (동작 · 결정 변화 없음).
 - ADR-0013 채택. 결과 문서 §5-3 표본 표기 · 천장 칸 표본 간격, ADR-0013 의 Reactor 스레드 조건, "자리를 먼저 받는다" → "잡는다" (ADR-0012 · HANDOVER).
 
 ## [P6-1] 컨슈머 코루틴 — 2026-11-05 ([#19](https://github.com/hyeokjinON/bank-transfer/pull/19), 머지 후 정리 [#20](https://github.com/hyeokjinON/bank-transfer/pull/20))

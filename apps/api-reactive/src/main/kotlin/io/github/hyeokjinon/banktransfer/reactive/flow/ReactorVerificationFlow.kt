@@ -21,7 +21,7 @@ import reactor.core.scheduler.Schedulers
  * - 다음 단계로 값 넘기기          ↔ `map` (짧은 계산) · `flatMap` (또 기다리는 것)
  * - `withContext(io) { save }`    ↔ `publishOn(boundedElastic())` 뒤 `map { save }` — 이 아래 연산자는 블로킹을 허용하는 스레드에서 돈다
  * - `catch (CancellationException)` ↔ `doOnCancel` — 클라이언트 끊김이 구독 취소로 온다 (실험 E2)
- * fromFuture 뒤 map 은 게이트웨이 이벤트 루프에서 돈다(실험 E1) — 그래서 저장 전에 publishOn 이 꼭 있어야 한다.
+ * fromFuture 뒤 map 은 게이트웨이 이벤트 루프에서(응답이 이미 와 있었으면 구독한 HTTP 루프에서) 돈다(실험 E1) — 어느 쪽이든 이벤트 루프라 저장 전에 publishOn 이 꼭 있어야 한다.
  */
 class ReactorVerificationFlow(
     private val client: BankGatewayClient,

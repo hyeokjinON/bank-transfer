@@ -38,6 +38,8 @@ flowchart LR
 ```
 
 ### 3-2. 코루틴 판 한 요청의 스레드 이동 (진행 조건 실험 E1 로 확인)
+
+> 응답이 `await` 보다 먼저 와 있으면(아주 빠른 은행) 아래의 "게이트웨이 루프" 단계가 "HTTP 루프" 그대로가 된다 — 2026-11-06 CI 에서 관찰. 어느 쪽이든 이벤트 루프라 저장을 IO 로 넘기는 이유는 같다.
 ```mermaid
 sequenceDiagram
   participant H as HTTP 루프 (reactor-http-nio)
