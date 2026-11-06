@@ -13,6 +13,7 @@ dependencies {
     implementation(project(":modules:account"))
     implementation(project(":modules:transfer"))
     implementation(project(":modules:bank-gateway"))
+    implementation(project(":modules:account-infra"))   // 1원인증 JPA 저장소 · 은행 응답 해석 (P6-2 에서 apps/api-reactive 와 같이 쓰려고 옮김)
 
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.springframework.boot:spring-boot-starter-validation")
@@ -35,6 +36,7 @@ dependencies {
     runtimeOnly("com.mysql:mysql-connector-j")
 
     testImplementation(project(":apps:mock-bank"))
+    testImplementation(testFixtures(project(":modules:account-infra")))   // 오류 계약 기대표
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:testcontainers-mysql")

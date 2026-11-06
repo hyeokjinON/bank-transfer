@@ -33,7 +33,8 @@
 - **일마감 대사 · 은행 점검 시간 · 알림 (P5-1)**: 모의 은행이 매일 00:05 에 만드는 대사 파일(고정길이 EUC-KR, 규격 v0.3)과 하루치 출금을 Spring Batch 잡으로 맞춘다 — 결과를 모르는 출금(UNKNOWN · SENDING)만 자동 확정(완료 / FAILED E002 + 환불), 확정된 건의 어긋남(이중 지급 · 환불했는데 나감 등)은 기록 · 알림. 끝난 날짜 거부 · 실패하면 멈춘 곳부터 · 동시 실행 하나. 23:50 ~ 00:10 은행 점검 시간에는 출금 · 1원인증 503 + Retry-After. 알림은 텔레그램(선택) / 로그 ([ADR-0010](docs/adr/0010-daily-reconciliation.md))
 - **보존 배치 (P5-2)**: 발행 뒤 7일 지난 아웃박스와 `VERIFIED` 가 아닌 만료 뒤 30일 지난 1원인증만 매일 06:30 에 나눠 지운다 (READ COMMITTED, 트랜잭션마다 `DELETE … LIMIT 1000`). 금융 기록은 지우지 않고 이유를 정책표로 남겼다 ([ADR-0011](docs/adr/0011-data-retention.md))
 - **컨슈머 코루틴 (P6-1)**: 출금 컨슈머를 Kotlin suspend 리스너로도 만들어 설정(`transfer.consumer.mode`)으로 고른다 (기본 블로킹). 은행 응답은 await · DB 는 IO 디스패처 · 은행 동시 호출 상한 64, 판정 코드는 한 벌. "밀린 N건 비우기" 처리량을 은행 지연별로 비교 → [측정 결과](docs/perf/p6-1-consumer-coroutines.md) (은행 지연 100ms: 블로킹 21건/s → 코루틴 387건/s, 같은 동시성 3 이면 24건/s — 차이는 동시성 몫. Hikari 풀 크기에 따라 처리량이 움직인 것은 확인, 풀 너머는 MySQL 로 추정, 상한 150 은 poll 묶음 천장) ([ADR-0012](docs/adr/0012-consumer-coroutines.md))
-- **테스트 465개**: 전문 직렬화, 쪼개진 TCP 패킷, 동시 요청 50건 매칭, 타임아웃, 재접속, API 통합(HTTP → TCP), MySQL · Kafka 통합(Testcontainers: 같은 키 동시 10건, 아웃박스 원자성, 발행기 2개 동시 발행 · 접수가 발행기에 막히지 않음, 같은 메시지 두 번 → 은행 1건, 처리 후 무응답 → 결과조회로 확정 · 입금 1건, 은행 장애 → 재시도 토픽 → DLT → 재발행 → 입금 1건, 동시 출금 100건 → 정확히 10건 · 잔고 0, 차감 전략 4종 × 동시 출금 100건, 실패 확정 경로마다 환불, 대사 전 칸 · 재시작(이중 환불 없음) · 동시 실행 하나 · 점검 시간 503 · 코루틴 컨슈머 × 재시도 토픽 · DLT · 느린 은행 동시 대기, UTC 시계 → KST 판정)
+- **웹 1원인증 WebFlux 비교 (P6-2, 진행 중)**: 1원인증 요청을 MVC 블로킹 · MVC 비동기(기본) · WebFlux 코루틴 · WebFlux Reactor 네 판으로 만들어 같은 도구(k6 열린 모델)로 비교한다. WebFlux 는 별도 앱 `apps/api-reactive`, 판정 · 저장소는 한 벌, 클라이언트가 끊으면 취소 ([ADR-0013](docs/adr/0013-web-verification-webflux-comparison.md), 제안). [측정 결과](docs/perf/p6-2-web-reactive.md): 은행 지연 500ms · 초당 400건에서 MVC 블로킹 53.5건/s(시간 초과 폭주, Tomcat 스레드 400 이면 386건/s), 비동기 세 판은 400건/s 로 같다. MVC 비동기는 초당 800건에서 앱 실행기(기본 8스레드)가 천장 — 64로 늘리면 800건/s.
+- **테스트 515개**: 전문 직렬화, 쪼개진 TCP 패킷, 동시 요청 50건 매칭, 타임아웃, 재접속, API 통합(HTTP → TCP), MySQL · Kafka 통합(Testcontainers: 같은 키 동시 10건, 아웃박스 원자성, 발행기 2개 동시 발행 · 접수가 발행기에 막히지 않음, 같은 메시지 두 번 → 은행 1건, 처리 후 무응답 → 결과조회로 확정 · 입금 1건, 은행 장애 → 재시도 토픽 → DLT → 재발행 → 입금 1건, 동시 출금 100건 → 정확히 10건 · 잔고 0, 차감 전략 4종 × 동시 출금 100건, 실패 확정 경로마다 환불, 대사 전 칸 · 재시작(이중 환불 없음) · 동시 실행 하나 · 점검 시간 503 · 코루틴 컨슈머 × 재시도 토픽 · DLT · 느린 은행 동시 대기, UTC 시계 → KST 판정)
 
 ## 구조
 
@@ -57,7 +58,9 @@ flowchart LR
 | `modules/bank-gateway` | 은행 접속 클라이언트: 폴링, 재접속, 응답 매칭, 타임아웃 | bank-protocol |
 | `modules/account` | 1원 계좌인증 도메인. **Spring·Netty 를 모른다** | 없음 |
 | `modules/transfer` | 출금이체 도메인: 상태 전이, 멱등 접수, 거래번호. **Spring·JPA 를 모른다** | 없음 |
+| `modules/account-infra` | 1원인증 JPA 저장소 · 은행 응답 해석 (두 앱이 같이 씀, P6-2) | account, bank-gateway |
 | `apps/api` | REST API, 조립(wiring), 예외 → HTTP 매핑 | account, transfer, bank-gateway |
+| `apps/api-reactive` | WebFlux 별도 앱(8081): 1원인증 요청 하나만, 코루틴 · Reactor 두 판 (P6-2) | account, account-infra, bank-gateway, transfer (RandomReferenceGenerator) |
 | `apps/mock-bank` | 모의 은행 FEP 서버 (실행 가능, 테스트 픽스처) | bank-protocol |
 
 `account` 는 `BankPort` 인터페이스만 알고, Netty 로 실제 연결하는 어댑터는 `apps/api` 에 있습니다.
@@ -96,11 +99,13 @@ sequenceDiagram
 2. 오른쪽 위 실행 목록에 `.run/` 의 구성이 자동으로 뜹니다.
    - `0. Mock Bank + API` : 모의 은행(9090)과 API(8080)를 한 번에 실행
    - `1. Mock Bank (9090)` / `2. API (8080)` : 하나씩 실행 (벌레 아이콘으로 디버그)
-   - `3. All Tests` : 테스트 465개
+   - `3. All Tests` : 테스트 515개
    - `4. API (재발행 손 확인)` : 재시도 간격 2초 · 4초 · 8초, 재발행 대기 30초로 줄인 API (P3-3b 손 확인용, [`http/transfer.http`](http/transfer.http) 8절)
    - `5. API (부하 측정)` : 발행기 · 정리 작업 · 컨슈머를 끄고 로그를 줄인 jar 실행 (P4-2 k6 측정용, [OPERATION §8](OPERATION.md#8-부하-측정-p4-2-k6))
    - `6. API (대사 손 확인)` : 정리 작업을 꺼서 결과를 모르는 출금이 `UNKNOWN` 으로 남게 하고, 오늘 날짜 수동 대사를 허용(`daily-recon.allow-today=true`)한 API (P5-1 대사 손 확인 전용, [`http/daily-recon.http`](http/daily-recon.http)). 다른 구성은 지난 날만 대사한다 (오늘 이후 400 `RECON_DATE_NOT_CLOSED`)
    - `7. API (코루틴 컨슈머)` : `--transfer.consumer.mode=coroutine` 으로 API 실행 ([OPERATION §11](OPERATION.md#11-컨슈머-모드--코루틴-측정-p6-1))
+   - `8. API 리액티브 (코루틴)` / `9. API 리액티브 (Reactor)` : WebFlux 별도 앱 `apps/api-reactive`(8081)을 판별로 실행 (P6-2, [OPERATION §12](OPERATION.md#12-웹-1원인증-판--webflux-측정-p6-2)). 먼저 `apps/api` 를 한 번 띄워 스키마(Flyway)를 만든다
+   - `10. API (1원인증 블로킹)` : `--account.verification.web-mode=blocking` 으로 API 실행 (대조군, 측정 전용)
 3. `http/account-verification.http` 를 열고 요청 왼쪽 ▶ 버튼으로 호출합니다.
    1번 요청이 응답의 `id` 를 저장하고, 모의 은행 콘솔의 `적요='BT1234'` 숫자를 2번 요청의 `code` 에 넣으면 `VERIFIED` 가 됩니다.
 
@@ -123,7 +128,7 @@ bash infra/verify.sh
 요구사항: JDK 21 (Gradle 은 래퍼가 내려받습니다)
 
 ```bash
-./gradlew build                                   # 컴파일 + 테스트 465개
+./gradlew build                                   # 컴파일 + 테스트 515개
 ./gradlew :apps:mock-bank:run --args="9090"       # 터미널 1: 모의 은행
 ./gradlew :apps:mock-bank:run --args="--close-day=20261029"   # 서버 없이 그 날짜 대사 파일만
 ./gradlew :apps:api:bootRun                       # 터미널 2: API (localhost:8080)
@@ -193,10 +198,11 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
   - [x] P5-2 보존 배치 (발행된 아웃박스 · 만료된 1원인증 정리) → [ADR-0011](docs/adr/0011-data-retention.md)
 - [ ] **P6** WebFlux / Coroutines 버전과 성능 비교
   - [x] P6-1 컨슈머 코루틴: suspend 리스너 · 은행 지연별 처리량 · 용량 탐색 → [ADR-0012](docs/adr/0012-consumer-coroutines.md) · [측정 결과](docs/perf/p6-1-consumer-coroutines.md)
+  - [ ] P6-2 웹 1원인증 WebFlux 비교: 네 판 · 별도 앱 `apps/api-reactive` · 끊기면 취소 → [ADR-0013](docs/adr/0013-web-verification-webflux-comparison.md) · [측정 결과](docs/perf/p6-2-web-reactive.md)
 - [ ] **P7** Virtual Thread 적용 비교
 - [ ] **P8** 모듈 분리(MSA), Docker Compose → Kubernetes
 - [ ] **P9** 관측성: Micrometer, Prometheus, Grafana
 
 ## 기술 스택
 
-Kotlin 2.3 · Java 21 · Spring Boot 4.1 (Spring MVC, Validation, Actuator) · Spring Data JPA (Hibernate 7) · Flyway · MySQL 8.4 · Spring Kafka (Kafka 4.1) · Testcontainers · Netty 4.2 · Spring Batch 6 (일마감 대사) · Kotlin Coroutines 1.10 (컨슈머 suspend 리스너) · Redisson 4.8 (Redis 분산락) · k6 2.3 (부하 측정) · JUnit 5 · Gradle 9 (Kotlin DSL) · GitHub Actions
+Kotlin 2.3 · Java 21 · Spring Boot 4.1 (Spring MVC, WebFlux(Reactor Netty) — apps/api-reactive, Validation, Actuator) · Spring Data JPA (Hibernate 7) · Flyway · MySQL 8.4 · Spring Kafka (Kafka 4.1) · Testcontainers · Netty 4.2 · Spring Batch 6 (일마감 대사) · Kotlin Coroutines 1.10 (컨슈머 suspend 리스너 · WebFlux suspend 핸들러 + kotlinx-coroutines-reactor) · Redisson 4.8 (Redis 분산락) · k6 2.3 (부하 측정) · JUnit 5 · Gradle 9 (Kotlin DSL) · GitHub Actions

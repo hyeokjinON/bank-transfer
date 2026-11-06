@@ -1,0 +1,10 @@
+{
+  "run": "blocking-d100-r400-1", "mode": "blocking", "app": "api", "delay_ms": 100, "rate": 400, "tomcat_threads": 200, "round": "1",
+  "rps_201": 400, "p50_201": 219.3137425, "p95_201": 230.9890821, "p99_201": 247.8214306100001,
+  "status_201": 12000, "status_4xx": 0, "status_5xx": 0, "timeouts": 0,
+  "dropped_iterations": 17, "vus_max": 417,
+  "created_all": 15983, "timeouts_all": 0, "rows": 15983, "one_won": 15983,
+  "rows_minus_created": 0, "one_won_minus_rows": 0,
+  "threads_max": 226.0, "sys_cpu_avg": 37.5, "sys_cpu_max": 51.9, "app_cpu_avg": 4.3, "app_cpu_max": 11.6,
+  "samples": 20, "app_warn_error_lines": 5, "code": "cccdb0a"
+}

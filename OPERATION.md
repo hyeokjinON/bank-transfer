@@ -479,3 +479,49 @@ bash load/consumer/summarize.sh                       # 비교 · 용량 탐색 
 
 - 시험 실행(N=300, 지연 20ms, 워밍업 포함 짧은 실행이라 결과가 아니다): blocking 39.5 tps · p95 48ms · 은행 동시 대기 최댓값 3 / coroutine 상한 64 는 210.7 tps · p95 591ms · 최댓값 64. 스크립트가 끝까지 도는지 보는 용도다.
 - CI 에서는 돌리지 않는다 (CI 는 두 모드의 정확성 테스트만).
+
+## 12. 웹 1원인증 판 · WebFlux 측정 (P6-2)
+1원인증 요청은 네 판이 있다 ([ADR-0013](docs/adr/0013-web-verification-webflux-comparison.md)). 결과는 [측정 결과](docs/perf/p6-2-web-reactive.md) (2026-11-05).
+
+### 12-1. 판 고르기
+- `apps/api` (8080): `--account.verification.web-mode=async` (기본, 서블릿 비동기) | `blocking` (Tomcat 스레드가 끝까지 기다리는 대조군 — **측정 전용, 운영에서 쓰지 않는다**). 실행 구성 `10. API (1원인증 블로킹)`.
+- `apps/api-reactive` (8081): `--account.verification.web-mode=coroutine` (기본) | `reactor`. 실행 구성 `8. API 리액티브 (코루틴)` · `9. API 리액티브 (Reactor)`. 이 앱은 1원인증 요청 하나만 받는다 (확인 `/confirm` 은 `apps/api`, 같은 DB).
+- 값은 소문자 그대로만 받고 그 밖은 기동 실패. 지금 값은 `curl -s localhost:8080/actuator/info` (`apps/api`: `web-mode` · Tomcat 최대 스레드) · `localhost:8081/actuator/info` (리액티브: `web-mode` · Hikari 최대 풀).
+- 리액티브 앱은 스키마를 만들지 않는다 — `apps/api` 를 한 번 띄워 Flyway 가 돈 뒤에 띄운다. 두 앱의 Hikari 최대 풀은 같은 20.
+
+### 12-2. 측정 한 회
+열린 모델(k6 `constant-arrival-rate`): 워밍업 10초 + 측정 30초, 요청 시간 초과 10초. 스크립트가 측정용 모의 은행과 앱을 직접 띄우고 내린다.
+
+**준비** (측정 중에는 빌드 · 테스트 · IDE 인덱싱 같은 무거운 작업을 하지 않는다):
+```bash
+docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait
+./gradlew :apps:api:bootJar :apps:api-reactive:bootJar :apps:mock-bank:installDist
+```
+
+**회차 실행** (Git Bash, 저장소 루트): `bash load/verification/run.sh <blocking|async|coroutine|reactor> <지연ms 0~2999> <도착률 1~5000> <회차> [톰캣 최대 스레드=200]`
+```bash
+bash load/verification/run.sh async 500 400 1
+bash load/verification/run.sh blocking 500 400 1 400     # 원인 확인: Tomcat 400
+bash load/verification/summarize.sh                       # 중앙값 표
+```
+- 측정 포트: 앱 `18080`(`apps/api`) · `18081`(`apps/api-reactive`), 측정용 모의 은행 `9190`(회차마다 새 거래 기록 디렉터리). 개발용 API(8080) · 개발용 모의 은행(9090)은 켜 둬도 된다. 측정 포트가 이미 쓰이면 시작하지 않고, 스크립트가 띄우지 않은 포트의 프로세스는 종료하지 않는다 (코드 확인됨, 커밋 45f54d8).
+- `apps/api` 측정 인스턴스는 Kafka 리스너 · 발행기 · 정리 작업 · 대사 · 보존 스케줄을 끈다 (개발용 컨슈머 그룹 메시지를 나눠 갖지 않게). 켜진 채로는 시작하지 않는다.
+- 측정 사용자는 `p62-u001` ~ `u100` 뿐이고 계좌는 모의 은행 기본 계좌다. 시작 전 읽기 전용 사전 확인: 포트 · `/actuator/info` 의 `web-mode` · 풀이 인자와 같은지 · 측정 사용자 행이 비어 있는지.
+- 결과: `docs/perf/raw/p6-2/<판>-d<지연>-r<도착률>[-t<톰캣>]-<회차>.json`, 로그 · 표본은 `build/load-p62/<이름>/`. 회차가 숫자면 본 측정 표, `probe` 로 시작하면 한계 탐색 표, 그 밖(`smoke`)은 표에서 빠진다.
+- 표본: `jvm.threads.live` · CPU 는 1초 쉬고 지표 3개를 차례로 읽는다 — 앱이 포화되면 같은 서버를 거쳐 표본이 크게 성겨진다 (P6-2: 포화 칸 1 ~ 5개, 정상 칸은 약 1.4 ~ 1.5초 간격). curl 에는 `--max-time 1` 을 둔다. 표본이 10개 미만인 칸의 스레드 최대 · CPU 는 약하게 읽는다.
+- `dropped_iterations` 는 워밍업을 포함한 실행 전체의 값이다. 앱이 느려 VU 가 모자란 경우(`vus_max` 가 `maxVUs` 에 닿음)와 부하 발생기 한계를 나눠 읽는다.
+- **정확성**: 시간 초과(k6 10초)가 0 이면 `201 수 = 행 수 = 1원 이체 수`. 시간 초과 T > 0 이면 `0 ≤ 행 수 − 201 수 ≤ T` 이고 `0 ≤ 1원 수 − 행 수 ≤ T` 일 때만 유효하다 — 블로킹 판이 천장을 넘으면 Tomcat 큐 대기가 시간 초과를 넘는 것이 예상된 결과이고, 클라이언트가 끊어도 MVC 는 끝까지 진행해 행을 저장하고(201 < 행), WebFlux 는 취소돼 1원만 나갈 수 있기 때문이다(행 < 1원). 그 밖은 `.json.invalid` 로 바뀌어 표에서 빠진다. `timeouts` · `rows_minus_created` · `one_won_minus_rows` 는 결과 파일에 남는다 (끊김 비용).
+
+> **끝나면 반드시** `bash load/verification/run.sh cleanup` — 측정 사용자 `p62-u001` ~ `u100` 의 1원인증 행만 지운다 (다른 행은 건드리지 않는다). 그대로 두면 30일 뒤 보존 배치 대상이다.
+
+### 12-3. 측정 순서
+- 본 측정 72회: 4판 × 은행 지연 100 · 500ms × 도착률 100 · 200 · 400건/s × 3회, 칸마다 중앙값.
+- 원인 확인 3회: MVC 블로킹 · Tomcat 최대 스레드 400 · 지연 500 · 도착률 400 — 천장이 스레드 수를 따라 움직이는지.
+- 한계 탐색: 비동기 세 판 · 지연 500 · 도착률 800 → 1600 → … 성공률 99% 미만 · 201 의 p99 3초 초과 · 시스템 CPU 80%(측정 구간 평균) 중 하나에 닿으면 멈춘다.
+- 판단 기준: 비동기 세 판 처리량 차이 5% 안이면 "같다". 운영 기본은 MVC 비동기 그대로 (ADR-0013).
+- CI 에서는 돌리지 않는다 (CI 는 판별 테스트와 오류 계약 테스트).
+
+### 12-4. 끊김
+리액티브 앱 로그에 `1원인증 요청 취소 (stage=transfer)` 경고가 보이면 1원 이체 응답을 기다리는 중 클라이언트가 끊은 것이다 (1원이 나갔을 수 있다, 계좌는 끝 4자리만 남는다). 할 일은 없다 — 사용자가 다시 요청한다 (최악에 1원 두 번). 자주 보이면 클라이언트 시간 초과가 은행 응답 시간(게이트웨이 3초)보다 짧은지 본다. 성명조회 중 끊김은 1원이 나가지 않아 경고가 없다 (끊김 테스트가 1원 없음을 확인).
+
+**틈**: 1원 이체 응답을 받은 뒤 저장이 시작되기 전(코루틴 IO 디스패처 대기 · Reactor `publishOn` 큐)에 취소되면 1원은 나갔는데 행도 경고도 없다. 부하가 높으면 넓어진다 (추정), P6-2 측정에서는 관측 없음(`one_won == rows`). 일마감 대사도 1원인증 줄(V 거래번호)은 대조하지 않고 건수만 세므로 개별로 보이지 않는다 — 은행 V 줄 건수와 우리 행 수의 차이로만 짐작한다 (코드 확인됨 / 추정).

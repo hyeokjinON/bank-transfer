@@ -1,7 +1,7 @@
 # HANDOVER — 지금 상태와 다음 할 일
 
 > 세션(주말 작업)이 끝날 때마다 이 파일을 갱신한다. 다음 사람(또는 다음 세션의 AI)이 이것만 읽고 이어갈 수 있어야 한다.
-> 마지막 갱신: 2026-11-05
+> 마지막 갱신: 2026-11-05 (P6-2 구현 · 측정까지, 머지 전)
 
 ## 1. 지금 어디까지 왔나
 | 단계 | 상태 | 비고 |
@@ -16,8 +16,9 @@
 | P4-2 락 전략 비교 | ✅ 완료 (2026-10-28, [#13](https://github.com/hyeokjinON/bank-transfer/pull/13)) | ADR-0009 채택, 테스트 240개. CI `build` · `infra-smoke` 통과. 차감 전략 4종 · 409/503 · k6 도구. 측정 24회 ([docs/perf](docs/perf/p4-2-lock-comparison.md)): 핫스팟 접수 조건부 106/s > 비관적 99 > Redis 81 > 낙관적 45(409 77%), 분산은 차이 없음. 손 확인: `redis` 전략 + Redis 정지 상태에서 API 기동 → 출금 접수 503 `WALLET_BUSY` + `Retry-After: 1`, 남은 출금 없음 (Postman 5-8 · curl, 인증 사용자 `user-p41`). `manualWalletBusy` 를 켜지 않고 Send 하면 5-8 이 나가지 않음(응답 없음)도 확인 |
 | P5-1 일마감 대사 | ✅ 완료 (2026-10-30, [#15](https://github.com/hyeokjinON/bank-transfer/pull/15)) | ADR-0010 채택, 테스트 370개. CI `build` · `infra-smoke` 통과. 대사 파일 v0.3 · 점검 시간 · Spring Batch 잡 · 알림. 손 확인 (`http/daily-recon.http` 순서를 curl 로, `user-1`): 정상 출금 `COMPLETED` · 무응답 계좌 출금 `UNKNOWN` → `--close-day=20261030` → 실행 구성 6 으로 오늘 대사 200 `COMPLETED` (출금 2 · 일치 1 · 자동 완료 1 · 불일치 0, 0.8초), `recon_issue` 에 `AUTO_COMPLETED` 한 줄, 무응답 건 `COMPLETED 0000`, 잔고 97,000 = 원장(충전 100,000 − 출금 3,000). 다시 보내면 409 `RECON_ALREADY_COMPLETED`, 2099-12-31 은 400 `RECON_DATE_NOT_CLOSED`. 기본 구성 + 지금을 포함한 점검(09:50 ~ 10:40)으로 다시 띄우면 오늘 날짜 대사도 400 `RECON_DATE_NOT_CLOSED`, 출금 · 1원인증 503 `BANK_MAINTENANCE` + `Retry-After: 2339` (10:40 까지 남은 초), 잔고 조회 200. 알림은 처음엔 로그(`ALERT … [INFO] 일마감 대사 2026-10-30 완료 — 불일치 없음`), 봇 설정 뒤에는 텔레그램: 출금 없는 지난 날(10-01 curl · 10-02 Postman 6-3)의 완료 요약이 휴대폰으로 왔다. 겪은 함정 두 가지 — 환경 변수를 넣기 전에 켜 둔 IntelliJ 에서 띄운 API 는 값을 못 받아 로그 알림으로 떨어진다(완전히 종료 후 다시 켜기, SETUP 2-6). Postman 6-3 이 `reconDate` 를 비운 채 한 번 나가면 스크립트가 오늘을 Current value 에 넣어, 나중에 바꾼 값 대신 오늘이 나가 400 `RECON_DATE_NOT_CLOSED` (Current value 를 고친다) |
 | P5-2 보존 배치 | ✅ 완료 (2026-11-04, [#17](https://github.com/hyeokjinON/bank-transfer/pull/17)) | ADR-0011 채택, 테스트 411개. CI `build` · `infra-smoke` 통과. 발행 7일 지난 아웃박스 · `VERIFIED` 가 아닌 만료 30일 지난 1원인증만 06:30 에 READ COMMITTED 로 나눠 삭제. 잠금 재현 · 변이 검사 결과는 ADR. 손 확인 (개발 DB, Postman 7 + MySQL 클라이언트, relay · reconcile · schedule 끔): 시드(아웃박스 3 · 인증 5) 뒤 7-3 미래 날짜 400 `RETENTION_DATE_IN_FUTURE`, 7-1 → 200 `COMPLETED` 아웃박스 32 · 인증 3 삭제 (아웃박스 31건은 시드 밖, 이전 손 확인 · 부하 측정이 남긴 발행 7일 지난 행), 다시 보내면 409 `RETENTION_ALREADY_COMPLETED`. 남은 행은 기대대로 6일 전 발행 · 미발행 아웃박스, 29일 전 만료 `SENT` · 31일 전 만료 `VERIFIED` 인증. 7-4 만료 시각이 지난 `VERIFIED` 사용자의 출금 → 202 `RECEIVED` (처음 422 는 충전을 빠뜨린 `INSUFFICIENT_BALANCE`). 대표 데이터 1만 행 `EXPLAIN`: 두 삭제 모두 `range`, `idx_outbox_unpublished` · `idx_verification_purge` (database.md §9). 겪은 함정 — Docker Desktop 이 꺼져 있으면 API 가 뜨지 않는다. `http/data-retention.http` 의 날짜는 그날로 고친다(Postman 은 비우면 오늘) |
-| P6-1 컨슈머 코루틴 | ✅ 완료 (2026-11-05, [#19](https://github.com/hyeokjinON/bank-transfer/pull/19)) | ADR-0012 채택, 테스트 465개. CI `build` · `infra-smoke` 통과. 측정 49회 ([docs/perf](docs/perf/p6-1-consumer-coroutines.md)): 은행 지연 100ms 에서 blocking 20.9건/s vs coroutine 387건/s, 대조(상한 3) 24.4건/s 라 차이는 동시성 몫. 용량 탐색은 상한 128 이후 약 427건/s 에서 평평 — 은행 동시 150(= 3 × poll 50) · DB(Hikari 10/20/40 → 282/428/465) 가 한계. 운영 기본은 blocking 유지(전환 조건은 ADR-0012 결과 절). suspend 리스너 · begin/finish · 은행 동시 호출 상한 · 측정 도구 `load/consumer/`. 측정은 OPERATION §11. 퍼밋은 begin 보다 먼저 받는다 (대기 중 SENDING 이면 정리 작업이 환불한 뒤 송금될 수 있어서, ADR-0012 결정 6). 측정 도구 첫 시험 실행이 개발 DB 의 손 확인 출금 6건을 측정용 모의 은행으로 처리한 일이 있어 `run.sh` 에 사전 확인이 들어갔다 (OPERATION §11-2). 손 확인 (개발 DB): 개발용 API 를 끈 채 `reset-dev-group` 으로 측정 메시지 lag 를 비운 뒤 실행 구성 `7. API (코루틴 컨슈머)` 로 기동 → `/actuator/info` 가 `mode: coroutine` · 상한 64 · Hikari 20. `user-p41` 로 손 출금 3건(50,000 · 30,000 · 30,000) → 모두 `COMPLETED 0000`, `sending_at` 뒤 13 ~ 29ms 에 확정, 결과조회 · 재발행 0회, 잔고 8,453,000 = 원장 합 |
-| P6-2 ~ P9 | ⬜ 예정 | README 로드맵 |
+| P6-1 컨슈머 코루틴 | ✅ 완료 (2026-11-05, [#19](https://github.com/hyeokjinON/bank-transfer/pull/19)) | ADR-0012 채택, 테스트 465개. CI `build` · `infra-smoke` 통과. 측정 49회 ([docs/perf](docs/perf/p6-1-consumer-coroutines.md)): 은행 지연 100ms 에서 blocking 20.9건/s vs coroutine 387건/s, 대조(상한 3) 24.4건/s 라 차이는 동시성 몫. 용량 탐색은 상한 128 이후 약 427건/s 에서 평평 — 은행 동시 150(= 3 × poll 50) · DB(Hikari 10/20/40 → 282/428/465) 가 한계. 운영 기본은 blocking 유지(전환 조건은 ADR-0012 결과 절). suspend 리스너 · begin/finish · 은행 동시 호출 상한 · 측정 도구 `load/consumer/`. 측정은 OPERATION §11. 은행 호출 자리(세마포어 permit)는 begin 보다 먼저 받는다 (대기 중 SENDING 이면 정리 작업이 환불한 뒤 송금될 수 있어서, ADR-0012 결정 6). 측정 도구 첫 시험 실행이 개발 DB 의 손 확인 출금 6건을 측정용 모의 은행으로 처리한 일이 있어 `run.sh` 에 사전 확인이 들어갔다 (OPERATION §11-2). 손 확인 (개발 DB): 개발용 API 를 끈 채 `reset-dev-group` 으로 측정 메시지 lag 를 비운 뒤 실행 구성 `7. API (코루틴 컨슈머)` 로 기동 → `/actuator/info` 가 `mode: coroutine` · 상한 64 · Hikari 20. `user-p41` 로 손 출금 3건(50,000 · 30,000 · 30,000) → 모두 `COMPLETED 0000`, `sending_at` 뒤 13 ~ 29ms 에 확정, 결과조회 · 재발행 0회, 잔고 8,453,000 = 원장 합 |
+| P6-2 웹 1원인증 WebFlux 비교 | 🔄 구현 · 측정 완료 · 머지 전 (브랜치 `feat/p6-2-web-reactive`) | 구현 · 테스트 완료(전체 515개, 실패 0), ADR-0013 제안. 1원인증 요청 네 판(MVC 블로킹 · 비동기, WebFlux 코루틴 · Reactor) · 별도 앱 `apps/api-reactive`(8081) · 측정 도구 `load/verification/`. 측정 82회 모두 정확성 통과 ([결과](docs/perf/p6-2-web-reactive.md)): 500ms · 400건/s 에서 블로킹 53.5건/s(Tomcat 400 이면 386.1), 비동기 세 판 400.0건/s 로 같다. MVC 비동기는 800건/s 에서 앱 실행기(기본 8)가 천장 — 64면 800.0건/s. 운영 기본은 MVC 비동기 유지(ADR-0013 결과 절). 진행 조건 실험 E1 ~ E4 통과 (await · Reactor 뒤는 게이트웨이 이벤트 루프, 끊기면 취소, 시간 초과 예외 그대로). |
+| P6-3 ~ P9 | ⬜ 예정 | README 로드맵 (P7 가상 스레드부터) |
 
 ## 2. P3 설계 (합의된 것)
 설계 섹션 1~5 모두 승인(2026-10-19) → **[설계 문서](docs/superpowers/specs/2026-10-19-p3-transfer-design.md)** 로 정리.
@@ -81,11 +82,31 @@ P3-1 (PR #3) · P3-2 (PR #5) · P3-3a (PR #7) · P3-3b (PR #9) 모두 머지됐�
 | 알림 | `AlertNotifier` + 텔레그램 Bot API(토큰 · chat id 가 둘 다 있을 때) / 로그. 실패는 삼키고 대사에 영향 없음. 기존 경고 3곳도 WARN |
 | 이름 | 일마감 대사 = `dailyrecon` (잡 `dailyReconciliationJob`) — 10초 주기 "정리 작업"(`reconcile`)과 구분 |
 
+### P6-2 설계 (합의된 것)
+설계 모두 승인(2026-11-05) → **[설계 문서](docs/superpowers/specs/2026-11-05-p6-2-web-reactive-design.md)**. 근거: [ADR-0013](docs/adr/0013-web-verification-webflux-comparison.md) (제안 — 머지 후 채택으로).
+
+| 결정 | 내용 |
+|---|---|
+| 비교 경로 | 1원인증 요청만 — 웹에서 은행을 기다리는 유일한 경로. 출금 접수는 은행을 기다리지 않는다 |
+| 앱 | WebFlux 는 별도 앱 `apps/api-reactive`(8081). 한 앱에 MVC 와 WebFlux 가 같이 있으면 Spring 이 MVC 를 고른다. Kafka · 스케줄러 · 배치 · Flyway 없음 |
+| 저장소 | JPA 엔티티 · 저장소 · 은행 응답 해석을 새 모듈 `modules/account-infra` 로 옮겨 두 앱이 공유. 테이블 소유(Flyway)는 `apps/api` |
+| DB 호출 | JDBC 는 이벤트 루프 밖에서 — 코루틴 `withContext(io)`, Reactor `publishOn(boundedElastic())` |
+| 판정 | `modules/account` 의 순수 함수 `VerificationRequestRules`(`checkHolder` · `newDraft` · `issue`)를 네 판이 공유. 기존 서비스 테스트는 그대로 통과 |
+| 고르는 법 | `account.verification.web-mode` — `apps/api`: `async`(기본) | `blocking`, `apps/api-reactive`: `coroutine`(기본) | `reactor`. 소문자만, 그 밖은 기동 실패. 지금 값은 `/actuator/info` |
+| 끊김 | 클라이언트가 끊으면 취소 (`CancellationException` 은 다시 던짐). 1원 이체 대기 중 끊김은 마스킹한 경고. `NonCancellable` 은 쓰지 않음 — 재요청으로 회복, 대가는 최악에 1원 두 번 |
+| 오류 응답 | 웹 계층은 공유하지 않고 계약 테스트(`VerificationErrorContract` 기대표)로 두 앱의 상태 · `code` 를 맞춘다 |
+| 측정 | k6 열린 모델. 4판 × 지연 100 · 500ms × 도착률 100 · 200 · 400건/s × 3회(72회), 원인 확인 3회(블로킹 · Tomcat 400), 한계 탐색. 판단 기준: 비동기 세 판 처리량 차이 5% 안이면 같다. 운영 기본은 MVC 비동기 그대로 |
+| 구현 중 조정 | `@AutoConfigurationPackage` 는 `basePackages` 만 적으면 앱 패키지가 빠져서 `basePackageClasses` 를 같이 적음 · `BankMaintenanceGuard` 를 `bank-gateway` 로 이동 · JPA 저장소 테스트는 `apps/api` 에 남김 · 모의 은행 입금 기록을 `ConcurrentLinkedQueue` 로 · 측정 정확성 규칙에 k6 시간 초과 포함 · `run.sh` 는 자기가 띄우지 않은 포트를 비우지 않음 |
+
 ## 3. 다음 할 일 (순서대로)
 1. velog `#2` ~ `#11` 은 비공개로 올라가 있다 (`#9` = P5-1 일마감 대사, `#10` = P5-2 보존 배치, `#11` = P6-1 컨슈머 코루틴). 시리즈 지정 · 글마다 "핵심 3줄" 직접 작성 후 공개.
 2. **!! 기본 설정으로 띄운 API 는 06:30(KST) 에 아무 조작 없이도 되돌릴 수 없는 삭제를 한다 — 그 API 가 가리키는 DB 에, 개발 DB 도 포함해서.** 옛 행이 필요하면 `SELECT COUNT(*)` 미리보기(OPERATION §10-1) 전에는 `--data-retention.schedule.enabled=false` 를 넘긴다. 부하를 다시 잴 때는 다른 API 인스턴스(IntelliJ 등)를 모두 끄고, 끝나면 `bash load/run.sh cleanup` ([OPERATION §8](OPERATION.md#8-부하-측정-p4-2-k6)).
 3. **P6-1 측정을 다시 하면 끝난 뒤 개발용 컨슈머 그룹을 비운다**: 측정 메시지가 개발용 그룹 `transfer-processor` 에도 쌓인다 (이번에는 약 586,806건, 2026-11-05 에 비움). 개발용 API 를 끈 채로 `bash load/consumer/run.sh reset-dev-group` (읽기 전용 사전 확인을 통과해야만 `transfer.requested` 끝으로 옮긴다, 전후 lag 출력). 안 하면 개발용 API 를 띄울 때 그걸 다 읽어 새 개발 출금이 수십 분 `RECEIVED` 로 멈춰 보인다. 측정 뒤 `cleanup` 은 밀린 게 있으면 이 명령을 안내한다 ([OPERATION §11](OPERATION.md)). 개발용 API 의 2026-11-04 일마감 대사가 `COMPLETED_NOT_AT_BANK` 6건을 보고할 수 있다 — 첫 시험 실행 때 `user-retention` 출금 6건이 측정용 모의 은행으로 처리돼 개발용 거래 기록에 없어서다 (시험 데이터, 예상된 결과).
-4. P6-2 (웹 — WebFlux 별도 앱 모듈) 설계.
+4. **P6-2 머지 전 손 확인**: 측정은 끝났다 (2026-11-05, 결과 문서 · ADR-0013 결과 절). 손 확인(리액티브 앱 요청 → `apps/api` `/confirm` → 그 계좌로 출금, 모의 은행 지연 2초에서 `curl --max-time 1` 로 끊김)은 사용자가. 머지 뒤 정리 PR 에서 ADR-0013 을 채택으로, README 로드맵 체크.
+5. P7 가상 스레드 비교 (같은 측정 도구).
+
+### P6-2 범위 밖으로 남긴 것
+- 측정 표본을 읽는 액추에이터를 관리 포트로 분리하는 것: 지금은 측정 대상 앱의 같은 서버를 거쳐 포화되면 표본이 성겨진다 (결과 문서 §4). P7 에서 같은 도구를 다시 쓸 때 표본 curl 에 `--max-time 1` 만 둔 상태 — 분리가 필요하면 그때.
 
 ### P6-1 범위 밖으로 남긴 것
 - 웹 요청 경로의 비동기 (P6-2, WebFlux 별도 앱 모듈) · 가상 스레드 비교 (P7, 같은 측정 도구).

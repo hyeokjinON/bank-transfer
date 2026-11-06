@@ -4,18 +4,19 @@ import io.github.hyeokjinon.banktransfer.account.AccountVerificationService
 import io.github.hyeokjinon.banktransfer.account.BankPort
 import io.github.hyeokjinon.banktransfer.account.RandomCodeGenerator
 import io.github.hyeokjinon.banktransfer.account.VerificationRepository
-import io.github.hyeokjinon.banktransfer.api.persistence.AccountVerificationJpaRepository
+import io.github.hyeokjinon.banktransfer.account.infra.AccountVerificationJpaRepository
+import io.github.hyeokjinon.banktransfer.account.infra.JpaVerificationRepository
+import io.github.hyeokjinon.banktransfer.account.infra.holderNameOf
+import io.github.hyeokjinon.banktransfer.account.infra.requireOk
 import io.github.hyeokjinon.banktransfer.api.persistence.JpaTransferStore
-import io.github.hyeokjinon.banktransfer.api.persistence.JpaVerificationRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.OutboxEventJpaRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.TransferJpaRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletDebit
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletLedger
-import io.github.hyeokjinon.banktransfer.api.web.BankMaintenanceGuard
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
+import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceGuard
 import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceWindow
-import io.github.hyeokjinon.banktransfer.protocol.ResponseCodes
 import io.github.hyeokjinon.banktransfer.transfer.RandomReferenceGenerator
 import io.github.hyeokjinon.banktransfer.transfer.ReferenceGenerator
 import io.github.hyeokjinon.banktransfer.transfer.TransferService
@@ -61,10 +62,22 @@ data class BankMaintenanceProperties(
 data class VerificationProperties(
     val ttl: Duration = Duration.ofMinutes(5),
     val maxAttempts: Int = 5,
-)
+    /**
+     * 1원인증 요청 판 (P6-2, ADR-0013): async(기본, 서블릿 비동기) | blocking(대조군 — 요청 스레드가 은행을 끝까지 기다린다, 측정 전용).
+     * 소문자 그대로만 받는다: @ConditionalOnProperty 는 대소문자를 무시해 "Blocking" 도 블로킹 컨트롤러를 띄우지만, info · 측정 이름과 어긋난다.
+     */
+    val webMode: String = ASYNC,
+) {
+    init {
+        require(webMode in WEB_MODES) { "account.verification.web-mode must be one of $WEB_MODES (lower case): '$webMode'" }
+    }
 
-/** 은행이 처리를 거절한 경우(응답코드가 0000 이 아님). */
-class BankRejectedException(val responseCode: String) : RuntimeException("bank rejected with code $responseCode")
+    companion object {
+        const val ASYNC = "async"
+        const val BLOCKING = "blocking"
+        val WEB_MODES = listOf(ASYNC, BLOCKING)
+    }
+}
 
 /**
  * 조립(wiring)은 여기서만 한다. account 모듈은 BankPort 인터페이스만 알고,
@@ -80,18 +93,10 @@ class BankGatewayAdapter(
     private val references: ReferenceGenerator = RandomReferenceGenerator(prefix = 'V'),
 ) : BankPort {
     override fun inquireHolderName(bankCode: String, accountNo: String): CompletableFuture<String?> =
-        client.inquireName(bankCode, accountNo).thenApplyAsync({ res ->
-            when (res.header.responseCode) {
-                ResponseCodes.OK -> res.holderName
-                ResponseCodes.ACCOUNT_NOT_FOUND -> null
-                else -> throw BankRejectedException(res.header.responseCode)
-            }
-        }, executor)
+        client.inquireName(bankCode, accountNo).thenApplyAsync({ res -> holderNameOf(res) }, executor)
 
     override fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String): CompletableFuture<Unit> =
-        client.transfer(bankCode, accountNo, amount, memo, references.next()).thenApplyAsync({ res ->
-            if (!res.header.isOk) throw BankRejectedException(res.header.responseCode)
-        }, executor)
+        client.transfer(bankCode, accountNo, amount, memo, references.next()).thenApplyAsync({ res -> requireOk(res) }, executor)
 }
 
 @Configuration(proxyBeanMethods = false)

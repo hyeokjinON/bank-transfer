@@ -161,6 +161,17 @@ class BankGatewayClientTest {
     }
 
     @Test
+    fun `입금 기록은 받은 순서대로다 (P6-2 - 입금 기록을 ConcurrentLinkedQueue 로 바꿔도 순서는 같다)`() {
+        val bank = MockBankServer().start().closeLater()
+        val client = client(bank.boundPort).start()
+        waitUntil { client.isConnected }
+
+        for (i in 1..3) client.transfer("090", "1101234567890", 1, "ORDER$i", "V20261105ORDER00000$i").get(5, TimeUnit.SECONDS)
+
+        assertEquals(listOf("ORDER1", "ORDER2", "ORDER3"), bank.depositsOf("1101234567890").map { it.memo })
+    }
+
+    @Test
     fun `모의 은행을 잠시 내렸다 올리면 같은 포트로 다시 붙는다 (은행 장애 시나리오용)`() {
         val bank = MockBankServer().start().closeLater()
         val client = client(bank.boundPort).start()

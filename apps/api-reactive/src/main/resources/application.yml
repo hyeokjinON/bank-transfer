@@ -1,0 +1,57 @@
+spring:
+  application:
+    name: bank-transfer-reactive
+  main:
+    web-application-type: reactive   # 명시: 클래스패스에 spring-web(RestClient 등)도 있어 서블릿으로 오인되지 않게
+  webflux:
+    problemdetails:
+      enabled: true                  # 표준 오류도 ProblemDetail + code (ReactiveExceptionHandler) — apps/api 와 같은 응답 모양
+  datasource:
+    # apps/api 와 같은 DB · 같은 시간대 설정 (docs/database.md §2). 스키마는 apps/api 의 Flyway 가 만든다
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:bank_transfer}?connectionTimeZone=Asia/Seoul&forceConnectionTimeZoneToSession=true
+    username: ${MYSQL_USER:bank}
+    password: ${MYSQL_PASSWORD:local-dev-only}
+    hikari:
+      maximum-pool-size: 20          # apps/api 와 같게 (P6-2 — 풀 크기가 다르면 측정이 풀을 재게 된다)
+      connection-init-sql: SET SESSION innodb_lock_wait_timeout = 5
+  jpa:
+    hibernate:
+      ddl-auto: validate             # 스키마는 바꾸지 않는다. 엔티티와 다르면 기동 실패
+    properties:
+      hibernate.jdbc.time_zone: Asia/Seoul
+      hibernate.type.preferred_instant_jdbc_type: TIMESTAMP
+
+server:
+  port: 8081                          # apps/api(8080)와 나란히 띄운다
+
+bank:
+  gateway:
+    host: localhost
+    port: 9090
+    response-timeout: 3s
+    poll-interval: 30s
+  maintenance:                        # apps/api 와 같은 점검 시간 (P5-1, KST)
+    enabled: true
+    start: "23:50"
+    end: "00:10"
+
+account:
+  verification:
+    ttl: 5m
+    web-mode: coroutine               # 1원인증 요청 판 (P6-2): coroutine(기본) | reactor. 소문자만, 그 밖은 기동 실패
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  info:
+    env:
+      enabled: true
+
+info:
+  account:
+    verification:
+      web-mode: ${account.verification.web-mode}   # load/verification/run.sh 가 측정 전에 확인
+  datasource:
+    maximum-pool-size: ${spring.datasource.hikari.maximum-pool-size}

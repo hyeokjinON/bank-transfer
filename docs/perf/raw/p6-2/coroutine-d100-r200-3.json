@@ -1,0 +1,10 @@
+{
+  "run": "coroutine-d100-r200-3", "mode": "coroutine", "app": "api-reactive", "delay_ms": 100, "rate": 200, "tomcat_threads": 200, "round": "3",
+  "rps_201": 200, "p50_201": 215.7914765, "p95_201": 221.630355, "p99_201": 226.21131944000004,
+  "status_201": 6000, "status_4xx": 0, "status_5xx": 0, "timeouts": 0,
+  "dropped_iterations": 1, "vus_max": 201,
+  "created_all": 8000, "timeouts_all": 0, "rows": 8000, "one_won": 8000,
+  "rows_minus_created": 0, "one_won_minus_rows": 0,
+  "threads_max": 101.0, "sys_cpu_avg": 30.6, "sys_cpu_max": 60.1, "app_cpu_avg": 4.4, "app_cpu_max": 13.4,
+  "samples": 20, "app_warn_error_lines": 0, "code": "cccdb0a"
+}

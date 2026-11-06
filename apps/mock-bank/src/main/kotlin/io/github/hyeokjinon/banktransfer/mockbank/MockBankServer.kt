@@ -30,7 +30,7 @@ import java.time.Clock
 import java.time.Duration
 import java.time.LocalDate
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -64,7 +64,12 @@ class MockBankServer(
     private val log = LoggerFactory.getLogger(javaClass)
     private val boss = MultiThreadIoEventLoopGroup(1, NioIoHandler.newFactory())
     private val workers = MultiThreadIoEventLoopGroup(2, NioIoHandler.newFactory())
-    private val deposits = ConcurrentHashMap<String, MutableList<TransferRequest>>()
+    /**
+     * 계좌별 입금 기록 (테스트가 적요의 코드를 꺼내 본다). 받은 순서대로 쌓는다.
+     * ConcurrentLinkedQueue: 추가가 O(1) — CopyOnWriteArrayList 는 입금마다 목록 전체를 복사해, 측정처럼 한 계좌에 수만 건이 오면
+     * 모의 은행 이벤트 루프가 그 복사에 시간을 쓴다 (P6-2 계획 "스펙과 다른 점" 7).
+     */
+    private val deposits = ConcurrentHashMap<String, ConcurrentLinkedQueue<TransferRequest>>()
     private val processedReferences: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val pollCounter = AtomicInteger()
 
@@ -201,7 +206,7 @@ class MockBankServer(
     private fun deposit(message: TransferRequest) {
         // 메모리보다 먼저 — "처리함" 의 기준이 기록이다. 쓰기가 실패하면 예외 → 채널이 닫혀 응답이 없다 = 결과를 모름
         journal?.record(message)
-        deposits.computeIfAbsent(message.accountNo) { CopyOnWriteArrayList() }.add(message)
+        deposits.computeIfAbsent(message.accountNo) { ConcurrentLinkedQueue() }.add(message)
         processedReferences += message.reference
         log.info("[통장] {} 입금 {}원 적요='{}' 거래번호={}", message.accountNo, message.amount, message.memo, message.reference)
     }

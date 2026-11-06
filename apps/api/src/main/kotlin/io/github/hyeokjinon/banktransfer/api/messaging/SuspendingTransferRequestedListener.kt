@@ -28,7 +28,7 @@ import java.util.UUID
  * 블로킹 판과 다른 것은 은행 응답을 기다리는 방법 하나다: 컨슈머 스레드가 `.get()` 으로 최대 3초 막히는 대신 `await()` 로 코루틴만 멈춘다.
  * 그래서 동시에 기다리는 출금 수가 컨슈머 스레드 수(3)에 묶이지 않는다. 대신
  * - 은행에 동시에 보내는 수는 [bankCalls] 로 묶는다 (transfer.consumer.coroutine.max-in-flight-bank-calls, 기본 64 — 실제 은행도 기관별 동시 요청을 제한한다).
- *   퍼밋은 begin(RECEIVED → SENDING) 부터 송금 응답까지 잡는다 — 기다리는 동안 SENDING 이면 정리 작업이 먼저 환불할 수 있다 (process 주석).
+ *   은행 호출 자리(세마포어 permit)는 begin(RECEIVED → SENDING) 부터 송금 응답까지 잡는다 — 기다리는 동안 SENDING 이면 정리 작업이 먼저 환불할 수 있다 (process 주석).
  *   처리 중인 메시지 수 자체는 Spring Kafka 비동기 ack 의 poll 묶음 단위 정지로 컨슈머 3 × max-poll-records 50 에 묶인다 (Task 1 실험 ②).
  * - DB 호출(begin · finish)과 결과 마무리(CONFLICT 알림 = 텔레그램 HTTP)는 [db] 에서 돈다. Spring 7 은 suspend 리스너를 Dispatchers.Unconfined 로 부르므로
  *   은행 응답 뒤의 코드는 그 응답을 완료한 Netty 이벤트 루프 스레드(게이트웨이에 하나뿐)에서 이어진다 — 거기서 JDBC 를 기다리면 모든 은행 응답이 멈춘다 (실험 ③).
@@ -73,10 +73,10 @@ class SuspendingTransferRequestedListener(
     }
 
     private suspend fun process(transferId: UUID): ProcessResult {
-        // begin 도 퍼밋 안에서 한다: 퍼밋을 기다리는 동안 행이 이미 SENDING 이면, 30초 넘게 기다릴 때(상한이 작고 은행이 느릴 때) 정리 작업이
-        // UNKNOWN → 결과조회 "미처리" → FAILED + 환불로 확정한 뒤에 이 코루틴이 퍼밋을 받아 송금한다 → 환불과 입금이 둘 다 일어난다 (CONFLICT).
-        // 블로킹 판은 begin 과 송금 사이가 거의 0 이다. 기다리는 동안은 RECEIVED 로 두고, 퍼밋을 받은 뒤에야 SENDING 으로 바꾼다.
-        // 퍼밋이 begin 의 짧은 DB 호출 하나를 함께 덮는 값을 치른다. finish · conclude 는 퍼밋 밖(자리를 오래 잡지 않는다).
+        // begin 도 자리 안에서 한다: 자리를 기다리는 동안 행이 이미 SENDING 이면, 30초 넘게 기다릴 때(상한이 작고 은행이 느릴 때) 정리 작업이
+        // UNKNOWN → 결과조회 "미처리" → FAILED + 환불로 확정한 뒤에 이 코루틴이 자리를 잡아 송금한다 → 환불과 입금이 둘 다 일어난다 (CONFLICT).
+        // 블로킹 판은 begin 과 송금 사이가 거의 0 이다. 기다리는 동안은 RECEIVED 로 두고, 자리를 잡은 뒤에야 SENDING 으로 바꾼다.
+        // 자리가 begin 의 짧은 DB 호출 하나를 함께 덮는 값을 치른다. finish · conclude 는 자리 밖(자리를 오래 잡지 않는다).
         val outcome = bankCalls.withPermit {
             val transfer = when (val begun = withContext(db) { processor.begin(transferId) }) {
                 TransferProcessor.Begin.NotFound -> return ProcessResult.NOT_FOUND
