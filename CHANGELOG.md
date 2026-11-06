@@ -9,7 +9,7 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
-## [P6-2] 웹 1원인증 WebFlux 비교 — (머지 전)
+## [P6-2] 웹 1원인증 WebFlux 비교 — 2026-11-06 ([#21](https://github.com/hyeokjinON/bank-transfer/pull/21), 머지 후 정리 [#22](https://github.com/hyeokjinON/bank-transfer/pull/22))
 ### Added
 - 신규 앱 `apps/api-reactive` (WebFlux, 포트 8081): 1원인증 요청 `POST /api/v1/account-verifications` 하나만, 코루틴 판(`withContext(io)`)과 Reactor 판(`fromFuture` · `publishOn(boundedElastic())`). 클라이언트가 끊으면 취소, 1원 이체 대기 중 끊김은 마스킹한 경고. 설정 `account.verification.web-mode`(`coroutine` 기본 · `reactor`).
 - 신규 모듈 `modules/account-infra`: 1원인증 JPA 저장소 · 은행 응답 해석 · 오류 계약 기대표(`VerificationErrorContract`, test fixtures).
@@ -27,8 +27,10 @@
 - 용어 정리: "퍼밋" → "은행 호출 자리(세마포어 permit)" (ADR-0012 · P6-1 결과 문서 · ARCHITECTURE · HANDOVER · 코루틴 리스너 주석 · 테스트 이름).
 - 예상 못 한 예외의 500 응답이 Boot 기본 모양에서 ProblemDetail + code `INTERNAL_ERROR` 로 (두 앱 · 네 판 같게). 처리기에 `Exception::class` 를 더했고, 리액티브 처리기는 취소(`CancellationException`)를 응답으로 바꾸지 않고 다시 던진다. 계약 테스트가 처리기 라우팅까지 확인.
 - 전체 테스트 515개.
-### Fixed
-- 없음.
+### Fixed (머지 후 정리)
+- 리액티브 처리기가 취소 예외를 다시 던지는지 지키는 테스트 `ReactiveExceptionHandlerTest` (2개). P6-1 `ConsumerModeWiringTest` 의 끝이 열린 정규식을 `[,}]` 로 막음. 전체 테스트 518개.
+- 진행 조건 실험 E1 (`WebFluxExperimentTest`) 이 CI 에서 가끔 깨지던 것: 은행 응답이 `await` · 구독보다 먼저 오면 기다린 뒤 코드가 게이트웨이 루프가 아니라 부른 HTTP 루프에서 이어진다. 은행 지연을 둔 결정적 E1 둘 + 지연 없이 "이벤트 루프 중 하나" 인지 보는 E1 하나로 나눔. 흐름 KDoc · ADR-0013 · 결과 문서 §3-2 에 두 경우를 적음 (동작 · 결정 변화 없음).
+- ADR-0013 채택. 결과 문서 §5-3 표본 표기 · 천장 칸 표본 간격, ADR-0013 의 Reactor 스레드 조건, "자리를 먼저 받는다" → "잡는다" (ADR-0012 · HANDOVER).
 
 ## [P6-1] 컨슈머 코루틴 — 2026-11-05 ([#19](https://github.com/hyeokjinON/bank-transfer/pull/19), 머지 후 정리 [#20](https://github.com/hyeokjinON/bank-transfer/pull/20))
 ### Added

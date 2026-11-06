@@ -30,7 +30,6 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -118,21 +117,41 @@ class WebFluxExperimentTest {
 
     private fun threadOnly(name: String?) = name!!.substringBefore(" @coroutine")   // 코루틴 디버그 모드(-ea)가 붙이는 꼬리를 뗀다
 
+    /**
+     * E1 은 두 경우로 나뉜다 (2026-11-06, CI 에서 관찰): Spring 은 suspend 핸들러를 Dispatchers.Unconfined 로 부르므로
+     * - 은행 응답이 await(구독) **뒤에** 오면 → 응답을 완료한 게이트웨이 이벤트 루프에서 이어진다 (은행 지연을 둬서 결정적으로 만든다)
+     * - 응답이 이미 와 있으면(localhost 라 아주 빠를 때) → 멈추지 않고 부른 스레드, 곧 HTTP 루프(reactor-http-…)에서 그대로 이어진다
+     * 어느 쪽이든 **이벤트 루프**다 — 그래서 JDBC 는 늘 IO 디스패처 · boundedElastic 으로 넘긴다 (설계 §4-2).
+     */
+    private fun isEventLoop(thread: String) = thread.startsWith("multiThreadIoEventLoopGroup") || thread.startsWith("reactor-http")
+
     @Test
-    fun `E1 코루틴 - await 뒤 코드는 은행 응답을 완료한 게이트웨이 이벤트 루프에서 이어진다`() {
+    fun `E1 코루틴 - 응답이 기다리는 중에 오면 await 뒤 코드는 응답을 완료한 게이트웨이 이벤트 루프에서 이어진다`() {
+        bank.responseDelay = Duration.ofMillis(100)
         assertEquals("홍길동", http.get().uri("/coroutine/name?account=1002123456789").retrieve().body(String::class.java))
         val after = threadOnly(probe.threadAfterAwait.get())
         println("[P6-2 실험 E1 코루틴] await 뒤 = $after")
         assertTrue(after.startsWith("multiThreadIoEventLoopGroup"), "게이트웨이 루프(Netty 기본 이름)여야 한다: $after")
-        assertFalse(after.startsWith("reactor-http"), "HTTP 루프가 아니어야 한다: $after")
     }
 
     @Test
-    fun `E1 Reactor - fromFuture 뒤 map 은 은행 응답을 완료한 게이트웨이 이벤트 루프에서 돈다`() {
+    fun `E1 Reactor - 응답이 기다리는 중에 오면 fromFuture 뒤 map 은 게이트웨이 이벤트 루프에서 돈다`() {
+        bank.responseDelay = Duration.ofMillis(100)
         assertEquals("홍길동", http.get().uri("/reactor/name?account=1002123456789").retrieve().body(String::class.java))
         val after = threadOnly(probe.threadAfterAwait.get())
         println("[P6-2 실험 E1 Reactor] map = $after")
         assertTrue(after.startsWith("multiThreadIoEventLoopGroup"), "게이트웨이 루프여야 한다: $after")
+    }
+
+    @Test
+    fun `E1 지연 없음 - 어느 판이든 기다린 뒤 코드는 이벤트 루프(게이트웨이 또는 HTTP)에서 돈다`() {
+        for (path in listOf("/coroutine/name", "/reactor/name")) {
+            probe.reset()
+            assertEquals("홍길동", http.get().uri("$path?account=1002123456789").retrieve().body(String::class.java))
+            val after = threadOnly(probe.threadAfterAwait.get())
+            println("[P6-2 실험 E1 지연 없음] $path → $after")
+            assertTrue(isEventLoop(after), "이벤트 루프여야 한다 (JDBC 를 여기서 기다리면 안 되는 이유): $after")
+        }
     }
 
     @Test

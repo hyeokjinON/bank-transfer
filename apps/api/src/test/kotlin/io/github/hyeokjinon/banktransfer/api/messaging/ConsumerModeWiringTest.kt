@@ -20,7 +20,7 @@ class ConsumerModeWiringTest : ApiIntegrationTest() {
         val info = client.get().uri("/actuator/info").retrieve().body(String::class.java)!!
 
         assertTrue("\"mode\":\"blocking\"" in info, info)
-        assertTrue(Regex("\"max-in-flight-bank-calls\":\"?64\"?").containsMatchIn(info), info)
-        assertTrue(Regex("\"maximum-pool-size\":\"?20\"?").containsMatchIn(info), info)
+        assertTrue(Regex("\"max-in-flight-bank-calls\":\"?64\"?[,}]").containsMatchIn(info), info)
+        assertTrue(Regex("\"maximum-pool-size\":\"?20\"?[,}]").containsMatchIn(info), info)
     }
 }

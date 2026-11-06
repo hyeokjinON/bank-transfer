@@ -1,6 +1,6 @@
 # ADR-0013: 웹 1원인증 경로의 WebFlux 비교 — 네 판 · 별도 앱 · 끊기면 취소
 
-- 상태: 제안 (2026-11-05)
+- 상태: 채택 (2026-11-06, [#21](https://github.com/hyeokjinON/bank-transfer/pull/21)) · 제안 2026-11-05
 - 관련: [설계](../superpowers/specs/2026-11-05-p6-2-web-reactive-design.md) · [계획](../superpowers/plans/2026-11-05-p6-2-web-reactive.md) · [ADR-0012](0012-consumer-coroutines.md) (컨슈머 코루틴) · [측정 결과](../perf/p6-2-web-reactive.md)
 
 ## 맥락
@@ -12,14 +12,14 @@
 1. **네 판을 같은 도구로 비교한다**: MVC 블로킹(대조군, `join`) · MVC 비동기(지금 기본) · WebFlux 코루틴 · WebFlux Reactor. `account.verification.web-mode` 로 기동 때 하나만 (소문자 그대로, 그 밖은 기동 실패). `apps/api` 는 `async`(기본) | `blocking`, `apps/api-reactive` 는 `coroutine`(기본) | `reactor`.
 2. **WebFlux 는 별도 앱 `apps/api-reactive`** (포트 8081) — 1원인증 요청 하나만. Spring 은 한 앱에 MVC 와 WebFlux 가 같이 있으면 MVC 를 고른다. Kafka · 스케줄러 · 배치 · Flyway 는 넣지 않는다 (스키마는 `apps/api` 소유).
 3. **판정 · 바깥 어댑터는 한 벌**: 판정 순수 함수 `VerificationRequestRules`(account — 기존 `AccountVerificationServiceTest` 는 그대로 통과), JPA 저장소 · 은행 응답 해석(새 모듈 `account-infra`). 판마다 다른 것은 기다리는 방법과 블로킹 코드를 도는 스레드뿐. 계획 중 드러난 조정: 공유 패키지의 엔티티 스캔은 `@AutoConfigurationPackage` 로 등록하는데 `basePackages` 만 적으면 앱 자기 패키지가 빠져서 `basePackageClasses = [앱 클래스]` 를 같이 적는다 (코드 확인됨, 커밋 64801f6). `BankMaintenanceGuard` 는 두 앱이 쓰므로 `bank-gateway` 로 옮겼다.
-4. **JDBC 는 이벤트 루프에서 돌지 않는다**: 코루틴 `withContext(Dispatchers.IO)`, Reactor `publishOn(boundedElastic())`. 실험 E1 (코드 확인됨, 커밋 bc79516): 코루틴 `await` 뒤와 Reactor `map` 은 둘 다 게이트웨이 이벤트 루프 스레드(`multiThreadIoEventLoopGroup-4-1`)에서 이어졌다 — 그대로 JDBC 를 부르면 은행 응답 처리 루프가 막힌다.
+4. **JDBC 는 이벤트 루프에서 돌지 않는다**: 코루틴 `withContext(Dispatchers.IO)`, Reactor `publishOn(boundedElastic())`. 실험 E1 (코드 확인됨, 커밋 bc79516): 코루틴 `await` 뒤와 Reactor `map` 은 둘 다 게이트웨이 이벤트 루프 스레드(`multiThreadIoEventLoopGroup-4-1`)에서 이어졌다 — 그대로 JDBC 를 부르면 은행 응답 처리 루프가 막힌다. 단 응답이 `await`(구독)보다 **먼저** 와 future 가 이미 끝나 있으면 멈추지 않고 부른 스레드, 곧 HTTP 루프(`reactor-http-…`)에서 그대로 이어진다 (2026-11-06 CI 에서 관찰 — 실험 테스트를 두 경우로 나눠 고정). 어느 쪽이든 이벤트 루프라 결정은 같다.
 5. **클라이언트가 끊으면 취소되게 둔다**: 실험 E2 · E3 (코드 확인됨) — 코루틴 · Reactor 모두 끊기면 취소되고, 게이트웨이 future 의 `isCancelled` 가 true 였다. E4: 은행 응답 시간 초과는 두 판 모두 `BankTimeoutException` 그대로 올라온다. 1원 이체 응답을 기다리는 중 끊기면 1원이 나갔을 수 있어 마스킹한 경고(`stage=transfer`)를 남기고, 사용자는 다시 요청한다(대가는 최악에 1원 두 번 — 돈을 잃지 않는다). `NonCancellable` 은 쓰지 않는다: 응답을 못 받은 사용자는 인증 건 id 를 몰라 저장해도 확인할 수 없다. `CancellationException` 은 오류 응답으로 바꾸지 않고 다시 던진다. **틈**: 1원 이체 응답을 받은 뒤 저장이 시작되기 전(코루틴 IO 디스패처 대기 · Reactor `publishOn` 큐)에 취소되면 1원은 나갔는데 행도 경고도 없다 — 부하가 높으면 넓어진다(추정), 측정에서는 관측 없음(`one_won == rows`). 일마감 대사도 1원인증 줄(V 거래번호)은 건수만 세고 대조하지 않아 개별로 보이지 않는다(코드 확인됨). MVC 비동기는 끊겨도 끝까지 가서 저장한다 (실험 E2 MVC, 코드 확인됨).
 6. **오류 응답은 계약 테스트로 맞춘다**: 웹 계층 코드는 공유하지 않고(API 가 다르다), 기대표 하나(`VerificationErrorContract`, account-infra test fixtures)를 두 앱 테스트가 읽는다. 갈라지면 테스트가 깨진다.
 7. **운영 기본은 MVC 비동기 그대로** — WebFlux 앱은 비교용이다. 측정 뒤에도 유지 (결과 절). 단 MVC 비동기의 콜백 실행기 크기를 정하는 일을 남긴다.
 
 ## 결과
 - **측정** (2026-11-05, 82회 모두 정확성 통과, [측정 결과](../perf/p6-2-web-reactive.md) — 이 PC 기준 상대 비교): 은행 지연 500ms(요청 ≈ 1초) · 초당 400건에서 MVC 블로킹 53.5건/s (k6 시간 초과 4,999건), MVC 비동기 · 코루틴 · Reactor 400.0건/s. 블로킹의 Tomcat 스레드를 200 → 400 으로 늘리면 386.1건/s — 천장은 스레드 수다.
-- **판단 기준 결과**: 본 측정 모든 칸에서 비동기 세 판의 처리량은 도착률 그대로라 **같다** (5% 안). 차이는 스레드 수(코루틴 96 ~ 110 일정, Reactor 약 190, MVC 비동기 63 ~ 163)와 p99(500ms · 400건/s: 1.04 · 1.03 · 1.15초).
+- **판단 기준 결과**: 본 측정 모든 칸에서 비동기 세 판의 처리량은 도착률 그대로라 **같다** (5% 안). 차이는 스레드 수(코루틴 96 ~ 110 일정, Reactor 초당 200건 이상에서 약 190 — 500ms · 200건/s 는 159, MVC 비동기 63 ~ 163)와 p99(500ms · 400건/s: 1.04 · 1.03 · 1.15초).
 - **예상 밖**: MVC 비동기는 초당 800건에서 491건/s · p99 4.3초로 무너졌다. 은행 응답 뒤처리 · 저장을 도는 앱 실행기(Boot 기본 8스레드)가 원인 — `spring.task.execution.pool.core-size=64` 로 같은 칸 800.0건/s · p99 1.7초 (확인 1회). 코루틴 · Reactor 는 800건/s 를 그대로, 1,600건/s 에서 960 · 973건/s 로 PC CPU(같은 PC 의 k6 포함)가 먼저 찼다.
 - **운영 기본 판단**: MVC 비동기 유지. 이 부하까지 WebFlux 와 같고, 별도 앱 · 끊김 취소 비용 · 운영 단위가 하나 더 생기는 것을 감수할 이득이 이 측정에서는 나오지 않았다. 대신 MVC 비동기의 콜백 실행기(크기 · 큐 · 지표)를 따로 정한다 — 기본 8스레드는 은행이 느릴 때 천장이 된다. 한계 탐색의 멈춤 조건 "dropped > 0" 은 측정 구간 처리량이 도착률의 99% 미만일 때만 적용했다 (dropped 는 낮은 부하에도 워밍업 VU 증설 지연으로 생긴다 — 결과 문서 §7-2). 멈춤 조건의 시스템 CPU 80% 도 측정 구간 평균으로 판정했다 (코루틴 800 은 최대 87.5% · 평균 57.8% 라 1,600 으로 진행). 표본이 10개 미만인 칸(블로킹 500ms · 400건/s, Tomcat 400, Reactor 1,600)의 스레드 · CPU 는 확인 — 표본 적음.
 - 검증 (코드 확인됨): 블로킹 대조군은 Tomcat 스레드 2 · 은행 250ms × 2 · 동시 4건에서 1074ms, `join` 을 future 반환으로 바꾸면 546ms 라 테스트가 잡는다 (커밋 01b0185).
