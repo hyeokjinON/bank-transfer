@@ -19,6 +19,8 @@
 - 웹 측정 회차(`load/verification/run.sh`)는 k6 전에 1원인증 3건을 순차로 보낸다 (모든 판). 정확성은 워밍업 뒤 기준값과의 차이로. 결과 JSON 에 `warmup` · `virtual_threads` · `pinned_events`.
 - 두 `run.sh` 의 포트 · PID 찾기를 netstat 에서 `/dev/tcp` 접속 시험 · `jcmd -l` 로 (이 PC 의 netstat 은 0.0.0.0 대기 포트를 보여 주지 않았다).
 - k6 스크립트(`verification.js`)의 요약 파일 경로가 `OUT_SUB` 를 따른다 (기본 `p6-2` 그대로).
+### Changed (머지 후 정리)
+- ADR-0014 채택. 손 확인 결과(가상 스레드로 띄운 개발용 API 에서 1원인증 → 출금 `COMPLETED`, 스레드 덤프로 리스너 · 스케줄러가 가상 스레드임을 확인)를 ADR-0014 · HANDOVER 에. README · ARCHITECTURE · 결과 문서의 "제안" 표기 정리.
 
 ## [P6-2] 웹 1원인증 WebFlux 비교 — 2026-11-06 ([#21](https://github.com/hyeokjinON/bank-transfer/pull/21), 머지 후 정리 [#22](https://github.com/hyeokjinON/bank-transfer/pull/22))
 ### Added

@@ -1,6 +1,6 @@
 # ADR-0014: 가상 스레드 적용 판단 — 성능은 코루틴만큼, Java 21 에서는 기본 끔
 
-- 상태: 제안 (2026-11-09)
+- 상태: 채택 (2026-11-09, [#23](https://github.com/hyeokjinON/bank-transfer/pull/23))
 - 관련: [설계](../superpowers/specs/2026-11-09-p7-virtual-threads-design.md) · [계획](../superpowers/plans/2026-11-09-p7-virtual-threads.md) · [ADR-0012](0012-consumer-coroutines.md) (컨슈머 코루틴) · [ADR-0013](0013-web-verification-webflux-comparison.md) (웹 WebFlux 비교) · [측정 결과](../perf/p7-virtual-threads.md)
 
 ## 맥락
@@ -32,6 +32,7 @@ Boot 4.1.1 에서 설정을 켜면 네 곳이 바뀐다: Tomcat 요청(`TomcatVi
 
 ## 결과
 - **측정** (2026-11-09, 웹 28회 · 컨슈머 6회 모두 정확성 통과, [측정 결과](../perf/p7-virtual-threads.md) — 이 PC 기준 상대 비교): 지연 500ms · 400건/s 에서 블로킹 59.0 → **400.0건/s** (p99 9,967 → 1,033ms), 800건/s 에서 비동기 495.8 → **800.0건/s**, 블로킹 + VT 800.0건/s — 코루틴 판(800.0건/s)과 같다. 플랫폼 스레드 최대는 VT 판 42 로 일정. 컨슈머는 20.7 → 20.6건/s 로 그대로 (은행 최대 동시 3 → 3).
+- **손 확인 (머지 전, 개발 DB · 개발용 모의 은행, 2026-11-09)**: 실행 구성 `2. API (8080)` + `--spring.threads.virtual.enabled=true` → `/actuator/info` `threads.virtual: true`. Postman 으로 한 건씩 `user-p41` 1원인증 `SENT` → `VERIFIED`, 출금 2건 `COMPLETED 0000` (접수 → 완료 0.2 ~ 0.6초). 스레드 덤프(요청 전후): Kafka 리스너 15개(출금 · 재시도 3 · DLT) · `@Scheduled` 2개가 `virtual`, Tomcat 요청 풀 `http-nio-8080-exec-*` 0개 (요청마다 가상 스레드라 상주 풀이 없다), 캐리어 `ForkJoinPool-1-worker-*` 23개 — 기본 병렬도 16 보다 많다 (캐리어 보충으로 추정, 원인 확인 안 함).
 - **해석**: 가상 스레드는 "동시에 기다릴 수 있는 수" 를 스레드 풀 크기에서 풀어 준다 (블로킹 · 실행기 천장이 사라짐). 그러나 동시성을 만들지는 않는다 — 한 건씩 처리하는 컨슈머는 그대로다 (동시성은 P6-1 처럼 코드가 만든다).
 - **풀이 없어진다**: 켜면 Tomcat · 앱 실행기의 풀 크기가 막아 주던 과부하 보호가 사라진다. 은행 · DB 동시 호출은 Hikari(20) · 은행 응답 시간 초과(3초)만 막는다. 켤 때는 동시 호출 상한(세마포어 등)을 함께 정한다 (범위 밖).
 - **다시 볼 조건**: ① Java 24+ (JEP 491 — `synchronized` 안에서도 캐리어를 놓음) 로 올리고 냉시동 재현이 사라지는지 확인, 또는 ② Java 21 그대로라면 기동 워밍업(첫 직렬화기 생성) 뒤에 레디니스를 여는 장치 + 냉시동 재현 시험 + 동시 호출 상한을 함께 넣을 때. 켜자는 결정이 나더라도 기본값 변경은 그 결정의 정리 PR 에서 한다.
