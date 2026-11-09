@@ -223,7 +223,7 @@ P3-1 (PR #3) · P3-2 (PR #5) · P3-3a (PR #7) · P3-3b (PR #9) 모두 머지됐�
 - Spring Batch 6 의 `chunk(size)` 는 트랜잭션 관리자를 넘기지 않으면 트랜잭션이 없다(Resourceless) — 단계마다 명시한다 (`DailyReconJobTest` 가 리플렉션으로 고정).
 - 같은 트랜잭션 안의 "다시 읽기" 는 REPEATABLE READ 에서 첫 읽기의 스냅숏을 본다 — 조건부 UPDATE 0건 뒤 다시 판정하려면 READ COMMITTED (`StatementSettlerIsolationTest`).
 - YAML 1.1 은 `23:50` 을 60진수 정수로 읽는다 — 시각은 따옴표로.
-- JFR `jdk.VirtualThreadPinned` 0건 ≠ 안전. JDK 21 은 이 이벤트를 "모니터를 쥔 채 park" 할 때만, 그것도 park 가 끝날 때 남긴다 — `synchronized` 입장 대기는 세지 않고(`jdk.JavaMonitorEnter` 로 따로) 교착은 0 으로 보인다. 멈춘 앱은 스레드 덤프로 (P7). 리뷰어 · 내 기억 대신 JDK `src.zip` 으로 확인했다.
+- JFR `jdk.VirtualThreadPinned` 0건 ≠ 안전. JDK 21 은 이 이벤트를 "모니터를 쥔 채 park" 할 때만, 그것도 park 가 끝날 때 남긴다 — `synchronized` 입장 대기는 세지 않고(`jdk.JavaMonitorEnter` 로 따로) 교착은 0 으로 보인다. 멈춘 앱은 스레드 덤프로 (P7, JDK `src.zip` 의 `VirtualThread.parkOnCarrierThread` 로 확인).
 - 측정 도구가 "0" 을 내면 그 0 이 집계 실패가 아닌지 본다 — `jfr summary` 실패를 0건으로 쓰던 것을 리뷰에서 잡았다 (P7).
 - 이 PC 의 `netstat -ano` 는 0.0.0.0 대기 포트를 보여 주지 않는다 → 포트 검사는 `/dev/tcp/127.0.0.1/PORT`, PID 는 `jcmd -l` (P7, `load/lib/proc.sh`).
 - `MSYS_NO_PATHCONV=1` 의 Git Bash: `taskkill /F` (`//F` 는 안 먹음), curl JSON 본문은 파일로(`--data-binary @파일`), `-o /dev/null` 은 exit 23 → 작업 폴더 파일로.

@@ -63,7 +63,7 @@ flowchart LR
   L0 -->|한 건 끝나야 다음| B[은행 100ms]
   L1 -->|한 건 끝나야 다음| B
   L2 -->|한 건 끝나야 다음| B
-  B --> R[동시에 기다리는 수 = 3 → 처리량 = 3 ÷ 한 건 약 145ms ≈ 21건/s]
+  B --> R[동시에 기다리는 수 = 3 → 처리량 = 3 ÷ 한 건 약 146ms ≈ 21건/s]
 ```
 - 스레드를 싸게 만들어도 **일을 나눠 주는 쪽(리스너 3개, 한 건씩 순서대로)** 이 그대로라 동시성이 늘지 않는다. P6-1 코루틴 판은 리스너 안에서 은행 호출을 상한 64까지 **동시에 띄워서** 387.3건/s 를 냈다 — 코드를 바꿔야 얻는 동시성이다.
 
@@ -234,7 +234,7 @@ flowchart TD
 flowchart TB
   subgraph C["캐리어 16개 (ForkJoinPool-1-worker-1 ~ 16) — 모두 사용 중"]
     direction LR
-    P1["가상 스레드 15개<br/>SerializerCache.addAndResolveNonTypedSerializer:233<br/>synchronized 입장 대기 → pinned"]
+    P1["가상 스레드 15개<br/>SerializerCache.addAndResolveNonTypedSerializer:233<br/>synchronized 입장 대기 → 캐리어를 붙잡음<br/>(VirtualThreadPinned 이벤트 없음)"]
     P2["가상 스레드 1개 (모니터를 쥔 쪽)<br/>그 안에서 Kotlin 리플렉션 ReentrantLock 대기<br/>parkOnCarrierThread → 캐리어째 멈춤"]
   end
   Q["Kotlin 리플렉션 락(DefaultSimpleLock)을<br/>기다리는 가상 스레드 4개<br/>(unmount 상태로 park)"]
