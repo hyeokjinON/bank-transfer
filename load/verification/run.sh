@@ -5,7 +5,8 @@
 #       k6 요약 · 로그 · 표본은 build/load-p62/<이름>/ (git 제외).
 #
 # 사용 (Git Bash, 저장소 루트):
-#   bash load/verification/run.sh <blocking|async|coroutine|reactor> <지연ms 0~2999> <도착률 1~5000> <회차> [톰캣 최대 스레드=200]
+#   [VT=1] [RAW_SUB=p7] bash load/verification/run.sh <blocking|async|coroutine|reactor> <지연ms 0~2999> <도착률 1~5000> <회차> [톰캣 최대 스레드=200]
+#   VT=1: 가상 스레드 + JFR pinning 집계 (MVC 판만, P7 설계 §6-3). RAW_SUB: 원자료 폴더 docs/perf/raw/<RAW_SUB> (기본 p6-2)
 #   bash load/verification/run.sh cleanup      # 측정이 끝나면 반드시
 # 먼저 (OPERATION §12): infra up (MySQL · Kafka — apps/api 는 리스너를 꺼도 기동 때 Kafka 관리 클라이언트가 붙는다),
 #   ./gradlew :apps:api:bootJar :apps:api-reactive:bootJar :apps:mock-bank:installDist
@@ -47,14 +48,18 @@ esac
 [[ "$ROUND" =~ ^[A-Za-z0-9_-]{1,16}$ ]] || { echo "회차는 영문 · 숫자 · - _ 16자 이내: $ROUND" >&2; exit 2; }
 { [[ "$TOMCAT" =~ ^[0-9]{1,4}$ ]] && [ "$TOMCAT" -ge 1 ]; } || { echo "톰캣 최대 스레드는 1 이상: $TOMCAT" >&2; exit 2; }
 [ "$APP" = api ] || [ "$TOMCAT" = 200 ] || { echo "톰캣 스레드는 MVC 판(blocking · async)에만 준다" >&2; exit 2; }
-NAME="$MODE-d$DELAY-r$RATE"
+. load/lib/vt.sh
+vt_validate "$([ "$APP" = api ] && echo 1 || echo 0)"
+RAW_SUB=${RAW_SUB:-p6-2}; raw_sub_validate "$RAW_SUB"
+NAME="$MODE$(vt_tag)-d$DELAY-r$RATE"
 [ "$TOMCAT" != 200 ] && NAME="$NAME-t$TOMCAT"
 NAME="$NAME-$ROUND"
 RUN=$NAME
-RAW=docs/perf/raw/p6-2
+RAW="docs/perf/raw/$RAW_SUB"
 OUT="$RAW/$NAME.json"
 WORK="build/load-p62/$NAME"
 BANK_FILES="$WORK/bank-files"   # 회차마다 새로 — 1원 이체 수(DV 줄)를 이 회차만 센다. 개발용 ./bank-files 와 따로
+vt_args "$WORK/app.jfr"   # VT=1 이면 VT_JVM_ARGS · VT_APP_ARGS (lib/vt.sh)
 BANK_PORT=9190
 API="http://localhost:$PORT"
 JAR="apps/$APP/build/libs/$APP-0.1.0-SNAPSHOT.jar"
@@ -126,7 +131,7 @@ if [ "$APP" = api ]; then
   ARGS+=(--spring.kafka.listener.auto-startup=false --transfer.outbox.relay.enabled=false --transfer.reconcile.enabled=false
     --daily-recon.schedule.enabled=false --data-retention.schedule.enabled=false --server.tomcat.threads.max="$TOMCAT")
 fi
-java -Xms1g -Xmx1g -Dstdout.encoding=UTF-8 -jar "$JAR" "${ARGS[@]}" > "$WORK/app.log" 2>&1 &
+java -Xms1g -Xmx1g "${VT_JVM_ARGS[@]}" -Dstdout.encoding=UTF-8 -jar "$JAR" "${ARGS[@]}" "${VT_APP_ARGS[@]}" > "$WORK/app.log" 2>&1 &
 APP_PID=$!; OWN_APP=1
 for _ in $(seq 120); do
   curl -sf "$API/actuator/health" >/dev/null 2>&1 && break
@@ -138,6 +143,7 @@ INFO=$(curl -sf "$API/actuator/info") || die "actuator info 를 읽지 못했다
 grep -q "\"web-mode\":\"$MODE\"" <<<"$INFO" || die "앱의 판이 $MODE 가 아니다: $INFO"
 grep -qE "\"maximum-pool-size\":\"?20\"?[,}]" <<<"$INFO" || die "앱의 Hikari 가 20 이 아니다: $INFO"
 if [ "$APP" = api ]; then grep -qE "\"max\":\"?$TOMCAT\"?[,}]" <<<"$INFO" || die "앱의 톰캣 최대 스레드가 $TOMCAT 이 아니다: $INFO"; fi
+if [ "$APP" = api ]; then grep -qE "\"virtual\":\"?$(vt_bool)\"?[,}]" <<<"$INFO" || die "앱의 가상 스레드가 $(vt_bool) 가 아니다: $INFO"; fi
 sleep 3   # 게이트웨이가 측정 은행에 붙을 시간 (첫 접속 · 재접속 1초) — 워밍업 첫 요청의 503 을 줄인다 (워밍업은 집계하지 않는다)
 
 # --- 4. 표본 ---
@@ -155,7 +161,7 @@ echo "[$RUN] 4/6 k6 열린 모델 ${RATE}건/s (워밍업 ${WARMUP_S}s + 측정 
 K6_START=$(date +%s%3N)
 dc --profile load run --rm \
   -e RUN="$NAME" -e BASE_URL="http://host.docker.internal:$PORT" -e RATE="$RATE" \
-  -e WARMUP_S="$WARMUP_S" -e MEASURE_S="$MEASURE_S" \
+  -e WARMUP_S="$WARMUP_S" -e MEASURE_S="$MEASURE_S" -e OUT_SUB="$RAW_SUB" \
   k6 run --quiet /scripts/verification/verification.js
 kill "$SAMPLER" 2>/dev/null || true; SAMPLER=
 K6_JSON="$RAW/$NAME.k6.json"
@@ -163,6 +169,8 @@ K6_JSON="$RAW/$NAME.k6.json"
 mv -f "$K6_JSON" "$WORK/k6.json"
 K6_JSON="$WORK/k6.json"
 WARNS=$(grep -cE " (WARN|ERROR) " "$WORK/app.log" || true)
+PINNED=null
+if [ "${VT:-0}" = 1 ]; then PINNED=$(vt_pinned "$PORT" "$WORK/app.jfr" "$WORK/pinned.txt") || die "JFR 덤프 · pinning 집계 실패 — $WORK"; fi
 stop_pid "$APP_PID"; APP_PID=; free_port "$PORT" || die "앱이 포트 $PORT 를 놓지 않는다"
 stop_pid "$BANK_PID"; BANK_PID=; free_port "$BANK_PORT" || die "모의 은행이 포트 $BANK_PORT 를 놓지 않는다"
 
@@ -187,7 +195,7 @@ RMC=$(( ROWS - CREATED )); OMR=$(( ${ONE_WON:-0} - ROWS ))
 echo "[$RUN] 201 $CREATED · 행 $ROWS · 1원 ${ONE_WON:-0} · 시간 초과 $TIMEOUTS (행−201 $RMC, 1원−행 $OMR)"
 cat > "$OUT" <<EOF
 {
-  "run": "$NAME", "mode": "$MODE", "app": "$APP", "delay_ms": $DELAY, "rate": $RATE, "tomcat_threads": $TOMCAT, "round": "$ROUND",
+  "run": "$NAME", "mode": "$MODE", "app": "$APP", "delay_ms": $DELAY, "rate": $RATE, "tomcat_threads": $TOMCAT, "round": "$ROUND", "virtual_threads": $(vt_bool), "pinned_events": $PINNED,
   "rps_201": $(k rps_201), "p50_201": $(k p50_201), "p95_201": $(k p95_201), "p99_201": $(k p99_201),
   "status_201": $(k status_201), "status_4xx": $(k status_4xx), "status_5xx": $(k status_5xx), "timeouts": $(k timeouts),
   "dropped_iterations": $(k dropped_iterations), "vus_max": $(k vus_max),
@@ -205,4 +213,4 @@ else
   echo "[$RUN] 주의: k6 시간 초과 $TIMEOUTS 건 — 끊김 비용으로 기록 (행−201 $RMC: 끊겨도 저장 / 1원−행 $OMR: 끊겨 1원만)" >&2
 fi
 OK=1
-echo "[$RUN] 끝 — 201 $(k rps_201)건/s · p99 $(k p99_201) ms · 스레드 최대 $THREADS_MAX · 시스템 CPU 평균 $SYS_AVG% → $OUT"
+echo "[$RUN] 끝 — 201 $(k rps_201)건/s · p99 $(k p99_201) ms · 스레드 최대 $THREADS_MAX · pinned $PINNED · 시스템 CPU 평균 $SYS_AVG% → $OUT"

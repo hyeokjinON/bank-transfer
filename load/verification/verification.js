@@ -90,6 +90,6 @@ export function handleSummary(data) {
   return {
     stdout: `[${RUN}] 201 ${f(result.rps_201)}/s · p50 ${f(result.p50_201)} · p95 ${f(result.p95_201)} · p99 ${f(result.p99_201)} ms · ` +
       `시간초과 ${result.timeouts} · dropped ${result.dropped_iterations} · VU 최대 ${result.vus_max}\n`,
-    [`/out/p6-2/${RUN}.k6.json`]: JSON.stringify(result, null, 2),
+    [`/out/${__ENV.OUT_SUB || 'p6-2'}/${RUN}.k6.json`]: JSON.stringify(result, null, 2),   // OUT_SUB = run.sh 의 RAW_SUB (P7)
   };
 }
