@@ -9,7 +9,7 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
-## [P7] 가상 스레드 비교 — 2026-11-09 (PR 링크는 PR 을 연 뒤)
+## [P7] 가상 스레드 비교 — 2026-11-09 ([#23](https://github.com/hyeokjinON/bank-transfer/pull/23))
 ### Added
 - `apps/api` 설정 `spring.threads.virtual.enabled` (기본 `false` 명시)와 `/actuator/info` 의 `threads.virtual`. 켜면 Tomcat 요청 · 앱 실행기 · `@Scheduled` · Kafka 리스너가 가상 스레드 (업무 코드 변경 없음).
 - 테스트 6개: 기본값 고정 2 (`VirtualThreadDefaultTest`), 진행 조건 실험 4 — V1 무엇이 가상 스레드가 되나(탐침), V2 실제 경로 pinning 0 (JFR `RecordingStream` 0ms) · V2 대조(`synchronized` 안 `sleep`), V3 `jvm.threads.live` 는 가상 스레드를 세지 않음. 전체 524개.
