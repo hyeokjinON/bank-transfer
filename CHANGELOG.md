@@ -9,6 +9,17 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
+## [P7] 가상 스레드 비교 — 2026-11-09 ([#23](https://github.com/hyeokjinON/bank-transfer/pull/23))
+### Added
+- `apps/api` 설정 `spring.threads.virtual.enabled` (기본 `false` 명시)와 `/actuator/info` 의 `threads.virtual`. 켜면 Tomcat 요청 · 앱 실행기 · `@Scheduled` · Kafka 리스너가 가상 스레드 (업무 코드 변경 없음).
+- 테스트 6개: 기본값 고정 2 (`VirtualThreadDefaultTest`), 진행 조건 실험 4 — V1 무엇이 가상 스레드가 되나(탐침), V2 실제 경로 pinning 0 (JFR `RecordingStream` 0ms) · V2 대조(`synchronized` 안 `sleep`), V3 `jvm.threads.live` 는 가상 스레드를 세지 않음. 전체 524개.
+- 측정 도구: 두 `run.sh` 에 `VT=1`(앱 인자 + JFR 녹화 → 끝나기 전 `jcmd JFR.dump` → `jdk.VirtualThreadPinned` 집계, MVC 판 · 블로킹 컨슈머만) · `RAW_SUB`(원자료 폴더), 공통 `load/lib/vt.sh` · `load/lib/proc.sh`, 표 `load/p7/summarize.sh`.
+- ADR-0014 (제안), OPERATION §13, [측정 결과](docs/perf/p7-virtual-threads.md) (웹 28회 · 컨슈머 6회 — 원자료 `docs/perf/raw/p7/`). 냉시동 교착 재현 기록 (VT 켬 4/4 멈춤).
+### Changed
+- 웹 측정 회차(`load/verification/run.sh`)는 k6 전에 1원인증 3건을 순차로 보낸다 (모든 판). 정확성은 워밍업 뒤 기준값과의 차이로. 결과 JSON 에 `warmup` · `virtual_threads` · `pinned_events`.
+- 두 `run.sh` 의 포트 · PID 찾기를 netstat 에서 `/dev/tcp` 접속 시험 · `jcmd -l` 로 (이 PC 의 netstat 은 0.0.0.0 대기 포트를 보여 주지 않았다).
+- k6 스크립트(`verification.js`)의 요약 파일 경로가 `OUT_SUB` 를 따른다 (기본 `p6-2` 그대로).
+
 ## [P6-2] 웹 1원인증 WebFlux 비교 — 2026-11-06 ([#21](https://github.com/hyeokjinON/bank-transfer/pull/21), 머지 후 정리 [#22](https://github.com/hyeokjinON/bank-transfer/pull/22))
 ### Added
 - 신규 앱 `apps/api-reactive` (WebFlux, 포트 8081): 1원인증 요청 `POST /api/v1/account-verifications` 하나만, 코루틴 판(`withContext(io)`)과 Reactor 판(`fromFuture` · `publishOn(boundedElastic())`). 클라이언트가 끊으면 취소, 1원 이체 대기 중 끊김은 마스킹한 경고. 설정 `account.verification.web-mode`(`coroutine` 기본 · `reactor`).

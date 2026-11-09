@@ -5,6 +5,9 @@ spring:
     scheduling:
       pool:
         size: 4   # 발행기(0.5초) · 정리 작업(10초) · 일마감 대사(01 ~ 06시) · 보존 배치(06:30, 밀린 행이 많으면 길다)가 서로 막지 않게 (P5-2 에서 3 → 4)
+  threads:
+    virtual:
+      enabled: false   # 가상 스레드 (P7): 켜면 Tomcat 요청 · 앱 실행기 · @Scheduled · Kafka 리스너가 가상 스레드. 기본은 끔 — 켤지는 ADR-0014, 측정은 VT=1 (OPERATION §13)
   mvc:
     problemdetails:
       enabled: true   # ApiExceptionHandler 가 ResponseEntityExceptionHandler 를 상속하므로 표준 오류도 ProblemDetail + code 로 응답한다 (Boot 기본 핸들러는 물러난다. 설정은 명시용으로 유지)
@@ -154,3 +157,5 @@ info:
       max-in-flight-bank-calls: ${transfer.consumer.coroutine.max-in-flight-bank-calls}
   datasource:
     maximum-pool-size: ${spring.datasource.hikari.maximum-pool-size}
+  threads:
+    virtual: ${spring.threads.virtual.enabled}   # 지금 가상 스레드 여부 (P7, load/verification · load/consumer run.sh 가 측정 전에 확인)

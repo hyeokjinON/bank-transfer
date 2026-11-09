@@ -5,7 +5,8 @@
 #       로그 · CPU 표본은 build/load-p61/<이름>/ (git 제외).
 #
 # 사용 (Git Bash, 저장소 루트):
-#   bash load/consumer/run.sh <blocking|coroutine> <지연ms 0~2999> <회차> [상한=64] [hikari=20]
+#   [VT=1] [RAW_SUB=p7] bash load/consumer/run.sh <blocking|coroutine> <지연ms 0~2999> <회차> [상한=64] [hikari=20]
+#   VT=1: 처리 단계 API 를 가상 스레드 + JFR pinning 집계로 (blocking 만, P7 설계 §6-3). RAW_SUB: 원자료 폴더 (기본 p6-1)
 #   bash load/consumer/run.sh cleanup      # 측정이 끝나면 반드시 (아래 경고)
 #   bash load/consumer/run.sh reset-dev-group   # 사람이 직접, 필요할 때만: 개발용 그룹 transfer-processor 의 밀린 오프셋을 끝으로 (아래 경고)
 # 먼저 (OPERATION §11): infra up, ./gradlew :apps:api:bootJar :apps:mock-bank:installDist.
@@ -31,7 +32,7 @@ RUN=consumer
 die() { echo "[$RUN] $*" >&2; exit 1; }
 API_PORT=${API_PORT:-8080}
 DEV_GROUP=transfer-processor   # 개발용 API 의 그룹. 측정은 자기 그룹(아래 GROUP)을 써서 이 그룹의 오프셋은 움직이지 않는다
-port_busy() { netstat -ano 2>/dev/null | grep -E "TCP +[^ ]+:$1 +[^ ]+ +LISTENING" >/dev/null; }
+. load/lib/proc.sh
 cond() { echo "COALESCE($1, '') LIKE 'load-p61-u%' AND COALESCE($1, '') REGEXP '^load-p61-u(00[1-9]|0[1-9][0-9]|100)\$'"; }   # $1 = 컬럼 (t.user_id | user_id) — cleanup.sql 과 같은 엄격한 조건, user_id 가 NULL 인 옛 행도 "측정 사용자 아님"으로 센다
 # 읽기만 하는 사전 확인: 발행기는 측정 사용자가 아닌 미발행 아웃박스도 발행하고, 측정 컨슈머가 그걸 처리해 버린다 → FOREIGN_OUTBOX · FOREIGN_PENDING 를 채운다
 foreign_counts() {
@@ -91,6 +92,9 @@ ROUND=${3:?회차: 1, 2, 3, sweep1 …}
 CAP=${4:-64}
 HIKARI=${5:-20}
 case "$MODE" in blocking|coroutine) ;; *) echo "모르는 모드: $MODE" >&2; exit 2 ;; esac
+. load/lib/vt.sh
+vt_validate "$([ "$MODE" = blocking ] && echo 1 || echo 0)"
+RAW_SUB=${RAW_SUB:-p6-1}; raw_sub_validate "$RAW_SUB"
 { [[ "$DELAY" =~ ^[0-9]{1,4}$ ]] && [ "$DELAY" -le 2999 ]; } || { echo "지연은 0 ~ 2999 (ms): $DELAY" >&2; exit 2; }
 [[ "$ROUND" =~ ^[A-Za-z0-9_-]{1,16}$ ]] || { echo "회차는 영문 · 숫자 · - _ 16자 이내: $ROUND" >&2; exit 2; }
 { [[ "$CAP" =~ ^[0-9]{1,4}$ ]] && [ "$CAP" -ge 1 ] && [ "$CAP" -le 1024 ]; } || { echo "상한은 1 ~ 1024: $CAP" >&2; exit 2; }
@@ -106,25 +110,26 @@ TIMEOUT=${TIMEOUT:-900}
 BANK_PORT=${BANK_PORT:-9190}
 API="http://localhost:$API_PORT"
 GROUP=transfer-processor-p61   # 측정 전용 그룹: 오프셋을 옮겨도 개발용 그룹(transfer-processor)의 밀린 메시지를 건너뛰지 않는다
-if [ "$MODE" = blocking ]; then NAME="blocking-d$DELAY-h$HIKARI-$ROUND"; else NAME="coroutine-d$DELAY-c$CAP-h$HIKARI-$ROUND"; fi
+if [ "$MODE" = blocking ]; then NAME="blocking$(vt_tag)-d$DELAY-h$HIKARI-$ROUND"; else NAME="coroutine-d$DELAY-c$CAP-h$HIKARI-$ROUND"; fi
 RUN=$NAME
-RAW=docs/perf/raw/p6-1
+RAW="docs/perf/raw/$RAW_SUB"
 OUT="$RAW/$NAME.json"
 WORK="build/load-p61/$NAME"
 BANK_FILES="$WORK/bank-files"   # 개발용 ./bank-files 와 따로 — 측정 출금 수천 건이 다음 날 대사에 섞이지 않게 (설계 §6)
+vt_args "$WORK/app.jfr"   # VT=1 이면 VT_JVM_ARGS · VT_APP_ARGS (lib/vt.sh)
 JAR=apps/api/build/libs/api-0.1.0-SNAPSHOT.jar
 BANK_CP="apps/mock-bank/build/install/mock-bank/lib/*"
 [ -f "$JAR" ] || die "API jar 가 없다 — ./gradlew :apps:api:bootJar"
 ls apps/mock-bank/build/install/mock-bank/lib/*.jar >/dev/null 2>&1 || die "모의 은행 배포본이 없다 — ./gradlew :apps:mock-bank:installDist"
 
 # --- 프로세스 · 정리 ---
-API_PID=; BANK_PID=; SAMPLERS=()
+API_PID=; BANK_PID=; SAMPLERS=(); API_JVM_ARGS=()
 OK=0
 STARTED=0   # 이전 결과 파일을 지우는 지점부터 1 — 그 앞에서 멈추면(점검 · 포트 · 사전 확인) 이전 회차 결과를 .invalid 로 바꾸지 않는다
 stop_pid() { [ -n "${1:-}" ] || return 0; kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
-free_port() {   # 그 포트를 쥔 프로세스가 끝날 때까지 (최대 15초). kill 이 듣지 않았으면 Windows PID 로 강제 종료
+free_port() {   # 그 포트를 쥔 프로세스가 끝날 때까지 (최대 15초). kill 이 듣지 않았으면 그 포트의 측정 JVM 을 Windows PID 로 강제 종료 (lib/proc.sh)
   for _ in $(seq 15); do port_busy "$1" || return 0; sleep 1; done
-  local wpid; wpid=$(netstat -ano | grep -E "TCP +[^ ]+:$1 +[^ ]+ +LISTENING" | awk '{ print $NF }' | head -1)
+  local wpid; wpid=$(port_pid "$1")
   [ -n "$wpid" ] && taskkill /F /PID "$wpid" >/dev/null 2>&1 || true
   sleep 1; ! port_busy "$1"
 }
@@ -142,7 +147,7 @@ COMMON=(--server.port="$API_PORT" --bank.gateway.port="$BANK_PORT" --bank.mainte
   --spring.kafka.consumer.group-id="$GROUP" --logging.level.io.github.hyeokjinon.banktransfer=WARN)
 start_api() {   # $1 = 로그 파일, 나머지 = 추가 인자
   local log=$1; shift
-  java -Xms1g -Xmx1g -Dstdout.encoding=UTF-8 -jar "$JAR" "${COMMON[@]}" "$@" > "$log" 2>&1 &
+  java -Xms1g -Xmx1g "${API_JVM_ARGS[@]}" -Dstdout.encoding=UTF-8 -jar "$JAR" "${COMMON[@]}" "$@" > "$log" 2>&1 &
   API_PID=$!
   for _ in $(seq 120); do
     curl -sf "$API/actuator/health" >/dev/null 2>&1 && return 0
@@ -173,6 +178,7 @@ echo "[$RUN] 0/6 사전 확인 — 측정 사용자 밖의 미발행 아웃박�
 mkdir -p "$RAW" "$WORK"
 rm -f "$OUT" "$OUT.invalid"
 STARTED=1
+rm -f "${WORK:?}/app.jfr" "${WORK:?}/pinned.txt"   # 같은 이름으로 다시 돌 때 지난 회차 녹화가 덤프 실패를 가리지 않게
 rm -rf "$BANK_FILES"
 
 # --- 1. 정리 · 시드 ---
@@ -220,14 +226,16 @@ for _ in $(seq 30); do
   sleep 1
 done
 grep -q "mock bank listening on" "$WORK/mock-bank.log" || die "모의 은행이 30초 안에 뜨지 않았다"
+API_JVM_ARGS=("${VT_JVM_ARGS[@]}")   # 발행 단계는 끈 채, 처리 단계만 VT · JFR
 start_api "$WORK/api-process.log" --transfer.outbox.relay.enabled=false \
   --transfer.consumer.mode="$MODE" --transfer.consumer.coroutine.max-in-flight-bank-calls="$CAP" \
   --spring.datasource.hikari.maximum-pool-size="$HIKARI" \
-  --management.endpoints.web.exposure.include=health,info,metrics
+  --management.endpoints.web.exposure.include=health,info,metrics "${VT_APP_ARGS[@]}"
 INFO=$(curl -sf "$API/actuator/info") || die "actuator info 를 읽지 못했다"
 grep -q "\"mode\":\"$MODE\"" <<<"$INFO" || die "앱의 모드가 $MODE 가 아니다: $INFO"
 grep -qE "\"max-in-flight-bank-calls\":\"?$CAP\"?[,}]" <<<"$INFO" || die "앱의 상한이 $CAP 이 아니다: $INFO"
 grep -qE "\"maximum-pool-size\":\"?$HIKARI\"?[,}]" <<<"$INFO" || die "앱의 Hikari 가 $HIKARI 가 아니다: $INFO"
+grep -qE "\"virtual\":\"?$(vt_bool)\"?[,}]" <<<"$INFO" || die "앱의 가상 스레드가 $(vt_bool) 가 아니다: $INFO"
 
 metric() {   # 읽지 못하면 '-' — 빈 값이면 cpu.txt 의 열이 밀린다
   local x; x=$(curl -sf "$API/actuator/metrics/$1" | grep -o '"value":[-0-9.eE+]*' | head -1 | cut -d: -f2 || true)
@@ -254,6 +262,8 @@ sleep 2   # 마지막 표본
 for p in "${SAMPLERS[@]}"; do kill "$p" 2>/dev/null || true; done
 SAMPLERS=()
 WARNS=$(grep -cE " (WARN|ERROR) " "$WORK/api-process.log" || true)
+PINNED=null
+if [ "${VT:-0}" = 1 ]; then PINNED=$(vt_pinned "$API_PORT" "$WORK/app.jfr" "$WORK/pinned.txt") || die "JFR 덤프 · pinning 집계 실패 — $WORK"; fi
 stop_api
 stop_pid "$BANK_PID"; BANK_PID=
 
@@ -276,7 +286,7 @@ read -r KAFKA_AVG KAFKA_MAX < <(docker_stat "$KAFKA_NAME")
 BANK_PEAK=$(grep -o 'mock bank peak pending responses: [0-9]*' "$WORK/mock-bank.log" | tail -1 | grep -o '[0-9]*$' || true)
 cat > "$OUT" <<EOF
 {
-  "run": "$NAME", "mode": "$MODE", "delay_ms": $DELAY, "round": "$ROUND", "cap": $CAP, "hikari": $HIKARI, "n": $N,
+  "run": "$NAME", "mode": "$MODE", "delay_ms": $DELAY, "round": "$ROUND", "virtual_threads": $(vt_bool), "pinned_events": $PINNED, "cap": $CAP, "hikari": $HIKARI, "n": $N,
   "seconds": $DURATION, "tps": $TPS, "p50_ms": $(v p50_ms), "p95_ms": $(v p95_ms),
   "sys_cpu_avg": $SYS_AVG, "sys_cpu_max": $SYS_MAX, "api_cpu_avg": $API_AVG, "api_cpu_max": $API_MAX,
   "mysql_cpu_avg": $MYSQL_AVG, "mysql_cpu_max": $MYSQL_MAX, "kafka_cpu_avg": $KAFKA_AVG, "kafka_cpu_max": $KAFKA_MAX,

@@ -1,0 +1,10 @@
+{
+  "run": "blocking-vt-d500-r400-drift", "mode": "blocking", "app": "api", "delay_ms": 500, "rate": 400, "tomcat_threads": 200, "round": "drift", "warmup": 3, "virtual_threads": true, "pinned_events": 0,
+  "rps_201": 399.9, "p50_201": 1018.570745, "p95_201": 1026.6068094, "p99_201": 1036.97140664,
+  "status_201": 11997, "status_4xx": 0, "status_5xx": 0, "timeouts": 0,
+  "dropped_iterations": 30, "vus_max": 429,
+  "created_all": 15971, "timeouts_all": 0, "rows": 15971, "one_won": 15971,
+  "rows_minus_created": 0, "one_won_minus_rows": 0,
+  "threads_max": 42.0, "sys_cpu_avg": 40.0, "sys_cpu_max": 54.9, "app_cpu_avg": 5.3, "app_cpu_max": 11.6,
+  "samples": 19, "app_warn_error_lines": 5, "code": "dcf35bf"
+}

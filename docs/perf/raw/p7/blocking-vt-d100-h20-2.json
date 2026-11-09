@@ -1,0 +1,7 @@
+{
+  "run": "blocking-vt-d100-h20-2", "mode": "blocking", "delay_ms": 100, "round": "2", "virtual_threads": true, "pinned_events": 0, "cap": 64, "hikari": 20, "n": 1500,
+  "seconds": 72.726, "tps": 20.6, "p50_ms": 117.2, "p95_ms": 126.7,
+  "sys_cpu_avg": 21.0, "sys_cpu_max": 37.8, "api_cpu_avg": 1.8, "api_cpu_max": 7.6,
+  "mysql_cpu_avg": 10.0, "mysql_cpu_max": 12.3, "kafka_cpu_avg": 41.0, "kafka_cpu_max": 191.7,
+  "cpu_samples": 55, "bank_peak": 3, "api_warn_error_lines": 5, "code": "dcf35bf"
+}
