@@ -1,0 +1,10 @@
+{
+  "run": "coroutine-d500-r800-2", "mode": "coroutine", "app": "api-reactive", "delay_ms": 500, "rate": 800, "tomcat_threads": 200, "round": "2", "warmup": 3, "virtual_threads": false, "pinned_events": null,
+  "rps_201": 799.9666666666667, "p50_201": 1042.543224, "p95_201": 1508.6681451, "p99_201": 1597.66913938,
+  "status_201": 23999, "status_4xx": 0, "status_5xx": 0, "timeouts": 0,
+  "dropped_iterations": 674, "vus_max": 1303,
+  "created_all": 31327, "timeouts_all": 0, "rows": 31327, "one_won": 31327,
+  "rows_minus_created": 0, "one_won_minus_rows": 0,
+  "threads_max": 106.0, "sys_cpu_avg": 62.6, "sys_cpu_max": 90.2, "app_cpu_avg": 8.9, "app_cpu_max": 27.7,
+  "samples": 17, "app_warn_error_lines": 0, "code": "dcf35bf"
+}

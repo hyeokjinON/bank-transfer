@@ -1,0 +1,10 @@
+{
+  "run": "blocking-vt-d500-r800-3", "mode": "blocking", "app": "api", "delay_ms": 500, "rate": 800, "tomcat_threads": 200, "round": "3", "warmup": 3, "virtual_threads": true, "pinned_events": 0,
+  "rps_201": 800.0333333333333, "p50_201": 1024.333799, "p95_201": 1094.965916, "p99_201": 1122.271193,
+  "status_201": 24001, "status_4xx": 0, "status_5xx": 0, "timeouts": 0,
+  "dropped_iterations": 424, "vus_max": 1138,
+  "created_all": 31577, "timeouts_all": 0, "rows": 31577, "one_won": 31577,
+  "rows_minus_created": 0, "one_won_minus_rows": 0,
+  "threads_max": 42.0, "sys_cpu_avg": 60.6, "sys_cpu_max": 77.3, "app_cpu_avg": 8.4, "app_cpu_max": 21.8,
+  "samples": 17, "app_warn_error_lines": 5, "code": "dcf35bf"
+}
