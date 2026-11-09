@@ -1,6 +1,6 @@
 # P7 가상 스레드(Virtual Thread) 적용 비교 — 설계
 
-> 상태: 설계 승인 (2026-11-09) · 다음: 구현 계획 · 결정 기록: ADR-0014 (측정 후 작성)
+> 상태: 구현 완료 (2026-11-09) · 결정 기록: [ADR-0014](../../adr/0014-virtual-threads.md) · 결과: [측정 결과](../../perf/p7-virtual-threads.md)
 > 앞 단계: [P6-2 설계](2026-11-05-p6-2-web-reactive-design.md) (네 판 · 측정 격리 · `load/verification`), [P6-1 설계](2026-11-04-p6-1-consumer-coroutines-design.md) (컨슈머 측정 · `load/consumer`), [ADR-0013](../../adr/0013-web-verification-webflux-comparison.md), [ADR-0012](../../adr/0012-consumer-coroutines.md)
 
 ## 1. 목적과 범위

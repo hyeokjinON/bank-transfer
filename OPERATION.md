@@ -525,3 +525,56 @@ bash load/verification/summarize.sh                       # 중앙값 표
 리액티브 앱 로그에 `1원인증 요청 취소 (stage=transfer)` 경고가 보이면 1원 이체 응답을 기다리는 중 클라이언트가 끊은 것이다 (1원이 나갔을 수 있다, 계좌는 끝 4자리만 남는다). 할 일은 없다 — 사용자가 다시 요청한다 (최악에 1원 두 번). 자주 보이면 클라이언트 시간 초과가 은행 응답 시간(게이트웨이 3초)보다 짧은지 본다. 성명조회 중 끊김은 1원이 나가지 않아 경고가 없다 (끊김 테스트가 1원 없음을 확인).
 
 **틈**: 1원 이체 응답을 받은 뒤 저장이 시작되기 전(코루틴 IO 디스패처 대기 · Reactor `publishOn` 큐)에 취소되면 1원은 나갔는데 행도 경고도 없다. 부하가 높으면 넓어진다 (추정), P6-2 측정에서는 관측 없음(`one_won == rows`). 일마감 대사도 1원인증 줄(V 거래번호)은 대조하지 않고 건수만 세므로 개별로 보이지 않는다 — 은행 V 줄 건수와 우리 행 수의 차이로만 짐작한다 (코드 확인됨 / 추정).
+
+## 13. 가상 스레드 측정 (P7)
+가상 스레드는 기본으로 꺼져 있다 ([ADR-0014](docs/adr/0014-virtual-threads.md) — Java 21 에서는 끈 채로). 결과는 [측정 결과](docs/perf/p7-virtual-threads.md) (2026-11-09).
+
+### 13-1. 켜고 끄기
+- 켜기: 앱 인자 `--spring.threads.virtual.enabled=true` (IntelliJ 실행 구성의 프로그램 인자 또는 `java -jar apps/api/build/libs/api-0.1.0-SNAPSHOT.jar --spring.threads.virtual.enabled=true`). 바뀌는 곳: Tomcat 요청 · 앱 실행기 · `@Scheduled` · Kafka 리스너 (실험 V1).
+- 확인: `curl -s localhost:8080/actuator/info` → `"threads":{"virtual":"true"}`.
+- **켠 채로 막 띄운 앱에 동시 요청을 곧바로 몰지 않는다** — Java 21 에서 첫 응답 직렬화기 생성(`synchronized`)에 가상 스레드가 몰려 앱이 통째로 멈출 수 있다 (냉시동 교착, 결과 문서 §6). 손 확인처럼 한 건씩 보내면 괜찮다. 멈췄으면 JFR 이 아니라 **스레드 덤프**로 본다: `jcmd <PID> Thread.dump_to_file -format=text <파일>` (가상 스레드 포함, PID 는 `jcmd -l`).
+
+### 13-2. 측정 한 회
+P6-2 · P6-1 도구(§12 · §11)에 환경변수 두 개가 더해졌다:
+```bash
+RAW_SUB=p7 VT=1 bash load/verification/run.sh blocking 500 400 1   # 웹, MVC 판(blocking · async)만
+RAW_SUB=p7 VT=1 bash load/consumer/run.sh blocking 100 1           # 컨슈머, blocking 만
+bash load/p7/summarize.sh                                           # 웹 · 컨슈머 표 두 개
+```
+- `VT=1`: 앱에 `--spring.threads.virtual.enabled=true`, JVM 에 `-XX:StartFlightRecording=name=p7,settings=default,filename=<작업 폴더>/app.jfr` (pinning 기준 20ms). 앱을 내리기 **전에** `jcmd <PID> JFR.dump` → `jfr summary` 로 `jdk.VirtualThreadPinned` 수를 세어 JSON `pinned_events` 에 넣고, 0 이 아니면 스택을 `<작업 폴더>/pinned.txt` 에 남긴다. 덤프 · 집계가 실패하면 0 으로 쓰지 않고 멈춘다. 그 밖의 판에 `VT=1` 이면 인자 오류(exit 2). 컨슈머는 처리 단계 앱에만 붙인다.
+- `RAW_SUB`: 원자료 폴더 `docs/perf/raw/<RAW_SUB>` (기본: 웹 `p6-2` · 컨슈머 `p6-1`). P7 은 끈 판 · 켠 판 모두 `p7`.
+- 결과 이름에 `-vt` (`blocking-vt-d500-r400-1`, `blocking-vt-d100-h20-1`), JSON 에 `virtual_threads` · `pinned_events`(끈 회차는 `null`) · 웹은 `warmup`.
+- **웹 회차는 k6 전에 1원인증 3건을 순차로 보낸다** (모든 판, 냉시동 교착을 피해 정상 상태를 잰다). 정확성은 워밍업 뒤 기준값과의 차이로 본다.
+- 포트 · PID 찾기는 `load/lib/proc.sh` 다 (`/dev/tcp` 접속 시험 · `jcmd -l`). 이 PC 의 `netstat` 은 0.0.0.0 대기 포트를 보여 주지 않는다 — `load/run.sh`(P4-2)는 아직 netstat 을 쓴다.
+- Git Bash 함정: curl 본문은 파일로 (`--data-binary @파일`, 한글은 `\uXXXX`), `-o /dev/null` 대신 작업 폴더 파일, `taskkill /F` (`//F` 아님).
+
+### 13-3. 측정 순서
+```bash
+export RAW_SUB=p7
+for round in 1 2 3; do
+  bash load/verification/run.sh blocking 500 400 $round
+  VT=1 bash load/verification/run.sh blocking 500 400 $round
+  bash load/verification/run.sh async 500 400 $round
+  VT=1 bash load/verification/run.sh async 500 400 $round
+  bash load/verification/run.sh coroutine 500 400 $round
+  VT=1 bash load/verification/run.sh blocking 500 800 $round
+  bash load/verification/run.sh async 500 800 $round
+  VT=1 bash load/verification/run.sh async 500 800 $round
+  bash load/verification/run.sh coroutine 500 800 $round
+done
+VT=1 bash load/verification/run.sh blocking 500 400 drift
+bash load/verification/run.sh cleanup
+
+# 컨슈머 — 개발용 API(8080)를 끈 뒤
+for round in 1 2 3; do
+  bash load/consumer/run.sh blocking 100 $round
+  VT=1 bash load/consumer/run.sh blocking 100 $round
+done
+bash load/consumer/run.sh cleanup
+```
+- 웹 약 40분, 컨슈머 약 15분. 판단 기준(ADR-0014): pinning 0 · 웹 VT 판 ≥ async(끔) · 컨슈머 ±5%.
+
+### 13-4. 끝난 뒤
+- `cleanup` 두 개는 반드시 (§12 · §11 과 같다 — 측정 사용자 데이터만 지운다).
+- 컨슈머 측정은 개발용 그룹 `transfer-processor` 에 밀린 메시지를 남긴다 — §11 의 `reset-dev-group` 안내를 따른다 (개발용 API 를 끈 채 사람이 직접).
+- 회차별 JFR · 표본 · 로그는 `build/load-p62/<이름>/` · `build/load-p61/<이름>/` 에 남는다 (커밋하지 않음). `jfr print --events jdk.VirtualThreadPinned <app.jfr>` 로 다시 볼 수 있다.

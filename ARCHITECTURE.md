@@ -175,6 +175,7 @@ sequenceDiagram
 - 인증코드는 원문 대신 `SHA-256(id + code)` 로 저장. 유효시간 5분, 실패 5회면 잠금. 시도 횟수는 저장소의 원자적 `update` 로 갱신.
 - 상태: `SENT → VERIFIED | EXPIRED | LOCKED`.
 - 요청 흐름은 네 판이 있다 (P6-2): MVC 비동기(위 그림, 기본) · MVC 블로킹(대조군) · WebFlux 코루틴 · WebFlux Reactor. 판정은 한 벌, 다른 것은 기다리는 방법과 JDBC 를 도는 스레드 — [ADR-0013](docs/adr/0013-web-verification-webflux-comparison.md).
+- `spring.threads.virtual.enabled=true` 면 MVC 두 판의 같은 코드가 가상 스레드에서 돈다 (Tomcat 요청 · 뒤처리 실행기) — 블로킹 판도 Tomcat 200 천장이 사라진다. 기본은 끔: Java 21 에서 냉시동 교착이 확인돼서다 (P7, [ADR-0014](docs/adr/0014-virtual-threads.md)).
 
 ## 4. 은행 연동 (bank-gateway · bank-protocol)
 
@@ -229,6 +230,7 @@ sequenceDiagram
 - 미전송이면 `RECEIVED` 로 되돌리고 컨슈머가 예외를 던진다 → 재시도 토픽(5s · 30s · 60s) → DLT (P3-3b, 아래).
 - 은행 응답 뒤 DB 기록이 실패하면 `SENDING` 으로 남는다 (아래 P3-3a 정리 작업 대상).
 - 컨슈머는 두 판이 있다 (P6-1, [ADR-0012](docs/adr/0012-consumer-coroutines.md)): 위 그림은 기본인 블로킹 판이다. `transfer.consumer.mode=coroutine` 이면 `SuspendingTransferRequestedListener` 가 은행 호출 자리(세마포어 permit)를 잡은 뒤 `begin`(DB, IO 디스패처) → 은행 `await`(스레드를 잡지 않음) 을 하고, 자리를 비운 다음 `finish`(DB, IO 디스패처) 로 같은 판정을 부른다. 자리를 `begin` 보다 먼저 잡는 것은 `SENDING` 인 채 자리를 기다리다 정리 작업이 환불한 뒤 송금되는 일을 막으려는 것이다. 은행 응답 뒤 코드는 Netty 이벤트 루프에서 이어지므로 DB 호출을 거기서 옮긴다. 같은 파티션 안 처리 순서는 지키지 않는다.
+- `spring.threads.virtual.enabled=true` 면 블로킹 판 리스너 컨테이너가 가상 스레드에서 돈다. 리스너가 한 건씩 처리하는 구조는 그대로라 동시에 기다리는 출금도 3 그대로다 (P7, [ADR-0014](docs/adr/0014-virtual-threads.md)).
 - 근거와 한계: [ADR-0005](docs/adr/0005-kafka-delivery-and-consumer-idempotency.md)
 
 ### P3-3a 정리 작업 흐름
@@ -261,7 +263,7 @@ sequenceDiagram
 
 - 정리 작업은 은행에 **다시 보내지 않고 묻기만 한다** (`BankTransferPort` 를 쓰지 않는다). 상태 변경은 모두 조건부라 컨슈머와 겹쳐도 한쪽만 반영된다.
 - 컨슈머가 은행의 확정 결과(완료 · 거절)를 늦게 받으면 `UNKNOWN → COMPLETED/FAILED` 로 기록한다. 이미 반대 결과로 확정돼 있으면 `CONFLICT` 경고만 남긴다.
-- 스케줄러 스레드 4개: 발행기(0.5초) · 정리 작업(10초) · 일마감 대사(01 ~ 06시) · 보존 배치(06:30)가 서로 막지 않는다 (P5-2 에서 3 → 4).
+- 스케줄러 스레드 4개: 발행기(0.5초) · 정리 작업(10초) · 일마감 대사(01 ~ 06시) · 보존 배치(06:30)가 서로 막지 않는다 (P5-2 에서 3 → 4). 가상 스레드를 켜면 풀 크기 대신 작업마다 가상 스레드다 (`SimpleAsyncTaskScheduler`, P7).
 - 근거와 한계: [ADR-0006](docs/adr/0006-inquire-instead-of-resend.md) · 전문 [protocol.md](docs/protocol.md) v0.2
 
 ### P3-3b 재시도 · 재발행 흐름
@@ -401,3 +403,4 @@ flowchart TB
 | [0011](docs/adr/0011-data-retention.md) | 보존 배치는 일회성 데이터 두 종류만 READ COMMITTED 로 나눠 지우고, 금융 기록은 지우지 않는다 |
 | [0012](docs/adr/0012-consumer-coroutines.md) | 출금 컨슈머의 은행 대기를 suspend 리스너로도 만들어 설정으로 고르고, 판정은 한 곳, DB 는 IO 디스패처, 은행 동시 호출 상한 (제안) |
 | [0013](docs/adr/0013-web-verification-webflux-comparison.md) | 웹 1원인증 경로는 네 판(MVC 블로킹 · 비동기, WebFlux 코루틴 · Reactor)을 같은 도구로 비교하고, WebFlux 는 별도 앱, 판정 · 어댑터는 한 벌, 끊기면 취소 (제안) |
+| [0014](docs/adr/0014-virtual-threads.md) | 가상 스레드는 Boot 설정 하나로 켜고, 성능은 코루틴만큼이지만 Java 21 냉시동 교착 때문에 기본은 끈다 (제안) |
