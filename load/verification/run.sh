@@ -149,9 +149,10 @@ sleep 3   # 게이트웨이가 측정 은행에 붙을 시간 (첫 접속 · 재
 # 순차 워밍업 (P7): 새 앱에 동시 요청이 곧바로 몰리면 Java 21 가상 스레드가 첫 직렬화기 생성(synchronized)에서 캐리어를 모두 붙잡아 멈출 수 있다
 # (P7 결과 문서 — 냉시동 교착). 정상 상태를 재려고 판 · VT 와 상관없이 1원인증을 한 건씩 3번 보낸다. 정확성 확인은 워밍업 전후 차이로 한다.
 WARMUP_N=3
-WARMUP_BODY='{"bankCode":"090","accountNo":"1002123456789","holderName":"홍길동"}'   # 홍길동 — Git Bash 의 curl 에 한글을 그대로 넣으면 깨진다
+WARMUP_BODY='{"bankCode":"090","accountNo":"1002123456789","holderName":"\ud64d\uae38\ub3d9"}'   # 홍길동 — JSON \u 이스케이프 (본문을 ASCII 로 유지)
+printf '%s' "$WARMUP_BODY" > "$WORK/warmup.json"   # 본문은 파일로 — Git Bash(MSYS_NO_PATHCONV=1)에서 명령행 인자로 넘기면 JSON 따옴표가 깨져 400
 for w in $(seq "$WARMUP_N"); do
-  code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' -H 'Content-Type: application/json' -H "X-User-Id: p62-u00$w" -d "$WARMUP_BODY" "$API/api/v1/account-verifications") || code=000
+  code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' -H 'Content-Type: application/json' -H "X-User-Id: p62-u00$w" --data-binary @"$WORK/warmup.json" "$API/api/v1/account-verifications") || code=000
   [ "$code" = 201 ] || die "워밍업 $w 번째 요청이 $code (201 이 아니다) — $WORK/app.log"
 done
 ROWS0=$(echo "SELECT COUNT(*) FROM account_verification WHERE $USERS" | sql)
