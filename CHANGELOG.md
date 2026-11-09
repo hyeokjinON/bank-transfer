@@ -22,7 +22,8 @@
 ### Changed (머지 후 정리)
 - ADR-0014 채택. 손 확인 결과(가상 스레드로 띄운 개발용 API 에서 1원인증 → 출금 `COMPLETED`, 스레드 덤프로 리스너 · 스케줄러가 가상 스레드임을 확인)를 ADR-0014 · HANDOVER 에. README · ARCHITECTURE · 결과 문서의 "제안" 표기 정리.
 ### Fixed (머지 후 정리)
-- 진행 조건 실험 V2 가 CI 에서 깨지던 것: 공유 Kafka 프로듀서가 녹화 안에서 처음 만들어지며 kafka-clients `AppInfoParser.registerAppInfo`(`static synchronized`) 안의 버전 로그가 출력 잠금을 기다려 1회성 pinning 1건. 녹화 전에 메시지 한 건으로 프로듀서를 만들어 두고, 실패 메시지의 스택을 8줄에서 40줄로 (ADR-0014 · 결과 문서 §4-4).
+- 진행 조건 실험 V2 가 CI(4코어)에서 깨지던 것: 녹화 안의 1회성 초기화 로그가 출력 잠금을 기다려 pinning — 첫 Kafka 프로듀서 생성(`AppInfoParser.registerAppInfo`, `static synchronized`)과 가상 스레드 리스너의 컨슈머 시작(그룹 합류 · 오프셋 초기화, 캐리어 4개로 로컬 재현). 녹화 전에 프로듀서를 파티션 조회로 만들고 모든 리스너가 첫 fetch 를 보낼 때까지 기다린다. 실패 메시지의 스택은 8줄 → 40줄. 가상 스레드 컨텍스트는 클래스가 끝나면 닫는다 (ADR-0014 · 결과 문서 §4-4).
+- CI `build` 단계: 30분 시간 제한, 20분이 지나도 돌면 JVM 스레드 덤프를 남겨 실패 산출물로 올린다 — P7 PR 의 마지막 실행이 3시간 멈췄는데 덤프가 없어 원인을 확인하지 못했다.
 
 ## [P6-2] 웹 1원인증 WebFlux 비교 — 2026-11-06 ([#21](https://github.com/hyeokjinON/bank-transfer/pull/21), 머지 후 정리 [#22](https://github.com/hyeokjinON/bank-transfer/pull/22))
 ### Added
