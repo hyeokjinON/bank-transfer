@@ -39,9 +39,9 @@ P6 에서 "기다리는 동안 스레드를 놓게" 하려고 코드를 다시 �
 
 | # | 질문 | 방법 | 예상 (추정) | 다르면 |
 |---|---|---|---|---|
-| V1 | 설정을 켜면 무엇이 가상 스레드가 되나 | 네 곳에서 실제로 도는 스레드를 기록해 `Thread.isVirtual()` 확인: Tomcat 요청(blocking 판 1원인증), 앱 실행기(async 판 뒤처리), `@Scheduled`(발행기), Kafka 리스너(블로킹 컨슈머 한 건) | 넷 다 `true` | 바뀌지 않는 곳은 측정 해석 · 결과 문서에서 그 판의 의미를 다시 적는다 |
-| V2 | 실제 경로에 pinning 이 있나 | JDK `jdk.jfr.consumer.RecordingStream` 으로 `jdk.VirtualThreadPinned` 를 **기준 0ms** (측정 기본 20ms 보다 민감하게) 로 켜고, blocking · async 1원인증 각 한 건 + 블로킹 출금 한 건(접수 → 발행 → 컨슈머 → 은행 → `COMPLETED`)을 끝까지 돌린 뒤 이벤트 수를 센다. 추가 의존성 없음 | 0건 | 위치(스택 맨 위 몇 줄)를 기록하고, 단언을 "실제로 이렇다" 로 바꿔 남긴다 (P6-2 E1 과 같은 방식). 측정 해석 · ADR-0014 기준 1 에 반영. 우회 코드는 범위 밖 |
-| V3 | `jvm.threads.live` 가 가상 스레드를 세나 | 가상 스레드 N(=200)개를 래치에 묶어 둔 채 `MeterRegistry` 의 `jvm.threads.live` 를 읽는다 | N 만큼 늘지 않는다 (플랫폼 스레드만 센다) | 결과 문서의 스레드 열 이름 · 해석을 바꾼다 |
+| V1 | 설정을 켜면 무엇이 가상 스레드가 되나 | 네 곳에서 실제로 도는 스레드를 기록해 `Thread.isVirtual()` 확인: Tomcat 요청(1원인증 요청이 지나는 서블릿 필터 — Tomcat 실행기는 판과 상관없이 같다), 앱 실행기(`applicationTaskExecutor` 빈에 작업 하나), `@Scheduled`(테스트용 예약 작업 — 앱과 같은 Boot 스케줄러), Kafka 리스너(테스트용 리스너 — 앱 리스너와 같은 Boot 컨테이너 팩토리) | 넷 다 `true` | 바뀌지 않는 곳은 측정 해석 · 결과 문서에서 그 판의 의미를 다시 적는다 |
+| V2 | 실제 경로에 pinning 이 있나 | JDK `jdk.jfr.consumer.RecordingStream` 으로 `jdk.VirtualThreadPinned` 를 **기준 0ms** (측정 기본 20ms 보다 민감하게) 로 켜고, async 1원인증(HTTP) 한 건 + blocking 1원인증 한 건(블로킹 컨트롤러가 하는 `service.request(...).join()` 을 가상 스레드에서 그대로) + 블로킹 출금 한 건(접수 → 가상 스레드에서 발행 → 컨슈머 → 은행 → `COMPLETED`)을 끝까지 돌린 뒤 이벤트 수를 센다. 같은 녹화 방식으로 `synchronized` 안 `sleep` 이 실제로 잡히는지 보는 대조 테스트를 함께 둔다. 추가 의존성 없음 | 0건 (대조는 1건 이상) | 위치(스택 맨 위 몇 줄)를 기록하고, 단언을 "실제로 이렇다" 로 바꿔 남긴다 (P6-2 E1 과 같은 방식). 측정 해석 · ADR-0014 기준 1 에 반영. 우회 코드는 범위 밖 |
+| V3 | `jvm.threads.live` 가 가상 스레드를 세나 | Micrometer `JvmThreadMetrics` 가 읽는 값(`ThreadMXBean.threadCount`)을, 가상 스레드 200개를 래치에 묶어 둔 채 읽는다 (Spring 컨텍스트 없이) | 200 만큼 늘지 않는다 (플랫폼 스레드만 센다) | 결과 문서의 스레드 열 이름 · 해석을 바꾼다 |
 
 - 실험은 머지 뒤에도 회귀 테스트로 남는다 (P6-1 `SuspendListenerExperimentTest`, P6-2 `WebFluxExperimentTest` 와 같다).
 
@@ -82,8 +82,8 @@ P6 에서 "기다리는 동안 스레드를 놓게" 하려고 코드를 다시 �
   - 앱을 내리기 **전에** `jcmd <PID> JFR.dump name=p7 filename=<WORK>/app.jfr` (강제 종료는 녹화를 남기지 않는다), 이어 `jfr print --events jdk.VirtualThreadPinned` 로 이벤트 수를 세어 JSON `pinned_events` 에 넣는다. 0 이 아니면 스택 맨 위 줄별 수를 `<WORK>/pinned.txt` 에 남긴다
   - 결과 이름에 `-vt` (웹 `blocking-vt-d500-r800-1`, 컨슈머 `blocking-vt-d100-h20-1`), JSON `virtual_threads: true`
 - 웹 `VT=1` 은 MVC 판(blocking · async)에만, 컨슈머 `VT=1` 은 blocking 에만 허용한다 (그 밖은 인자 오류로 멈춤).
-- 원자료 위치를 환경변수 `RAW` 로 바꿀 수 있게 한다 (기본은 각 도구의 기존 경로 `raw/p6-2` · `raw/p6-1` 그대로). P7 측정 절차(OPERATION §13)는 끈 판 · VT 판 모두 `RAW=docs/perf/raw/p7` 로 돌린다. 작업 파일은 `build/load-p62/` · `build/load-p61/` 그대로.
-- `summarize.sh` 두 개: VT 열 · `pinned` 열 추가, "스레드 최대" → "플랫폼 스레드 최대" (V3 결과에 따라).
+- 원자료 폴더를 환경변수 `RAW_SUB` 로 바꿀 수 있게 한다 (`docs/perf/raw/<RAW_SUB>`, 기본은 각 도구의 기존 `p6-2` · `p6-1` 그대로). k6 요약 파일 경로도 같은 값을 따른다. P7 측정 절차(OPERATION §13)는 끈 판 · VT 판 모두 `RAW_SUB=p7` 로 돌린다. 작업 파일은 `build/load-p62/` · `build/load-p61/` 그대로.
+- 표는 새 `load/p7/summarize.sh` 가 `raw/p7` 하나로 웹 · 컨슈머 두 표를 만든다 (VT · `pinned` 열, "플랫폼 스레드 최대"). P6 의 `summarize.sh` 두 개는 고치지 않는다 — P6 결과 문서를 그대로 다시 만들 수 있게.
 - 측정 사용자 · 격리 · 정확성 확인은 P6-2 · P6-1 규칙 그대로 (웹 `p62-u001` ~ `u100`, 컨슈머 `load-p61-u001` ~ `u100`, 끝나면 `cleanup`).
 
 ### 6-4. 한 회차에 기록하는 것 (기존 + 추가)
@@ -114,7 +114,7 @@ P6 에서 "기다리는 동안 스레드를 놓게" 하려고 코드를 다시 �
 | `apps/api` 설정 테스트 | 설정을 주지 않으면 Tomcat 요청 · 앱 실행기가 플랫폼 스레드다 (결정 전까지 기존 동작 고정), `/actuator/info` 에 `threads.virtual` 이 보인다 |
 | 기존 | 518개 그대로 통과. CI 에 Testcontainers 컨텍스트 하나가 늘어난다 |
 
-- **변이 검사** (커밋하지 않고 되돌림): 실험 컨텍스트에서 설정을 빼기 → V1 이 잡아야 한다, V2 경로에 `synchronized` 블록 안 `Thread.sleep` 을 잠깐 넣기 → V2 가 0 이 아니어야 한다 (pinning 검출이 실제로 동작하는지).
+- **변이 검사** (커밋하지 않고 되돌림): 실험 컨텍스트에서 설정을 빼기 → V1 이 잡아야 한다. pinning 검출이 실제로 동작하는지는 V2 의 대조 테스트(`synchronized` 안 `sleep` → 1건 이상)가 늘 확인한다.
 - 측정 도구: `bash -n` 문법 확인, `VT=1` 인자 검사(허용 안 되는 판에서 멈춤), 짧은 시험 회차(`smoke`) 하나씩 — 결과는 `.json` 으로 남기지 않는다.
 - **손 확인** (머지 전): `--spring.threads.virtual.enabled=true` 로 API 를 띄워 1원인증 → 201 → `/confirm` → `VERIFIED` → 출금 → `COMPLETED`. `/actuator/info` 의 `threads.virtual` 확인.
 
