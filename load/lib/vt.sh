@@ -24,14 +24,17 @@ vt_args() {
 }
 # 포트 $1 의 앱 JFR 을 $2 로 덤프하고 jdk.VirtualThreadPinned 수를 표준출력에. 0 이 아니면 스택(맨 위 8줄)을 $3 에. 실패하면 return 1
 vt_pinned() {
-  local port=$1 file=$2 stacks=$3 bin wpid n
+  local port=$1 file=$2 stacks=$3 bin wpid n summary
   bin=$(dirname "$(command -v java)")
   wpid=$(netstat -ano | grep -E "TCP +[^ ]+:$port +[^ ]+ +LISTENING" | awk '{ print $NF }' | head -1)
   [ -n "$wpid" ] || { echo "vt_pinned: 포트 $port 의 PID 를 찾지 못했다" >&2; return 1; }
   "$bin/jcmd" "$wpid" JFR.dump name=p7 filename="$(pwd -W)/$file" >/dev/null || return 1
-  n=$("$bin/jfr" summary "$file" | tr -d '\r' | awk '$1 == "jdk.VirtualThreadPinned" { print $2 }')
+  [ -s "$file" ] || { echo "vt_pinned: 덤프 파일이 없다: $file" >&2; return 1; }
+  summary=$("$bin/jfr" summary "$file") || { echo "vt_pinned: jfr summary 실패" >&2; return 1; }
+  grep -q "jdk\." <<<"$summary" || { echo "vt_pinned: jfr summary 출력이 이상하다" >&2; return 1; }
+  n=$(tr -d '\r' <<<"$summary" | awk '$1 == "jdk.VirtualThreadPinned" { print $2 }')
   n=${n:-0}
   [[ "$n" =~ ^[0-9]+$ ]] || { echo "vt_pinned: 이벤트 수를 읽지 못했다: $n" >&2; return 1; }
-  if [ "$n" != 0 ]; then "$bin/jfr" print --events jdk.VirtualThreadPinned --stack-depth 8 "$file" > "$stacks"; fi
+  if [ "$n" != 0 ]; then "$bin/jfr" print --events jdk.VirtualThreadPinned --stack-depth 8 "$file" > "$stacks" || echo "vt_pinned: 스택 출력 실패 (수는 기록함)" >&2; fi
   echo "$n"
 }

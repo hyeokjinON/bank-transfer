@@ -11,7 +11,7 @@ median() { awk '/^[-+]?[0-9]/' | sort -g | awk '{ v[NR] = $1 } END { if (NR == 0
 maxv() { awk '/^[-+]?[0-9]/' | sort -g | awk 'END { if (NR == 0) print "-"; else print $1 }'; }
 fmt() { if [[ "$1" =~ ^[-+]?[0-9] ]]; then printf "%.${2}f" "$1"; else printf -- "-"; fi; }
 maxdev() { awk '/^[-+]?[0-9]/' | awk -v m="$1" '{ d = (m == 0) ? 0 : ($1 - m) / m * 100; if (d < 0) d = -d; if (d > x) x = d } END { printf "%.0f", x }'; }
-files() { ls "$RAW/$1-"[0-9]*.json 2>/dev/null || true; }   # $1 = 회차 앞까지의 이름
+files() { { ls "$RAW/$1-"[0-9]*.json 2>/dev/null | grep -v '\.k6\.json$'; } || true; }   # $1 = 회차 앞까지의 이름
 med() { local k=$1; shift; for f in "$@"; do num "$f" "$k"; done | median; }
 mx() { local k=$1; shift; for f in "$@"; do num "$f" "$k"; done | maxv; }
 
