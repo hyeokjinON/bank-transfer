@@ -15,14 +15,26 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v6
+      # 평소 6분 안팎. 멈추면 6시간이 아니라 30분에 실패하게 하고, 20분이 지나도 돌고 있으면 JVM 스레드 덤프를 남긴다
+      # (P7 머지 뒤 테스트 JVM 이 3시간 멈춘 일이 있다 — 덤프가 없어 원인 미확인. 가상 스레드까지 보이게 Thread.dump_to_file)
       - name: Build and test
-        run: ./gradlew build --no-daemon
+        timeout-minutes: 30
+        run: |
+          ( sleep 1200; mkdir -p build/hang-dumps
+            for p in $(jps -q); do jcmd "$p" Thread.dump_to_file -format=text "$PWD/build/hang-dumps/$p.txt" || true; done
+          ) > /dev/null 2>&1 &
+          WATCH=$!
+          status=0; ./gradlew build --no-daemon || status=$?
+          kill "$WATCH" 2>/dev/null || true
+          exit "$status"
       - name: Upload test reports
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v6
         with:
           name: test-reports
-          path: '**/build/reports/tests/'
+          path: |
+            **/build/reports/tests/
+            build/hang-dumps/
 
   # 로컬 인프라 파일(infra/docker-compose.yml)이 실제로 뜨고 읽기/쓰기가 되는지 확인 (ADR-0003)
   infra-smoke:

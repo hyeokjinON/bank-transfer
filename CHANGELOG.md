@@ -9,7 +9,7 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
-## [P7] 가상 스레드 비교 — 2026-11-09 ([#23](https://github.com/hyeokjinON/bank-transfer/pull/23))
+## [P7] 가상 스레드 비교 — 2026-11-09 ([#23](https://github.com/hyeokjinON/bank-transfer/pull/23), 머지 후 정리 [#24](https://github.com/hyeokjinON/bank-transfer/pull/24))
 ### Added
 - `apps/api` 설정 `spring.threads.virtual.enabled` (기본 `false` 명시)와 `/actuator/info` 의 `threads.virtual`. 켜면 Tomcat 요청 · 앱 실행기 · `@Scheduled` · Kafka 리스너가 가상 스레드 (업무 코드 변경 없음).
 - 테스트 6개: 기본값 고정 2 (`VirtualThreadDefaultTest`), 진행 조건 실험 4 — V1 무엇이 가상 스레드가 되나(탐침), V2 실제 경로 pinning 0 (JFR `RecordingStream` 0ms) · V2 대조(`synchronized` 안 `sleep`), V3 `jvm.threads.live` 는 가상 스레드를 세지 않음. 전체 524개.
@@ -19,6 +19,11 @@
 - 웹 측정 회차(`load/verification/run.sh`)는 k6 전에 1원인증 3건을 순차로 보낸다 (모든 판). 정확성은 워밍업 뒤 기준값과의 차이로. 결과 JSON 에 `warmup` · `virtual_threads` · `pinned_events`.
 - 두 `run.sh` 의 포트 · PID 찾기를 netstat 에서 `/dev/tcp` 접속 시험 · `jcmd -l` 로 (이 PC 의 netstat 은 0.0.0.0 대기 포트를 보여 주지 않았다).
 - k6 스크립트(`verification.js`)의 요약 파일 경로가 `OUT_SUB` 를 따른다 (기본 `p6-2` 그대로).
+### Changed (머지 후 정리)
+- ADR-0014 채택. 손 확인 결과(가상 스레드로 띄운 개발용 API 에서 1원인증 → 출금 `COMPLETED`, 스레드 덤프로 리스너 · 스케줄러가 가상 스레드임을 확인)를 ADR-0014 · HANDOVER 에. README · ARCHITECTURE · 결과 문서의 "제안" 표기 정리.
+### Fixed (머지 후 정리)
+- 진행 조건 실험 V2 가 CI(4코어)에서 깨지던 것: 녹화 안의 1회성 초기화 로그가 출력 잠금을 기다려 pinning — 첫 Kafka 프로듀서 생성(`AppInfoParser.registerAppInfo`, `static synchronized`)과 가상 스레드 리스너의 컨슈머 시작(그룹 합류 · 오프셋 초기화, 캐리어 4개로 로컬 재현). 녹화 전에 프로듀서를 파티션 조회로 만들고 모든 리스너가 첫 fetch 를 보낼 때까지 기다린다. 실패 메시지의 스택은 8줄 → 40줄. 가상 스레드 컨텍스트는 클래스가 끝나면 닫는다 (ADR-0014 · 결과 문서 §4-4).
+- CI `build` 단계: 30분 시간 제한, 20분이 지나도 돌면 JVM 스레드 덤프를 남겨 실패 산출물로 올린다 — P7 PR 의 마지막 실행이 3시간 멈췄는데 덤프가 없어 원인을 확인하지 못했다.
 
 ## [P6-2] 웹 1원인증 WebFlux 비교 — 2026-11-06 ([#21](https://github.com/hyeokjinON/bank-transfer/pull/21), 머지 후 정리 [#22](https://github.com/hyeokjinON/bank-transfer/pull/22))
 ### Added
