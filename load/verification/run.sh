@@ -152,8 +152,9 @@ WARMUP_N=3
 WARMUP_BODY='{"bankCode":"090","accountNo":"1002123456789","holderName":"\ud64d\uae38\ub3d9"}'   # 홍길동 — JSON \u 이스케이프 (본문을 ASCII 로 유지)
 printf '%s' "$WARMUP_BODY" > "$WORK/warmup.json"   # 본문은 파일로 — Git Bash(MSYS_NO_PATHCONV=1)에서 명령행 인자로 넘기면 JSON 따옴표가 깨져 400
 for w in $(seq "$WARMUP_N"); do
-  code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' -H 'Content-Type: application/json' -H "X-User-Id: p62-u00$w" --data-binary @"$WORK/warmup.json" "$API/api/v1/account-verifications") || code=000
-  [ "$code" = 201 ] || die "워밍업 $w 번째 요청이 $code (201 이 아니다) — $WORK/app.log"
+  # -o /dev/null 은 MSYS_NO_PATHCONV=1 에서 Windows curl 이 열지 못한다 (exit 23)
+  code=$(curl -s -o "$WORK/warmup-response.json" -m 10 -w '%{http_code}' -H 'Content-Type: application/json' -H "X-User-Id: p62-u00$w" --data-binary @"$WORK/warmup.json" "$API/api/v1/account-verifications") || code=000
+  [ "$code" = 201 ] || die "워밍업 $w 번째 요청이 $code (201 이 아니다) — $WORK/warmup-response.json · $WORK/app.log"
 done
 ROWS0=$(echo "SELECT COUNT(*) FROM account_verification WHERE $USERS" | sql)
 journal() { cat "$BANK_FILES"/journal/*.log 2>/dev/null || true; }
