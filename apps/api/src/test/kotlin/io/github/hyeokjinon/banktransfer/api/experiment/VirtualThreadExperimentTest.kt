@@ -44,7 +44,8 @@ import kotlin.test.assertTrue
  * P7 진행 조건 실험 V1 · V2 (설계 §4). `spring.threads.virtual.enabled=true` 컨텍스트 — 설정이 달라 새 컨텍스트(컨테이너도 새로)가 뜬다.
  * V1: Tomcat 요청 · 앱 실행기 · 예약 작업 · Kafka 리스너가 가상 스레드인지. 예약 작업 · 리스너는 테스트용 탐침이다 — 앱 것과 같은 Boot 스케줄러 ·
  *     컨테이너 팩토리를 쓴다 (앱에 직접 만든 팩토리가 없다). Tomcat 실행기는 웹 판과 상관없이 같아 기본 판(async) 요청으로 본다.
- * V2: JFR jdk.VirtualThreadPinned 를 기준 0ms 로 켜고 실제 경로를 돌린다. 블로킹 판은 컨트롤러가 하는 일(service.request(...).join())을
+ * V2: JFR jdk.VirtualThreadPinned(JDK 21 은 모니터를 쥔 채 park 할 때만 남긴다 — synchronized 입장 대기는 세지 않는다)를 기준 0ms 로 켜고
+ *     요청을 한 건씩 실제 경로로 돌린다 (경합은 만들지 않는다). 블로킹 판은 컨트롤러의 서비스 호출(service.request(...).join())을
  *     가상 스레드에서 그대로 부른다 (Tomcat 요청 스레드 = 가상 스레드인 것은 V1 이 본다). 대조 테스트는 검출이 실제로 동작하는지 본다.
  *     확인된 1회성 pinning: 첫 요청의 DispatcherServlet 초기화(Tomcat StandardWrapper.allocate 의 synchronized 안)에서 로그가 출력 잠금을 기다리면
  *     캐리어를 붙잡는다 (Gradle 테스트 출력 잠금에서 재현). 그래서 V2 는 녹화 전에 요청 한 번으로 초기화를 끝내 둔다. 운영에서는
@@ -125,7 +126,7 @@ class VirtualThreadExperimentTest : ApiIntegrationTest() {
         assertEquals(201, requestVerification(newUserId()).status)
         val pinned = recordPinned {
             assertEquals(201, requestVerification(newUserId()).status)   // async 판: Tomcat 요청 · 앱 실행기 뒤처리
-            inVirtualThread {   // blocking 판이 하는 일 그대로 (BlockingVerificationRequestController)
+            inVirtualThread {   // blocking 판 컨트롤러(BlockingVerificationRequestController)의 서비스 호출 부분 — HTTP 응답 직렬화는 거치지 않는다
                 service.request(RequestVerification(newUserId(), "090", ACCOUNT, "홍길동")).join()
             }
             val user = fundedUser()

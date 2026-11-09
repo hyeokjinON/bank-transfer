@@ -14,7 +14,7 @@
 
 | 기준 | 결과 | 판정 |
 |---|---|---|
-| 1. 실험 V2 와 측정 회차 모두 pinning 0건 | V2(0ms) · 측정 VT 회차(20ms) 0건. 그러나 **냉시동 교착 4/4** (아래) | 불충족 |
+| 1. 실험 V2 와 측정 회차 모두 pinning 0건 | park 중 pinning(`jdk.VirtualThreadPinned`)은 V2(0ms) · 측정 VT 회차(20ms) 0건. 그러나 **냉시동 교착 4/4** (아래), 측정 회차에도 가상 스레드의 모니터 입장 대기 2건 | 불충족 |
 | 2. 웹 모든 칸에서 VT 판 처리량 ≥ async(끔) | 400건/s: 400.0 · 399.1 vs 399.8 (같다), 800건/s: 800.0 · 800.0 vs 495.8 | 충족 |
 | 3. 컨슈머 VT 처리량이 끈 판의 ±5% 안 | 20.6 vs 20.7건/s (−0.5%) | 충족 |
 
@@ -24,9 +24,11 @@
 Boot 4.1.1 에서 설정을 켜면 네 곳이 바뀐다: Tomcat 요청(`TomcatVirtualThreadsWebServerFactoryCustomizer`, 요청마다 가상 스레드 — `server.tomcat.threads.max` 가 천장이 아니게 된다), 앱 실행기 `applicationTaskExecutor`(`SimpleAsyncTaskExecutor`, 풀 없음), `@Scheduled`(`SimpleAsyncTaskScheduler`), Kafka 리스너 컨테이너. Netty 게이트웨이 이벤트 루프 · Hikari · Kafka 클라이언트 내부 스레드는 그대로다 (추정).
 
 ## pinning (실험 V2 · 측정 · 재현)
-- **정상 상태 0건**: JFR `jdk.VirtualThreadPinned` 를 기준 0ms 로 켜고 async · blocking 1원인증, 블로킹 출금(발행 → 컨슈머 → 은행 → `COMPLETED`)을 돌려 0건. 대조(`synchronized` 안 `sleep`) 1 ~ 3건으로 검출이 동작함을 함께 확인 (확인).
+- **JFR 이 세는 범위**: JDK 21 에서 `jdk.VirtualThreadPinned` 를 만드는 곳은 `VirtualThread.parkOnCarrierThread` 하나다 (JDK `src.zip` 확인) — **모니터를 쥔 채 park** 할 때만 남고, `synchronized` **입장 대기**로 캐리어를 붙잡는 것은 남지 않는다. 입장 대기는 `jdk.JavaMonitorEnter` 로 따로 본다.
+- **park 중 pinning 0건**: JFR `jdk.VirtualThreadPinned` 를 기준 0ms 로 켜고 async · blocking 1원인증, 블로킹 출금(발행 → 컨슈머 → 은행 → `COMPLETED`)을 돌려 0건. 대조(`synchronized` 안 `sleep`) 1 ~ 3건으로 검출이 동작함을 함께 확인 (확인).
 - **1회성**: 첫 요청의 `DispatcherServlet` 초기화가 Tomcat `StandardWrapper.allocate` 의 `synchronized` 안에서 돌아, 그 안의 로그가 출력 잠금을 기다리면 pinned 된다 (테스트에서 확인). `spring.mvc.servlet.load-on-startup` 으로 피할 수 있다 (추정).
-- **냉시동 교착 (핵심 발견)**: 막 뜬 앱에 동시 요청이 곧바로 몰리면 앱이 통째로 멈췄다 — VT 켬 4/4, 끔 2/2 정상, 데운 VT 앱 정상 (확인). 스레드 덤프: 가상 스레드 하나가 Jackson 3 `SerializerCache` 의 모니터를 쥔 채 Kotlin 리플렉션 `ReentrantLock` 을 기다리며 캐리어째 멈추고(`parkOnCarrierThread`), 나머지 15개는 그 모니터 입장을 기다리며 캐리어를 붙잡아 캐리어 16개가 모두 묶였다. 락을 이어받아 진행할 가상 스레드가 올라탈 캐리어가 없다 (덤프 확인 · 마지막 고리는 추정). JFR pinning 이벤트는 풀릴 때 기록돼 이 교착은 **0건으로 보인다** — "JFR 0건 = 안전" 이 아니다.
+- **냉시동 교착 (핵심 발견)**: 막 뜬 앱에 동시 요청이 곧바로 몰리면 앱이 통째로 멈췄다 — VT 켬 4/4, 끔 2/2 정상, 데운 VT 앱 정상 (확인). 스레드 덤프: 가상 스레드 하나가 Jackson 3 `SerializerCache` 의 모니터를 쥔 채 Kotlin 리플렉션 `ReentrantLock` 을 기다리며 캐리어째 멈추고(`parkOnCarrierThread`), 나머지 15개는 그 모니터 입장을 기다리며 캐리어를 붙잡아 캐리어 16개가 모두 묶였다. 같은 락을 기다리는 가상 스레드 4개는 내려와 park 중이고, 락이 넘어가도 다음 대기자가 올라탈 캐리어가 없다 (덤프 확인 · 마지막 고리는 추정). 입장 대기 15개는 `VirtualThreadPinned` 를 만들지 않고, 모니터를 쥔 1개는 park 가 끝나지 않아 기록되지 않는다 — 이 교착은 JFR pinning **0건으로 보인다**. "JFR 0건 = 안전" 이 아니다.
+- **측정 회차의 모니터 입장 대기** (사후 집계, `jdk.JavaMonitorEnter` 20ms 이상): VT 웹 13회 0건, 컨슈머 VT 1회차에 가상 리스너 스레드 2건(각 22.6ms, Hibernate 첫 UPDATE 쿼리 번역의 `synchronized`). "처음 한 번" 라이브러리 초기화라는 점에서 냉시동 교착과 같은 모양이다 (추정). 워밍업이 모든 "처음" 을 덮지는 못한다 — 처음 보는 오류 응답이 몰리는 순간 등 (추정).
 
 ## 결과
 - **측정** (2026-11-09, 웹 28회 · 컨슈머 6회 모두 정확성 통과, [측정 결과](../perf/p7-virtual-threads.md) — 이 PC 기준 상대 비교): 지연 500ms · 400건/s 에서 블로킹 59.0 → **400.0건/s** (p99 9,967 → 1,033ms), 800건/s 에서 비동기 495.8 → **800.0건/s**, 블로킹 + VT 800.0건/s — 코루틴 판(800.0건/s)과 같다. 플랫폼 스레드 최대는 VT 판 42 로 일정. 컨슈머는 20.7 → 20.6건/s 로 그대로 (은행 최대 동시 3 → 3).

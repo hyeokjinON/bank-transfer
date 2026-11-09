@@ -532,7 +532,7 @@ bash load/verification/summarize.sh                       # 중앙값 표
 ### 13-1. 켜고 끄기
 - 켜기: 앱 인자 `--spring.threads.virtual.enabled=true` (IntelliJ 실행 구성의 프로그램 인자 또는 `java -jar apps/api/build/libs/api-0.1.0-SNAPSHOT.jar --spring.threads.virtual.enabled=true`). 바뀌는 곳: Tomcat 요청 · 앱 실행기 · `@Scheduled` · Kafka 리스너 (실험 V1).
 - 확인: `curl -s localhost:8080/actuator/info` → `"threads":{"virtual":"true"}`.
-- **켠 채로 막 띄운 앱에 동시 요청을 곧바로 몰지 않는다** — Java 21 에서 첫 응답 직렬화기 생성(`synchronized`)에 가상 스레드가 몰려 앱이 통째로 멈출 수 있다 (냉시동 교착, 결과 문서 §6). 손 확인처럼 한 건씩 보내면 괜찮다. 멈췄으면 JFR 이 아니라 **스레드 덤프**로 본다: `jcmd <PID> Thread.dump_to_file -format=text <파일>` (가상 스레드 포함, PID 는 `jcmd -l`).
+- **켠 채로 막 띄운 앱에 동시 요청을 곧바로 몰지 않는다** — Java 21 에서 첫 응답 직렬화기 생성(`synchronized`)에 가상 스레드가 몰려 앱이 통째로 멈출 수 있다 (냉시동 교착, 결과 문서 §6). 손 확인처럼 한 건씩 보내면 괜찮다 — 단 냉시동만의 문제가 아닐 수 있다: 처음 보는 타입을 직렬화하는 순간(예: 처음 보는 오류 응답이 몰릴 때) 동시 요청이 캐리어 수(논리 코어 수)를 넘으면 같은 모양이 날 수 있다 (추정). 멈췄으면 JFR(`jdk.VirtualThreadPinned` 는 `synchronized` 입장 대기를 세지 않는다)이 아니라 **스레드 덤프**로 본다: `jcmd <PID> Thread.dump_to_file -format=text <파일>` (가상 스레드 포함, PID 는 `jcmd -l`).
 
 ### 13-2. 측정 한 회
 P6-2 · P6-1 도구(§12 · §11)에 환경변수 두 개가 더해졌다:

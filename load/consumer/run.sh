@@ -178,6 +178,7 @@ echo "[$RUN] 0/6 사전 확인 — 측정 사용자 밖의 미발행 아웃박�
 mkdir -p "$RAW" "$WORK"
 rm -f "$OUT" "$OUT.invalid"
 STARTED=1
+rm -f "${WORK:?}/app.jfr" "${WORK:?}/pinned.txt"   # 같은 이름으로 다시 돌 때 지난 회차 녹화가 덤프 실패를 가리지 않게
 rm -rf "$BANK_FILES"
 
 # --- 1. 정리 · 시드 ---

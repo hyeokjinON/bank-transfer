@@ -79,7 +79,7 @@ P6 에서 "기다리는 동안 스레드를 놓게" 하려고 코드를 다시 �
 - 두 `run.sh` 에 환경변수 `VT=1` (기본 0). 켜면:
   - 앱 인자 `--spring.threads.virtual.enabled=true`, 사전 확인에서 `/actuator/info` 의 `threads.virtual` 이 `true` 인지 확인 (끈 회차는 `false` 인지)
   - JVM 인자 `-XX:StartFlightRecording=name=p7,settings=default,filename=<WORK>/app.jfr` — JDK 21 `default.jfc` 는 `jdk.VirtualThreadPinned` 를 기준 20ms 로 켠다
-  - 앱을 내리기 **전에** `jcmd <PID> JFR.dump name=p7 filename=<WORK>/app.jfr` (강제 종료는 녹화를 남기지 않는다), 이어 `jfr print --events jdk.VirtualThreadPinned` 로 이벤트 수를 세어 JSON `pinned_events` 에 넣는다. 0 이 아니면 스택 맨 위 줄별 수를 `<WORK>/pinned.txt` 에 남긴다
+  - 앱을 내리기 **전에** `jcmd <PID> JFR.dump name=p7 filename=<WORK>/app.jfr` (강제 종료는 녹화를 남기지 않는다), 이어 `jfr summary` 로 `jdk.VirtualThreadPinned` 이벤트 수를 세어 JSON `pinned_events` 에 넣는다. 0 이 아니면 `jfr print --events jdk.VirtualThreadPinned --stack-depth 8` 의 스택을 `<WORK>/pinned.txt` 에 남긴다 (구현 중 조정)
   - 결과 이름에 `-vt` (웹 `blocking-vt-d500-r800-1`, 컨슈머 `blocking-vt-d100-h20-1`), JSON `virtual_threads: true`
 - 웹 `VT=1` 은 MVC 판(blocking · async)에만, 컨슈머 `VT=1` 은 blocking 에만 허용한다 (그 밖은 인자 오류로 멈춤).
 - 원자료 폴더를 환경변수 `RAW_SUB` 로 바꿀 수 있게 한다 (`docs/perf/raw/<RAW_SUB>`, 기본은 각 도구의 기존 `p6-2` · `p6-1` 그대로). k6 요약 파일 경로도 같은 값을 따른다. P7 측정 절차(OPERATION §13)는 끈 판 · VT 판 모두 `RAW_SUB=p7` 로 돌린다. 작업 파일은 `build/load-p62/` · `build/load-p61/` 그대로.

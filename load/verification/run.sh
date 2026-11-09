@@ -101,6 +101,7 @@ mkdir -p "$RAW" "$WORK"
 # 변수가 비면 멈추게 :? 를 쓴다 (빈 변수로 엉뚱한 경로를 지우지 않게)
 rm -f "${OUT:?}" "${OUT:?}.invalid" "${RAW:?}/${NAME:?}.k6.json"
 STARTED=1
+rm -f "${WORK:?}/app.jfr" "${WORK:?}/pinned.txt"   # 같은 이름으로 다시 돌 때 지난 회차 녹화가 덤프 실패를 가리지 않게
 rm -rf "${BANK_FILES:?}"
 
 # --- 1. 정리 ---
