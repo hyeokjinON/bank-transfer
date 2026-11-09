@@ -48,7 +48,8 @@ import kotlin.test.assertTrue
  *     요청을 한 건씩 실제 경로로 돌린다 (경합은 만들지 않는다). 블로킹 판은 컨트롤러의 서비스 호출(service.request(...).join())을
  *     가상 스레드에서 그대로 부른다 (Tomcat 요청 스레드 = 가상 스레드인 것은 V1 이 본다). 대조 테스트는 검출이 실제로 동작하는지 본다.
  *     확인된 1회성 pinning: 첫 요청의 DispatcherServlet 초기화(Tomcat StandardWrapper.allocate 의 synchronized 안)에서 로그가 출력 잠금을 기다리면
- *     캐리어를 붙잡는다 (Gradle 테스트 출력 잠금에서 재현). 그래서 V2 는 녹화 전에 요청 한 번으로 초기화를 끝내 둔다. 운영에서는
+ *     캐리어를 붙잡는다 (Gradle 테스트 출력 잠금에서 재현). 공유 Kafka 프로듀서의 첫 생성(AppInfoParser.registerAppInfo, static synchronized
+ *     안의 버전 로그)도 같은 모양이다 (CI 에서 확인). 그래서 V2 는 녹화 전에 요청 한 번 · 메시지 한 건으로 둘 다 끝내 둔다. 운영에서는
  *     spring.mvc.servlet.load-on-startup 으로 기동 때 초기화해 피할 수 있다 (P7 범위 밖, ADR-0014).
  * 결과는 ADR-0014 · 결과 문서에 옮긴다.
  */
@@ -124,6 +125,9 @@ class VirtualThreadExperimentTest : ApiIntegrationTest() {
         // 첫 요청의 DispatcherServlet 지연 초기화는 Tomcat StandardWrapper.allocate 의 synchronized 안에서 돈다 —
         // 그 안의 로그가 출력 잠금에서 기다리면 pinning 이 잡힌다 (1회성, 이 실험에서 확인). 정상 상태의 요청 경로만 보려고 녹화 전에 한 번 끝내 둔다.
         assertEquals(201, requestVerification(newUserId()).status)
+        // 공유 Kafka 프로듀서도 녹화 전에 만든다 — 첫 생성은 kafka-clients AppInfoParser.registerAppInfo(static synchronized) 안에서
+        // "Kafka version" 로그를 남겨, 출력 잠금을 기다리면 같은 1회성 pinning 이 잡힌다 (CI 에서 2ms 1건, 이 클래스는 V2 가 V1 보다 먼저 돈다).
+        kafka.send(PROBE_TOPIC, "warmup").get(10, TimeUnit.SECONDS)
         val pinned = recordPinned {
             assertEquals(201, requestVerification(newUserId()).status)   // async 판: Tomcat 요청 · 앱 실행기 뒤처리
             inVirtualThread {   // blocking 판 컨트롤러(BlockingVerificationRequestController)의 서비스 호출 부분 — HTTP 응답 직렬화는 거치지 않는다
@@ -190,5 +194,5 @@ class VirtualThreadExperimentTest : ApiIntegrationTest() {
     }
 
     private fun describe(e: RecordedEvent): String =
-        "${e.duration.toMillis()}ms\n" + (e.stackTrace?.frames?.take(8)?.joinToString("\n") { "    ${it.method.type.name}.${it.method.name}:${it.lineNumber}" } ?: "    (스택 없음)")
+        "${e.duration.toMillis()}ms\n" + (e.stackTrace?.frames?.take(40)?.joinToString("\n") { "    ${it.method.type.name}.${it.method.name}:${it.lineNumber}" } ?: "    (스택 없음)")
 }

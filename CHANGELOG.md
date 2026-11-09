@@ -21,6 +21,8 @@
 - k6 스크립트(`verification.js`)의 요약 파일 경로가 `OUT_SUB` 를 따른다 (기본 `p6-2` 그대로).
 ### Changed (머지 후 정리)
 - ADR-0014 채택. 손 확인 결과(가상 스레드로 띄운 개발용 API 에서 1원인증 → 출금 `COMPLETED`, 스레드 덤프로 리스너 · 스케줄러가 가상 스레드임을 확인)를 ADR-0014 · HANDOVER 에. README · ARCHITECTURE · 결과 문서의 "제안" 표기 정리.
+### Fixed (머지 후 정리)
+- 진행 조건 실험 V2 가 CI 에서 깨지던 것: 공유 Kafka 프로듀서가 녹화 안에서 처음 만들어지며 kafka-clients `AppInfoParser.registerAppInfo`(`static synchronized`) 안의 버전 로그가 출력 잠금을 기다려 1회성 pinning 1건. 녹화 전에 메시지 한 건으로 프로듀서를 만들어 두고, 실패 메시지의 스택을 8줄에서 40줄로 (ADR-0014 · 결과 문서 §4-4).
 
 ## [P6-2] 웹 1원인증 WebFlux 비교 — 2026-11-06 ([#21](https://github.com/hyeokjinON/bank-transfer/pull/21), 머지 후 정리 [#22](https://github.com/hyeokjinON/bank-transfer/pull/22))
 ### Added
