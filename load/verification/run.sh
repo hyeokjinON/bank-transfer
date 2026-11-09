@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# P6-2 웹 1원인증 측정 1회 (설계 §6): 정리 → 측정용 모의 은행(지연) → 앱(판) → k6 열린 모델(워밍업 10초 + 측정 30초) → 정확성.
+# P6-2 웹 1원인증 측정 1회 (설계 §6): 정리 → 측정용 모의 은행(지연) → 앱(판) → 순차 워밍업 3건 → k6 열린 모델(워밍업 10초 + 측정 30초) → 정확성.
 # 결과: docs/perf/raw/p6-2/<이름>.json (이름 = <판>-d<지연>-r<도착률>[-t<톰캣>]-<회차>).
 #       정확성 확인을 통과하기 전에 끝나면(어긋남 · 오류 · Ctrl+C) .json.invalid 로 바꾼다 — summarize.sh 는 .json 만 읽는다.
 #       k6 요약 · 로그 · 표본은 build/load-p62/<이름>/ (git 제외).
@@ -24,7 +24,7 @@ dc() { docker compose -f infra/docker-compose.yml --env-file "$ENV_FILE" "$@"; }
 sql() { dc exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" exec mysql -u"$MYSQL_USER" "$MYSQL_DATABASE" --default-character-set=utf8mb4 -N'; }
 RUN=verification
 die() { echo "[$RUN] $*" >&2; exit 1; }
-port_busy() { netstat -ano 2>/dev/null | grep -E "TCP +[^ ]+:$1 +[^ ]+ +LISTENING" >/dev/null; }
+. load/lib/proc.sh
 USERS="user_id LIKE 'p62-u%' AND user_id REGEXP '^p62-u(00[1-9]|0[1-9][0-9]|100)\$'"   # cleanup.sql 과 같은 조건
 
 if [ "${1:-}" = cleanup ]; then
@@ -75,9 +75,9 @@ OWN_APP=0; OWN_BANK=0   # 이 실행이 그 포트에서 프로세스를 띄운 
 OK=0
 STARTED=0   # 이전 결과를 지우는 지점부터 1 — 그 앞에서 멈추면 이전 회차 결과를 .invalid 로 바꾸지 않는다
 stop_pid() { [ -n "${1:-}" ] || return 0; kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
-free_port() {   # 그 포트를 쥔 프로세스가 끝날 때까지 (최대 15초). kill 이 듣지 않았으면 Windows PID 로 강제 종료 (load/consumer/run.sh 와 같다)
+free_port() {   # 그 포트를 쥔 프로세스가 끝날 때까지 (최대 15초). kill 이 듣지 않았으면 그 포트의 측정 JVM 을 Windows PID 로 강제 종료 (lib/proc.sh, load/consumer/run.sh 와 같다)
   for _ in $(seq 15); do port_busy "$1" || return 0; sleep 1; done
-  local wpid; wpid=$(netstat -ano | grep -E "TCP +[^ ]+:$1 +[^ ]+ +LISTENING" | awk '{ print $NF }' | head -1)
+  local wpid; wpid=$(port_pid "$1")
   [ -n "$wpid" ] && taskkill /F /PID "$wpid" >/dev/null 2>&1 || true
   sleep 1; ! port_busy "$1"
 }
@@ -146,6 +146,18 @@ if [ "$APP" = api ]; then grep -qE "\"max\":\"?$TOMCAT\"?[,}]" <<<"$INFO" || die
 if [ "$APP" = api ]; then grep -qE "\"virtual\":\"?$(vt_bool)\"?[,}]" <<<"$INFO" || die "앱의 가상 스레드가 $(vt_bool) 가 아니다: $INFO"; fi
 sleep 3   # 게이트웨이가 측정 은행에 붙을 시간 (첫 접속 · 재접속 1초) — 워밍업 첫 요청의 503 을 줄인다 (워밍업은 집계하지 않는다)
 
+# 순차 워밍업 (P7): 새 앱에 동시 요청이 곧바로 몰리면 Java 21 가상 스레드가 첫 직렬화기 생성(synchronized)에서 캐리어를 모두 붙잡아 멈출 수 있다
+# (P7 결과 문서 — 냉시동 교착). 정상 상태를 재려고 판 · VT 와 상관없이 1원인증을 한 건씩 3번 보낸다. 정확성 확인은 워밍업 전후 차이로 한다.
+WARMUP_N=3
+WARMUP_BODY='{"bankCode":"090","accountNo":"1002123456789","holderName":"홍길동"}'   # 홍길동 — Git Bash 의 curl 에 한글을 그대로 넣으면 깨진다
+for w in $(seq "$WARMUP_N"); do
+  code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' -H 'Content-Type: application/json' -H "X-User-Id: p62-u00$w" -d "$WARMUP_BODY" "$API/api/v1/account-verifications") || code=000
+  [ "$code" = 201 ] || die "워밍업 $w 번째 요청이 $code (201 이 아니다) — $WORK/app.log"
+done
+ROWS0=$(echo "SELECT COUNT(*) FROM account_verification WHERE $USERS" | sql)
+journal() { cat "$BANK_FILES"/journal/*.log 2>/dev/null || true; }
+ONE_WON0=$(journal | grep -c '^DV' || true)
+
 # --- 4. 표본 ---
 # 1초 쉬고 지표 3개를 차례로 읽는다 (정확히 1초 간격이 아니다). 읽는 곳이 측정 대상 앱의 액추에이터라 앱이 포화되면
 # 같은 서버를 거쳐 표본이 크게 성겨진다 (P6-2: 포화 칸 1 ~ 5개) — 그래서 curl 에 시간 제한을 둔다. 관리 포트 분리는 범위 밖.
@@ -187,15 +199,14 @@ read -r _ THREADS_MAX _ < <(stat 4 1)
 
 # --- 7. 정확성 (스펙과 다른 점 5) ---
 echo "[$RUN] 6/6 정확성"
-ROWS=$(echo "SELECT COUNT(*) FROM account_verification WHERE $USERS" | sql)
-journal() { cat "$BANK_FILES"/journal/*.log 2>/dev/null || true; }
-ONE_WON=$(journal | grep -c '^DV' || true)
+ROWS=$(( $(echo "SELECT COUNT(*) FROM account_verification WHERE $USERS" | sql) - ROWS0 ))
+ONE_WON=$(( $(journal | grep -c '^DV' || true) - ${ONE_WON0:-0} ))
 CREATED=$(k created_all); TIMEOUTS=$(k timeouts_all)
 RMC=$(( ROWS - CREATED )); OMR=$(( ${ONE_WON:-0} - ROWS ))
 echo "[$RUN] 201 $CREATED · 행 $ROWS · 1원 ${ONE_WON:-0} · 시간 초과 $TIMEOUTS (행−201 $RMC, 1원−행 $OMR)"
 cat > "$OUT" <<EOF
 {
-  "run": "$NAME", "mode": "$MODE", "app": "$APP", "delay_ms": $DELAY, "rate": $RATE, "tomcat_threads": $TOMCAT, "round": "$ROUND", "virtual_threads": $(vt_bool), "pinned_events": $PINNED,
+  "run": "$NAME", "mode": "$MODE", "app": "$APP", "delay_ms": $DELAY, "rate": $RATE, "tomcat_threads": $TOMCAT, "round": "$ROUND", "warmup": $WARMUP_N, "virtual_threads": $(vt_bool), "pinned_events": $PINNED,
   "rps_201": $(k rps_201), "p50_201": $(k p50_201), "p95_201": $(k p95_201), "p99_201": $(k p99_201),
   "status_201": $(k status_201), "status_4xx": $(k status_4xx), "status_5xx": $(k status_5xx), "timeouts": $(k timeouts),
   "dropped_iterations": $(k dropped_iterations), "vus_max": $(k vus_max),

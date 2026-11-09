@@ -32,7 +32,7 @@ RUN=consumer
 die() { echo "[$RUN] $*" >&2; exit 1; }
 API_PORT=${API_PORT:-8080}
 DEV_GROUP=transfer-processor   # 개발용 API 의 그룹. 측정은 자기 그룹(아래 GROUP)을 써서 이 그룹의 오프셋은 움직이지 않는다
-port_busy() { netstat -ano 2>/dev/null | grep -E "TCP +[^ ]+:$1 +[^ ]+ +LISTENING" >/dev/null; }
+. load/lib/proc.sh
 cond() { echo "COALESCE($1, '') LIKE 'load-p61-u%' AND COALESCE($1, '') REGEXP '^load-p61-u(00[1-9]|0[1-9][0-9]|100)\$'"; }   # $1 = 컬럼 (t.user_id | user_id) — cleanup.sql 과 같은 엄격한 조건, user_id 가 NULL 인 옛 행도 "측정 사용자 아님"으로 센다
 # 읽기만 하는 사전 확인: 발행기는 측정 사용자가 아닌 미발행 아웃박스도 발행하고, 측정 컨슈머가 그걸 처리해 버린다 → FOREIGN_OUTBOX · FOREIGN_PENDING 를 채운다
 foreign_counts() {
@@ -127,9 +127,9 @@ API_PID=; BANK_PID=; SAMPLERS=(); API_JVM_ARGS=()
 OK=0
 STARTED=0   # 이전 결과 파일을 지우는 지점부터 1 — 그 앞에서 멈추면(점검 · 포트 · 사전 확인) 이전 회차 결과를 .invalid 로 바꾸지 않는다
 stop_pid() { [ -n "${1:-}" ] || return 0; kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
-free_port() {   # 그 포트를 쥔 프로세스가 끝날 때까지 (최대 15초). kill 이 듣지 않았으면 Windows PID 로 강제 종료
+free_port() {   # 그 포트를 쥔 프로세스가 끝날 때까지 (최대 15초). kill 이 듣지 않았으면 그 포트의 측정 JVM 을 Windows PID 로 강제 종료 (lib/proc.sh)
   for _ in $(seq 15); do port_busy "$1" || return 0; sleep 1; done
-  local wpid; wpid=$(netstat -ano | grep -E "TCP +[^ ]+:$1 +[^ ]+ +LISTENING" | awk '{ print $NF }' | head -1)
+  local wpid; wpid=$(port_pid "$1")
   [ -n "$wpid" ] && taskkill /F /PID "$wpid" >/dev/null 2>&1 || true
   sleep 1; ! port_busy "$1"
 }
