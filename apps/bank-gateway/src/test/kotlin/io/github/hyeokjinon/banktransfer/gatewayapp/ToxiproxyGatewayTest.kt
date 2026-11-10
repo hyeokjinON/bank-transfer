@@ -25,6 +25,7 @@ import java.util.UUID
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -36,7 +37,7 @@ import kotlin.test.assertTrue
 class ToxiproxyGatewayTest {
 
     companion object {
-        private val bank = MockBankServer().start()
+        private lateinit var bank: MockBankServer   // Docker 가 없어 테스트가 꺼진 실행에서는 은행 서버도 띄우지 않는다
         private lateinit var app: ConfigurableApplicationContext
         private lateinit var toxiproxy: ToxiproxyContainer
         private lateinit var proxy: Proxy
@@ -45,6 +46,7 @@ class ToxiproxyGatewayTest {
         @JvmStatic
         @BeforeAll
         fun up() {
+            bank = MockBankServer().start()
             app = GatewayApps.start(WebApplicationType.REACTIVE, bank.boundPort)
             Testcontainers.exposeHostPorts(app.port())                       // 컨테이너가 host.testcontainers.internal 로 이 JVM 의 게이트웨이에 닿게
             toxiproxy = ToxiproxyContainer("ghcr.io/shopify/toxiproxy:2.9.0").also { it.start() }
@@ -56,7 +58,12 @@ class ToxiproxyGatewayTest {
 
         @JvmStatic
         @AfterAll
-        fun down() { toxiproxy.stop(); app.close(); bank.close() }
+        fun down() {
+            // 셋업이 중간에 실패해도 가능한 것은 모두 닫는다 — 하나의 close 가 다른 close 를 막지 않게
+            if (::toxiproxy.isInitialized) runCatching { toxiproxy.stop() }
+            if (::app.isInitialized) runCatching { app.close() }
+            if (::bank.isInitialized) runCatching { bank.close() }
+        }
     }
 
     private val client = WebClientBankGateway(HttpGatewaySettings(baseUrl = baseUrl, responseTimeout = Duration.ofSeconds(2)))
@@ -79,9 +86,12 @@ class ToxiproxyGatewayTest {
     fun `응답이 막히면 모름 - 은행에는 한 번만 갔다`() {
         proxy.toxics().timeout("cut", ToxicDirection.DOWNSTREAM, 0)       // 응답 방향을 막는다 (요청은 통과)
         val r = ref()
-        val e = (runCatching { client.transfer("090", "1002123456789", 1_000, "TX2", r).get(5, TimeUnit.SECONDS) }.exceptionOrNull() as ExecutionException).cause!!
+        val e = assertFailsWith<ExecutionException> { client.transfer("090", "1002123456789", 1_000, "TX2", r).get(5, TimeUnit.SECONDS) }.cause
         assertIs<BankUnavailableException>(e)
         assertTrue(e !is BankNotSentException)
-        await.atMost(Duration.ofSeconds(3)) untilAsserted { assertEquals(1, bank.depositsOf("1002123456789").count { it.reference == r }) }
+        val sent = { bank.depositsOf("1002123456789").count { it.reference == r } }
+        await.atMost(Duration.ofSeconds(3)) untilAsserted { assertEquals(1, sent()) }
+        // 클라이언트 응답 타임아웃(2초)을 넘겨서도 1 이어야 한다 — 뒤늦은 재전송이 없다
+        await.during(Duration.ofSeconds(3)).atMost(Duration.ofSeconds(5)) untilAsserted { assertEquals(1, sent()) }
     }
 }
