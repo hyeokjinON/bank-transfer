@@ -14,7 +14,7 @@ interface HttpBankGateway : BankGateway, AutoCloseable {
         fun create(kind: String, settings: HttpGatewaySettings): HttpBankGateway = when (kind) {
             WEBCLIENT -> WebClientBankGateway(settings)
             JDK -> JdkHttpBankGateway(settings)
-            else -> throw IllegalArgumentException("unknown http client '$kind' (webclient | jdk)")
+            else -> throw IllegalArgumentException("unknown http client '$kind' (${KINDS.joinToString(" | ")})")
         }
     }
 }
