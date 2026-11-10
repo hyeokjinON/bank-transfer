@@ -59,10 +59,23 @@ import kotlin.test.assertTrue
  *     가상 스레드 리스너의 컨슈머 시작(그룹 합류 · 오프셋 초기화)도 Kafka 컨슈머의 synchronized 안 로그로 pinning 을 만든다 (캐리어 4개에서 재현).
  *     요청 경로가 아니라서 V2 는 리스너가 모두 파티션을 받고 첫 fetch 를 보낸 뒤 녹화한다.
  * 이 컨텍스트(가상 스레드 리스너 약 16개 + 자기 Kafka 컨테이너)는 클래스가 끝나면 닫는다 — 캐리어가 적은 CI(4코어)에서 남은 테스트 내내
- * 가상 스레드 리스너가 돌지 않게 (P7 머지 뒤 CI 가 이 클래스 다음에서 멈춘 일이 있다 — 원인 미확인).
+ * 가상 스레드 리스너가 돌지 않게.
+ * Kafka 로그는 이 컨텍스트에서만 WARN 으로 낮춘다 (P8-1 정리 PR #26 CI 멈춤, 스레드 덤프로 확인): 컨텍스트를 닫을 때 가상 스레드 컨슈머 약 16개가
+ * 한꺼번에 close 하면서 Kafka 의 synchronized 안(AppInfoParser.unregisterAppInfo — static synchronized, AbstractCoordinator.close 의
+ * synchronized 블록과 그 안에서 불리는 Spring 리밸런스 콜백)에서 INFO 로그를 찍는다. JDK 21 에서는 모니터를 쥔 가상 스레드가 logback 출력
+ * 잠금(ReentrantLock)을 기다리면 캐리어를 놓지 못하고, 모니터 입장 대기도 캐리어를 붙잡아 30분 동안 아무것도 진행되지 않았다
+ * (테스트 스레드는 프로듀서 close 의 같은 AppInfoParser 모니터에서 대기). 냉시동 교착(ADR-0014)과 같은 모양이다. 잠금 안에서 로그를 찍는
+ * 경로 자체를 없앤다 — 이 실험이 보는 것(스레드 종류 · 요청 경로 pinning)에는 Kafka INFO 로그가 필요 없다. P7 머지 뒤 이 클래스 다음에서
+ * 멈춘 일도 같은 원인으로 본다 (그때는 덤프가 없었다 — 추정).
  * 결과는 ADR-0014 · 결과 문서에 옮긴다.
  */
-@TestPropertySource(properties = ["spring.threads.virtual.enabled=true"])
+@TestPropertySource(
+    properties = [
+        "spring.threads.virtual.enabled=true",
+        "logging.level.org.apache.kafka=WARN",
+        "logging.level.org.springframework.kafka=WARN",
+    ],
+)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Import(VirtualThreadExperimentTest.Probes::class)
 class VirtualThreadExperimentTest : ApiIntegrationTest() {

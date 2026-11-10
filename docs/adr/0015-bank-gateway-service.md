@@ -1,6 +1,6 @@
 # ADR-0015: 은행 게이트웨이를 별도 서비스로 분리 — 동기 HTTP, 실패 분류 유지, 기본은 직결
 
-- 상태: 제안 (2026-11-10) — 머지 뒤 정리 PR 에서 "채택"
+- 상태: 채택 (2026-11-10, [#25](https://github.com/hyeokjinON/bank-transfer/pull/25))
 - 관련: [설계](../superpowers/specs/2026-11-10-p8-1-gateway-split-design.md) · [계획](../superpowers/plans/2026-11-10-p8-1-gateway-split.md) · [ADR-0001](0001-modular-monolith-ports.md) (모듈러 모놀리스, 분리 예고) · [ADR-0006](0006-inquire-instead-of-resend.md) (모르면 다시 보내지 않고 조회) · [ADR-0007](0007-retry-topic-and-bounded-republish.md) (재시도 토픽) · [ADR-0012](0012-consumer-coroutines.md) (처리량은 동시 대기 수) · [측정 결과](../perf/p8-1-gateway-split.md)
 
 ## 맥락
