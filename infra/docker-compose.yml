@@ -91,6 +91,18 @@ services:
       kafka:
         condition: service_healthy
 
+  # 망 지연 · 끊김 주입 (P8-1). 기본 실행에는 포함 안 됨 — 측정 스크립트(load/lib/gateway.sh)가 쓴다:
+  #   docker compose -f infra/docker-compose.yml --env-file infra/.env --profile chaos up -d toxiproxy
+  # 제어 API :8474 (프록시 · toxic 만들기), 프록시 :28082 → PC 에서 띄운 측정용 게이트웨이(host.docker.internal:18082)
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.9.0
+    profiles: ["chaos"]
+    ports:
+      - "8474:8474"
+      - "28082:28082"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # 리눅스(CI)에서도 PC(호스트)를 이 이름으로 (Docker Desktop 은 기본 제공)
+
   # 부하 측정 (P4-2). 기본 실행에는 포함 안 됨 — load/run.sh 가 부른다:
   #   docker compose -f infra/docker-compose.yml --env-file infra/.env --profile load run --rm k6 run /scripts/hotspot.js
   # 스크립트는 load/, 요약 JSON 은 docs/perf/raw/ 로 나온다. 대상은 PC 에서 띄운 앱(host.docker.internal:8080)

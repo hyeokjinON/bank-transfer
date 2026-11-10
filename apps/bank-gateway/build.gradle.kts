@@ -22,6 +22,9 @@ dependencies {
     testImplementation(testFixtures(project(":modules:bank-gateway-http")))   // TcpCutProxy
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.awaitility:awaitility-kotlin")
+    testImplementation("org.testcontainers:testcontainers-toxiproxy")   // 버전은 Boot BOM (Testcontainers 2.0.5)
+    testImplementation("org.testcontainers:testcontainers-junit-jupiter")
+    testImplementation("eu.rekawek.toxiproxy:toxiproxy-java:2.1.7")    // Toxiproxy 제어 클라이언트 (BOM 밖 — 버전 고정)
 }
 
 tasks.withType<Test> {
