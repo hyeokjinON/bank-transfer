@@ -14,7 +14,7 @@ vt_validate() {   # $1 = 이 판에 VT=1 을 허용하면 1
 vt_bool() { if [ "${VT:-0}" = 1 ]; then echo true; else echo false; fi; }
 vt_tag() { if [ "${VT:-0}" = 1 ]; then echo "-vt"; fi; }
 raw_sub_validate() {   # $1 = RAW_SUB 값
-  [[ "$1" =~ ^p[0-9]+(-[0-9]+)?$ ]] || { echo "RAW_SUB 은 p7 · p6-2 처럼: $1" >&2; exit 2; }
+  [[ "$1" =~ ^p[0-9]+(-[0-9]+)?(-try)?$ ]] || { echo "RAW_SUB 은 p7 · p6-2 · p8-1-try 처럼: $1" >&2; exit 2; }
 }
 # 배열 VT_JVM_ARGS · VT_APP_ARGS 를 채운다 (VT=0 이면 빈 배열). $1 = JFR 파일 (저장소 루트 기준 상대 경로)
 vt_args() {
