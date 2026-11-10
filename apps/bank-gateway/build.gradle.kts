@@ -13,6 +13,7 @@ dependencies {
     implementation(project(":modules:bank-gateway-http"))   // 계약 DTO · 오류 코드 · JSON
 
     implementation("org.springframework.boot:spring-boot-starter-webflux")
+    implementation("org.springframework.boot:spring-boot-starter-webmvc")   // servlet 판 (MVC 비동기, P8-1 비교). 둘 다 있으면 web-application-type 이 고른다
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("tools.jackson.module:jackson-module-kotlin")

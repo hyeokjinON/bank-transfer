@@ -7,6 +7,9 @@ spring:
     name: bank-gateway
   main:
     web-application-type: reactive   # reactive = WebFlux 판(기본) | servlet = MVC 비동기 판 (P8-1 비교)
+  mvc:
+    async:
+      request-timeout: 30s     # servlet 판만. 은행 응답 시간 초과(3s)보다 길게 — 먼저 끊으면 은행 결과를 버린다
 
 bank:
   gateway:                     # api 의 direct 모드와 같은 값

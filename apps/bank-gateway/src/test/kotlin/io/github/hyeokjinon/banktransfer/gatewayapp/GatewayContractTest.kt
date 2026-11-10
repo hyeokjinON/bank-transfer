@@ -44,6 +44,9 @@ class GatewayContractTest {
         @JvmStatic
         fun combos() = listOf(
             Combo(WebApplicationType.REACTIVE, HttpBankGateway.WEBCLIENT),
+            Combo(WebApplicationType.REACTIVE, HttpBankGateway.JDK),
+            Combo(WebApplicationType.SERVLET, HttpBankGateway.WEBCLIENT),
+            Combo(WebApplicationType.SERVLET, HttpBankGateway.JDK),
         )
 
         val bank: MockBankServer = MockBankServer(silentAccounts = setOf(SILENT)).start()
