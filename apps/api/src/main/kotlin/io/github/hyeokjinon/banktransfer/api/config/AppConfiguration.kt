@@ -76,7 +76,7 @@ data class BankGatewayProperties(
         const val DIRECT = "direct"
         const val HTTP = "http"
         val MODES = listOf(DIRECT, HTTP)
-        val CLIENTS = listOf(HttpBankGateway.WEBCLIENT)
+        val CLIENTS = HttpBankGateway.KINDS
     }
 }
 
@@ -120,7 +120,7 @@ data class VerificationProperties(
  * 조립(wiring)은 여기서만 한다. account 모듈은 BankPort 인터페이스만 알고,
  * BankPort 를 은행 게이트웨이(BankGateway — direct: Netty 직결, http: 게이트웨이 앱)에 붙이는 건 이 어댑터다 (포트-어댑터 구조).
  *
- * 은행 응답 future 는 Netty(direct) · Reactor(http) 이벤트 루프가 완료한다. 그 뒤의 처리(DB 저장 등 블로킹)가 이벤트 루프에서 돌지 않도록
+ * 은행 응답 future 는 은행 게이트웨이 구현의 I/O 스레드(Netty 이벤트 루프 · HTTP 클라이언트 스레드)가 완료한다. 그 뒤의 처리(DB 저장 등 블로킹)가 이벤트 루프에서 돌지 않도록
  * thenApplyAsync 로 앱 실행기에 넘긴다. 이벤트 루프가 막히면 같은 루프의 모든 은행 통신이 멈춘다.
  */
 class BankGatewayAdapter(
@@ -176,8 +176,8 @@ class AppConfiguration {
     @Bean(destroyMethod = "close")
     @ConditionalOnProperty(prefix = "bank.gateway", name = ["mode"], havingValue = BankGatewayProperties.HTTP)
     fun httpBankGateway(props: BankGatewayProperties): HttpBankGateway {
-        if (props.http.responseTimeout < Duration.ofSeconds(5)) {
-            log.warn("bank.gateway.http.response-timeout={} is shorter than 5s (gateway bank timeout 3s + margin) — more results will be unknown", props.http.responseTimeout)
+        if (props.http.responseTimeout < HttpGatewaySettings.RECOMMENDED_MIN_RESPONSE_TIMEOUT) {
+            log.warn("bank.gateway.http.response-timeout={} is shorter than {} (gateway bank timeout 3s + margin) — more results will be unknown", props.http.responseTimeout, HttpGatewaySettings.RECOMMENDED_MIN_RESPONSE_TIMEOUT)
         }
         log.info("bank gateway mode=http client={} baseUrl={}", props.http.client, props.http.baseUrl)
         return HttpBankGateway.create(props.http.client, props.http.toSettings())

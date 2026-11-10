@@ -38,8 +38,11 @@ import kotlin.test.assertNotEquals
 class HttpGatewayFlowTest : ApiIntegrationTest() {
 
     companion object {
-        private val gatewayApp: GatewayProcess by lazy { GatewayProcess.start(bank.boundPort, "--bank.gateway.response-timeout=500ms") }
-        val proxy: TcpCutProxy by lazy { TcpCutProxy(gatewayApp.port).start() }
+        // Lazy 를 따로 쥔다: 정리에서 "띄운 것만" 닫고, 정리하려고 게이트웨이를 새로 띄우지 않는다
+        private val gatewayHolder = lazy { GatewayProcess.start(bank.boundPort, "--bank.gateway.response-timeout=500ms") }
+        private val gatewayApp: GatewayProcess get() = gatewayHolder.value
+        private val proxyHolder = lazy { TcpCutProxy(gatewayApp.port).start() }
+        val proxy: TcpCutProxy get() = proxyHolder.value
 
         @JvmStatic
         @DynamicPropertySource
@@ -51,7 +54,13 @@ class HttpGatewayFlowTest : ApiIntegrationTest() {
 
         @JvmStatic
         @AfterAll
-        fun stopGateway() { proxy.close(); gatewayApp.close() }
+        fun stopGateway() {
+            try {
+                if (proxyHolder.isInitialized()) proxyHolder.value.close()
+            } finally {
+                if (gatewayHolder.isInitialized()) gatewayHolder.value.close()   // 프록시 정리가 던져도 게이트웨이 JVM 은 반드시 닫는다
+            }
+        }
     }
 
     @Autowired private lateinit var relay: OutboxRelay

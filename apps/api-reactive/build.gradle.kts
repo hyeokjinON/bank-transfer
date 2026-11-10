@@ -49,6 +49,7 @@ val bankGatewayRuntime: Configuration by configurations.creating {
 }
 dependencies { bankGatewayRuntime(project(":apps:bank-gateway")) }
 
+
 tasks.withType<Test> {
     inputs.files(bankGatewayRuntime)
     jvmArgumentProviders.add(CommandLineArgumentProvider { listOf("-Dbank-gateway.classpath=" + bankGatewayRuntime.asPath) })

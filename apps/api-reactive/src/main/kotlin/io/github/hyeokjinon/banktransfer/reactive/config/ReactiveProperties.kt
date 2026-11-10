@@ -26,7 +26,9 @@ data class ReactiveVerificationProperties(
 }
 
 /**
- * apps/api 의 같은 키 · 같은 기본값 (결정(계획): 20줄짜리라 모듈로 빼지 않고 앱마다 둔다). 은행 게이트웨이 (P8-1). mode: direct(기본 — 이 프로세스가 Netty 로 FEP 에 직결) | http(게이트웨이 앱을 HTTP 로 부름, apps/bank-gateway).
+ * apps/api 의 같은 키 · 같은 기본값 (결정(계획): 20줄짜리라 모듈로 빼지 않고 앱마다 둔다).
+ *
+ * 은행 게이트웨이 (P8-1). mode: direct(기본 — 이 프로세스가 Netty 로 FEP 에 직결) | http(게이트웨이 앱을 HTTP 로 부름, apps/bank-gateway).
  * host · port · response-timeout · poll-interval 은 direct 일 때만 쓴다. http.* 는 http 일 때만 (스펙 §6).
  */
 @ConfigurationProperties("bank.gateway")
@@ -61,7 +63,7 @@ data class BankGatewayProperties(
         const val DIRECT = "direct"
         const val HTTP = "http"
         val MODES = listOf(DIRECT, HTTP)
-        val CLIENTS = listOf(HttpBankGateway.WEBCLIENT)
+        val CLIENTS = HttpBankGateway.KINDS
     }
 }
 

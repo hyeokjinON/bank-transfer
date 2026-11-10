@@ -25,7 +25,9 @@ import kotlin.test.assertEquals
 class HttpGatewayCoroutineFlowTest : ApiIntegrationTest() {
 
     companion object {
-        private val gatewayApp: GatewayProcess by lazy { GatewayProcess.start(bank.boundPort, "--bank.gateway.response-timeout=500ms") }
+        // Lazy 를 따로 쥔다: 정리에서 "띄운 것만" 닫고, 정리하려고 게이트웨이를 새로 띄우지 않는다
+        private val gatewayHolder = lazy { GatewayProcess.start(bank.boundPort, "--bank.gateway.response-timeout=500ms") }
+        private val gatewayApp: GatewayProcess get() = gatewayHolder.value
 
         @JvmStatic
         @DynamicPropertySource
@@ -38,7 +40,7 @@ class HttpGatewayCoroutineFlowTest : ApiIntegrationTest() {
 
         @JvmStatic
         @AfterAll
-        fun stopGateway() = gatewayApp.close()
+        fun stopGateway() { if (gatewayHolder.isInitialized()) gatewayHolder.value.close() }
     }
 
     @Autowired private lateinit var relay: OutboxRelay

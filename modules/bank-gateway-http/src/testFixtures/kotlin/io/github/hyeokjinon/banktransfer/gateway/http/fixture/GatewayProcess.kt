@@ -59,8 +59,23 @@ class GatewayProcess private constructor(private val process: Process, val port:
                 "--server.port=$port", "--bank.gateway.host=127.0.0.1", "--bank.gateway.port=$bankPort",
                 "--bank.maintenance.enabled=false", *args,
             )
-            val process = ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile()).start()
-            return GatewayProcess(process, port, log).also { it.awaitBankConnection(Duration.ofSeconds(60)) }
+            val process = try {
+                ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile()).start()
+            } catch (e: Throwable) {
+                runCatching { Files.deleteIfExists(argFile) }
+                throw e
+            }
+            val gateway = GatewayProcess(process, port, log)
+            try {
+                gateway.awaitBankConnection(Duration.ofSeconds(60))
+            } catch (e: Throwable) {
+                gateway.close()   // 은행 연결을 못 기다린 경우에도 자식 JVM 을 남기지 않는다
+                throw e
+            } finally {
+                // 인자 파일은 JVM 이 뜬 뒤(연결 확인 뒤)에야 지운다 — 시작 직후에 지우면 java 가 읽기 전일 수 있다. 로그는 오류 메시지가 가리키므로 남긴다
+                runCatching { Files.deleteIfExists(argFile) }
+            }
+            return gateway
         }
     }
 }

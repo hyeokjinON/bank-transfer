@@ -18,4 +18,8 @@ data class HttpGatewaySettings(
     init {
         require(maxConnections >= 1) { "maxConnections must be >= 1: $maxConnections" }
     }
+    companion object {
+        /** 응답 시간 초과 권장 하한 — 게이트웨이의 은행 응답 시간 초과(3s) + 여유. 이보다 짧으면 "모름" 이 쓸데없이 는다. */
+        val RECOMMENDED_MIN_RESPONSE_TIMEOUT: Duration = Duration.ofSeconds(5)
+    }
 }

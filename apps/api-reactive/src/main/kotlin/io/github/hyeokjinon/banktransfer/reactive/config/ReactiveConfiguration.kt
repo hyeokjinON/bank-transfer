@@ -11,6 +11,7 @@ import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
 import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceGuard
 import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceWindow
 import io.github.hyeokjinon.banktransfer.gateway.http.HttpBankGateway
+import io.github.hyeokjinon.banktransfer.gateway.http.HttpGatewaySettings
 import io.github.hyeokjinon.banktransfer.reactive.flow.CoroutineVerificationFlow
 import io.github.hyeokjinon.banktransfer.reactive.flow.ReactorVerificationFlow
 import io.github.hyeokjinon.banktransfer.transfer.RandomReferenceGenerator
@@ -54,8 +55,8 @@ class ReactiveConfiguration {
     @Bean(destroyMethod = "close")
     @ConditionalOnProperty(prefix = "bank.gateway", name = ["mode"], havingValue = BankGatewayProperties.HTTP)
     fun httpBankGateway(props: BankGatewayProperties): HttpBankGateway {
-        if (props.http.responseTimeout < Duration.ofSeconds(5)) {
-            log.warn("bank.gateway.http.response-timeout={} is shorter than 5s (gateway bank timeout 3s + margin) — more results will be unknown", props.http.responseTimeout)
+        if (props.http.responseTimeout < HttpGatewaySettings.RECOMMENDED_MIN_RESPONSE_TIMEOUT) {
+            log.warn("bank.gateway.http.response-timeout={} is shorter than {} (gateway bank timeout 3s + margin) — more results will be unknown", props.http.responseTimeout, HttpGatewaySettings.RECOMMENDED_MIN_RESPONSE_TIMEOUT)
         }
         log.info("bank gateway mode=http client={} baseUrl={}", props.http.client, props.http.baseUrl)
         return HttpBankGateway.create(props.http.client, props.http.toSettings())
