@@ -9,7 +9,7 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
-## [P8-1] 은행 게이트웨이 서비스 분리 — 2026-11-10 ([#25](https://github.com/hyeokjinON/bank-transfer/pull/25), 머지 후 정리 PR)
+## [P8-1] 은행 게이트웨이 서비스 분리 — 2026-11-10 ([#25](https://github.com/hyeokjinON/bank-transfer/pull/25), 머지 후 정리 [#26](https://github.com/hyeokjinON/bank-transfer/pull/26))
 ### Added
 - 신규 앱 `apps/bank-gateway` (포트 8082): 은행 FEP 연결 하나를 내부 HTTP API 3개(`/internal/v1/bank/{name-inquiries,transfers,inquiries}`)로 노출. 오류는 503 `BANK_NOT_SENT` · 504 `BANK_TIMEOUT` · 502 `BANK_UNAVAILABLE` · 400 · 500, 점검 시간 송신 보류, `/actuator/health/bankConnection`. 서버 두 판: WebFlux(기본) · MVC 비동기 (`spring.main.web-application-type`). 요청이 끊겨도 은행 송신은 취소하지 않는다 (클라이언트 응답 시간 초과로 연결을 닫는 계약 ⑨ 에서 "은행 1회 · 대기 표 비움" 을 네 조합 모두 확인).
 - 신규 모듈 `modules/bank-gateway-http`: 계약 DTO · 실패 분류(`BankNotSentException` 만 "안 보냄", 503 은 코드가 있을 때만) · 클라이언트 두 판(WebClient 기본 · JDK `HttpClient`, `bank.gateway.http.client`), 자동 재시도 끔, 테스트 픽스처(`GatewayProcess` · `TcpCutProxy`).
