@@ -41,6 +41,7 @@ if [ "$GWCOLS" = 1 ]; then
   header "게이트웨이 · 지연 · 도착률"
   keys=$(for f in "$RAW"/*.json; do
     [ -f "$f" ] || continue
+    grep -q '"rate":' "$f" || continue   # 웹 원자료만 (P8-1 은 컨슈머 원자료가 같은 폴더에 있다)
     [[ "$(str "$f" round)" =~ ^[0-9]+$ ]] || continue
     g=$(str "$f" gateway); echo "${g:-direct} $(val "$f" delay_ms) $(val "$f" rate)"
   done | sort -u -k1,1 -k2,2n -k3,3n)
@@ -48,8 +49,11 @@ if [ "$GWCOLS" = 1 ]; then
     [ -n "$g" ] || continue
     files=$(for f in "$RAW"/*.json; do
       [ -f "$f" ] || continue
+      grep -q '"rate":' "$f" || continue
       [[ "$(str "$f" round)" =~ ^[0-9]+$ ]] || continue
-      fg=$(str "$f" gateway); [ "${fg:-direct}" = "$g" ] && [ "$(val "$f" delay_ms)" = "$d" ] && [ "$(val "$f" rate)" = "$r" ] && echo "$f"
+      fg=$(str "$f" gateway)
+      # if 로 감싼다 — && 사슬이 마지막 파일에서 거짓이면 치환 전체가 실패로 끝나 set -e 가 스크립트를 멈춘다
+      if [ "${fg:-direct}" = "$g" ] && [ "$(val "$f" delay_ms)" = "$d" ] && [ "$(val "$f" rate)" = "$r" ]; then echo "$f"; fi
     done)
     row "$files" "$g · ${d}ms · $r"
   done <<<"$keys"

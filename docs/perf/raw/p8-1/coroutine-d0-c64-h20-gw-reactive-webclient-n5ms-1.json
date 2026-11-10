@@ -1,0 +1,8 @@
+{
+  "run": "coroutine-d0-c64-h20-gw-reactive-webclient-n5ms-1", "mode": "coroutine", "delay_ms": 0, "round": "1", "virtual_threads": false, "pinned_events": null, "cap": 64, "hikari": 20, "n": 5000,
+  "seconds": 16.649, "tps": 300.3, "p50_ms": 80.3, "p95_ms": 221.4,
+  "sys_cpu_avg": 88.3, "sys_cpu_max": 100.0, "api_cpu_avg": 20.8, "api_cpu_max": 34.6,
+  "mysql_cpu_avg": 114.6, "mysql_cpu_max": 150.5, "kafka_cpu_avg": 62.2, "kafka_cpu_max": 233.5,
+  "gateway": "http-gw-reactive-webclient-n5ms", "gw_cpu_avg": 6.9, "gw_cpu_max": 10.4, "gw_threads_max": 30,
+  "cpu_samples": 8, "bank_peak": 1, "api_warn_error_lines": 5, "code": "79be982"
+}

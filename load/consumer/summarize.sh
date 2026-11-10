@@ -23,6 +23,7 @@ table() {   # $1 = 회차 정규식, $2 = 제목
   local files=() f
   for f in "$RAW"/*.json; do
     [ -f "$f" ] || continue
+    grep -q '"tps":' "$f" || continue   # 컨슈머 원자료만 (P8-1 은 웹 1원인증 원자료가 같은 폴더에 있다)
     [[ "$(str "$f" round)" =~ $1 ]] && files+=("$f")
   done
   echo
