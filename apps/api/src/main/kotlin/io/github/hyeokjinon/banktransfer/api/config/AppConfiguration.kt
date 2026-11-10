@@ -13,6 +13,7 @@ import io.github.hyeokjinon.banktransfer.api.persistence.OutboxEventJpaRepositor
 import io.github.hyeokjinon.banktransfer.api.persistence.TransferJpaRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletDebit
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletLedger
+import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
 import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceGuard
@@ -87,7 +88,7 @@ data class VerificationProperties(
  * thenApplyAsync 로 앱 실행기에 넘긴다. 이벤트 루프가 막히면 같은 루프의 모든 은행 통신이 멈춘다.
  */
 class BankGatewayAdapter(
-    private val client: BankGatewayClient,
+    private val client: BankGateway,
     private val executor: Executor,
     /** 1원인증 이체의 이용기관 거래번호 (V 접두). 결과조회 대상이 아니라 저장하지 않는다. */
     private val references: ReferenceGenerator = RandomReferenceGenerator(prefix = 'V'),
@@ -130,7 +131,7 @@ class AppConfiguration {
         ).start()
 
     @Bean
-    fun bankPort(client: BankGatewayClient, @Qualifier("applicationTaskExecutor") executor: Executor, clock: Clock): BankPort =
+    fun bankPort(client: BankGateway, @Qualifier("applicationTaskExecutor") executor: Executor, clock: Clock): BankPort =
         BankGatewayAdapter(client, executor, RandomReferenceGenerator(prefix = 'V', clock = clock))
 
     @Bean

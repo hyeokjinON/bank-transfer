@@ -1,5 +1,6 @@
 package io.github.hyeokjinon.banktransfer.reactive.support
 
+import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.account.infra.contract.VerificationErrorContract
 import io.github.hyeokjinon.banktransfer.reactive.web.ReactiveExceptionHandler
 import io.github.hyeokjinon.banktransfer.reactive.web.USER_ID_HEADER
@@ -102,7 +103,7 @@ abstract class VerificationSuite : ReactiveIntegrationTest() {
             Thread.sleep(500)   // 은행 응답(300ms)이 지난 뒤에도
             assertEquals(0, rowsOf(user), "끊긴 요청은 저장하지 않는다 (1원은 나갔다 — 설계 §4-3 의 대가)")
             assertEquals(before + 1, bank.depositsOf("1002123456789").size)
-            await.atMost(Duration.ofSeconds(5)) untilAsserted { assertEquals(0, gateway.pendingCount) }
+            await.atMost(Duration.ofSeconds(5)) untilAsserted { assertEquals(0, (gateway as BankGatewayClient).pendingCount) }
         } finally {
             logger.detachAppender(appender)
         }

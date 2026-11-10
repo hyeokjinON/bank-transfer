@@ -5,6 +5,7 @@ import io.github.hyeokjinon.banktransfer.account.VerificationRepository
 import io.github.hyeokjinon.banktransfer.account.VerificationRequestRules
 import io.github.hyeokjinon.banktransfer.account.infra.AccountVerificationJpaRepository
 import io.github.hyeokjinon.banktransfer.account.infra.JpaVerificationRepository
+import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
 import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceGuard
@@ -53,7 +54,7 @@ class ReactiveConfiguration {
 
     @Bean
     fun coroutineVerificationFlow(
-        client: BankGatewayClient,
+        client: BankGateway,
         rules: VerificationRequestRules,
         repository: VerificationRepository,
         references: ReferenceGenerator,
@@ -61,7 +62,7 @@ class ReactiveConfiguration {
 
     @Bean
     fun reactorVerificationFlow(
-        client: BankGatewayClient,
+        client: BankGateway,
         rules: VerificationRequestRules,
         repository: VerificationRepository,
         references: ReferenceGenerator,

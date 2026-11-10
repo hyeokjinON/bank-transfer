@@ -54,7 +54,7 @@ data class BankGatewayConfig(
     val readerIdleTimeout: Duration get() = pollInterval.multipliedBy(3)
 }
 
-class BankTimeoutException(val tranNo: Long, timeout: Duration) :
+class BankTimeoutException(val tranNo: Long, val timeout: Duration) :
     RuntimeException("bank did not respond to tranNo=$tranNo within $timeout")
 
 /** 은행과 통신할 수 없다. 보낸 뒤에 끊긴 경우도 포함한다 — 그때는 은행이 요청을 받았을 수 있다. */
@@ -89,7 +89,7 @@ class BankGatewayClient(
     private val clock: Clock = Clock.systemDefaultZone(),
     /** 점검 시간 등으로 보내지 않을 때 (P5-1). 기본은 늘 열림. */
     private val sendGate: SendGate = SendGate.OPEN,
-) : AutoCloseable {
+) : BankGateway, AutoCloseable {
 
     private val log = LoggerFactory.getLogger(javaClass)
     private val group = MultiThreadIoEventLoopGroup(1, NioIoHandler.newFactory())
@@ -131,14 +131,14 @@ class BankGatewayClient(
         return this
     }
 
-    fun inquireName(bankCode: String, accountNo: String): CompletableFuture<NameInquiryResponse> =
+    override fun inquireName(bankCode: String, accountNo: String): CompletableFuture<NameInquiryResponse> =
         send(NameInquiryRequest(newHeader(BizType.NAME_INQUIRY), bankCode, accountNo)).thenApply { it.expect<NameInquiryResponse>() }
 
-    fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String, reference: String): CompletableFuture<TransferResponse> =
+    override fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String, reference: String): CompletableFuture<TransferResponse> =
         send(TransferRequest(newHeader(BizType.TRANSFER), bankCode, accountNo, amount, memo, reference)).thenApply { it.expect<TransferResponse>() }
 
     /** 결과조회 (v0.2). 결과를 모르는 이체를 이용기관 거래번호로 묻는다 — 이체를 다시 보내지 않는다. */
-    fun inquire(reference: String): CompletableFuture<InquiryResponse> =
+    override fun inquire(reference: String): CompletableFuture<InquiryResponse> =
         send(InquiryRequest(newHeader(BizType.INQUIRY), reference)).thenApply { it.expect<InquiryResponse>() }
 
     /**

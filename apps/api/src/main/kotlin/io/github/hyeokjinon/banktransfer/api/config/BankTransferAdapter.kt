@@ -1,6 +1,6 @@
 package io.github.hyeokjinon.banktransfer.api.config
 
-import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
+import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.gateway.BankNotSentException
 import io.github.hyeokjinon.banktransfer.protocol.TransferResponse
 import io.github.hyeokjinon.banktransfer.transfer.BankTransferOutcome
@@ -9,11 +9,11 @@ import org.slf4j.LoggerFactory
 import java.util.concurrent.ExecutionException
 
 /**
- * transfer 모듈의 BankTransferPort 를 Netty 게이트웨이에 연결한다 — 블로킹 판 (컨슈머 스레드가 .get() 으로 기다린다).
+ * transfer 모듈의 BankTransferPort 를 은행 게이트웨이(BankGateway)에 연결한다 — 블로킹 판 (컨슈머 스레드가 .get() 으로 기다린다).
  * 예외를 "보냈나 / 모르나"로 나누는 규칙은 [classifyBankFailure] 하나를 코루틴 판(SuspendBankTransferAdapter)과 같이 쓴다 (P6-1).
  * 응답 시간 초과는 게이트웨이(bank.gateway.response-timeout)가 건다.
  */
-class BankTransferAdapter(private val client: BankGatewayClient) : BankTransferPort {
+class BankTransferAdapter(private val client: BankGateway) : BankTransferPort {
 
     override fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String, reference: String): BankTransferOutcome =
         try {

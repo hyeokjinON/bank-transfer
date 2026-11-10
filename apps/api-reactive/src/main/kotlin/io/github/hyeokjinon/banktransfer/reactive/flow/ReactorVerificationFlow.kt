@@ -7,7 +7,7 @@ import io.github.hyeokjinon.banktransfer.account.VerificationRequestRules
 import io.github.hyeokjinon.banktransfer.account.infra.holderNameOf
 import io.github.hyeokjinon.banktransfer.account.infra.maskAccount
 import io.github.hyeokjinon.banktransfer.account.infra.requireOk
-import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
+import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.transfer.ReferenceGenerator
 import org.slf4j.LoggerFactory
 import reactor.core.publisher.Mono
@@ -24,7 +24,7 @@ import reactor.core.scheduler.Schedulers
  * fromFuture 뒤 map 은 게이트웨이 이벤트 루프에서(응답이 이미 와 있었으면 구독한 HTTP 루프에서) 돈다(실험 E1) — 어느 쪽이든 이벤트 루프라 저장 전에 publishOn 이 꼭 있어야 한다.
  */
 class ReactorVerificationFlow(
-    private val client: BankGatewayClient,
+    private val client: BankGateway,
     private val rules: VerificationRequestRules,
     private val repository: VerificationRepository,
     private val references: ReferenceGenerator,
