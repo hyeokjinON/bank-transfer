@@ -10,6 +10,8 @@ import java.net.http.HttpConnectTimeoutException
 import java.net.http.HttpTimeoutException
 import java.time.Duration
 import java.util.concurrent.CompletionException
+import reactor.netty.internal.shaded.reactor.pool.PoolAcquirePendingLimitException
+import reactor.netty.internal.shaded.reactor.pool.PoolAcquireTimeoutException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -49,12 +51,14 @@ class HttpFailuresTest {
     }
 
     @Test
-    fun `연결 단계 실패는 안 보냄 - 거부 · 연결 시간 초과 · 이름 풀이 · 연결 풀 대기`() {
+    fun `연결 단계 실패는 안 보냄 - 거부 · 연결 시간 초과 · 이름 풀이 · 연결 풀 대기 시간 초과 · 대기열 상한`() {
         assertIs<BankNotSentException>(HttpFailures.fromTransport(ConnectException("refused")))
         assertIs<BankNotSentException>(HttpFailures.fromTransport(CompletionException(RuntimeException("wrap", ConnectException("refused")))))
         assertIs<BankNotSentException>(HttpFailures.fromTransport(HttpConnectTimeoutException("connect timed out")))
         assertIs<BankNotSentException>(HttpFailures.fromTransport(UnknownHostException("gw")))
-        assertIs<BankNotSentException>(HttpFailures.fromTransport(PoolAcquireTimeoutException()))
+        // Reactor Netty 1.3.7 의 실제 셰이드 예외 — 이름이 바뀌면(버전 올림) 여기서 깨진다
+        assertIs<BankNotSentException>(HttpFailures.fromTransport(PoolAcquireTimeoutException(Duration.ofSeconds(1))))
+        assertIs<BankNotSentException>(HttpFailures.fromTransport(PoolAcquirePendingLimitException(64)))
     }
 
     @Test
@@ -71,7 +75,4 @@ class HttpFailuresTest {
         val e = runCatching { HttpFailures.parse(200, "{broken") { GatewayJson.read(it, TransferResult::class.java) } }.exceptionOrNull()
         assertIs<BankUnavailableException>(e)
     }
-
-    /** Reactor Netty 의 셰이드된 예외와 이름만 같은 가짜 — 분류는 클래스 이름으로 본다 (셰이드 패키지에 기대지 않게). */
-    private class PoolAcquireTimeoutException : RuntimeException("pool")
 }
