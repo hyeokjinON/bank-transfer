@@ -7,6 +7,8 @@
 # 사용 (Git Bash, 저장소 루트):
 #   [VT=1] [RAW_SUB=p7] bash load/consumer/run.sh <blocking|coroutine> <지연ms 0~2999> <회차> [상한=64] [hikari=20]
 #   VT=1: 처리 단계 API 를 가상 스레드 + JFR pinning 집계로 (blocking 만, P7 설계 §6-3). RAW_SUB: 원자료 폴더 (기본 p6-1)
+#   [GATEWAY=http [SERVER=reactive|servlet] [CLIENT=webclient|jdk] [GW_POOL=n] [NET_DELAY=ms]] — P8-1: 처리 단계 API 가 게이트웨이 앱(18082)을 HTTP 로 부른다. RAW_SUB=p8-1 과 함께
+#   (GATEWAY 를 안 주면 지금까지와 똑같이 API 가 은행에 직접 붙는다 — 원자료 이름도 같다. 먼저: ./gradlew :apps:bank-gateway:bootJar, NET_DELAY 면 Compose chaos 프로필의 toxiproxy)
 #   bash load/consumer/run.sh cleanup      # 측정이 끝나면 반드시 (아래 경고)
 #   bash load/consumer/run.sh reset-dev-group   # 사람이 직접, 필요할 때만: 개발용 그룹 transfer-processor 의 밀린 오프셋을 끝으로 (아래 경고)
 # 먼저 (OPERATION §11): infra up, ./gradlew :apps:api:bootJar :apps:mock-bank:installDist.
@@ -33,6 +35,7 @@ die() { echo "[$RUN] $*" >&2; exit 1; }
 API_PORT=${API_PORT:-8080}
 DEV_GROUP=transfer-processor   # 개발용 API 의 그룹. 측정은 자기 그룹(아래 GROUP)을 써서 이 그룹의 오프셋은 움직이지 않는다
 . load/lib/proc.sh
+. load/lib/gateway.sh
 cond() { echo "COALESCE($1, '') LIKE 'load-p61-u%' AND COALESCE($1, '') REGEXP '^load-p61-u(00[1-9]|0[1-9][0-9]|100)\$'"; }   # $1 = 컬럼 (t.user_id | user_id) — cleanup.sql 과 같은 엄격한 조건, user_id 가 NULL 인 옛 행도 "측정 사용자 아님"으로 센다
 # 읽기만 하는 사전 확인: 발행기는 측정 사용자가 아닌 미발행 아웃박스도 발행하고, 측정 컨슈머가 그걸 처리해 버린다 → FOREIGN_OUTBOX · FOREIGN_PENDING 를 채운다
 foreign_counts() {
@@ -108,9 +111,10 @@ fi
 { [[ "$N" =~ ^[0-9]{1,6}$ ]] && [ "$N" -ge 1 ] && [ "$N" -le 100000 ]; } || { echo "N 은 1 ~ 100000: $N" >&2; exit 2; }
 TIMEOUT=${TIMEOUT:-900}
 BANK_PORT=${BANK_PORT:-9190}
+gw_validate   # GATEWAY=http 일 때 jar · 포트 18082 · Toxiproxy 를 읽기만 확인 (lib/gateway.sh)
 API="http://localhost:$API_PORT"
 GROUP=transfer-processor-p61   # 측정 전용 그룹: 오프셋을 옮겨도 개발용 그룹(transfer-processor)의 밀린 메시지를 건너뛰지 않는다
-if [ "$MODE" = blocking ]; then NAME="blocking$(vt_tag)-d$DELAY-h$HIKARI-$ROUND"; else NAME="coroutine-d$DELAY-c$CAP-h$HIKARI-$ROUND"; fi
+if [ "$MODE" = blocking ]; then NAME="blocking$(vt_tag)-d$DELAY-h$HIKARI$(gw_tag)-$ROUND"; else NAME="coroutine-d$DELAY-c$CAP-h$HIKARI$(gw_tag)-$ROUND"; fi
 RUN=$NAME
 RAW="docs/perf/raw/$RAW_SUB"
 OUT="$RAW/$NAME.json"
@@ -135,7 +139,7 @@ free_port() {   # 그 포트를 쥔 프로세스가 끝날 때까지 (최대 15�
 }
 finish() {
   for p in "${SAMPLERS[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null || true; done
-  stop_pid "$API_PID"; stop_pid "$BANK_PID"
+  stop_pid "$API_PID"; gw_stop 2>/dev/null || true; stop_pid "$BANK_PID"   # 게이트웨이는 API 다음 · 모의 은행 앞 (GW_PID 가 있을 때만 — lib/gateway.sh)
   if [ "$OK" != 1 ] && [ "$STARTED" = 1 ] && [ -f "$OUT" ]; then mv -f "$OUT" "$OUT.invalid"; echo "[$RUN] 확인을 통과하지 못해 $OUT.invalid 로 바꿨다 — 이 회차 숫자는 쓰지 않는다" >&2; fi
   return 0
 }
@@ -226,11 +230,14 @@ for _ in $(seq 30); do
   sleep 1
 done
 grep -q "mock bank listening on" "$WORK/mock-bank.log" || die "모의 은행이 30초 안에 뜨지 않았다"
+gw_start "$WORK/gateway.log"   # GATEWAY=http 일 때만: 게이트웨이 앱 (18082) 이 측정용 모의 은행에 붙는다
+mapfile -t GW_ARGS < <(gw_api_args)   # direct 면 빈 배열
 API_JVM_ARGS=("${VT_JVM_ARGS[@]}")   # 발행 단계는 끈 채, 처리 단계만 VT · JFR
 start_api "$WORK/api-process.log" --transfer.outbox.relay.enabled=false \
   --transfer.consumer.mode="$MODE" --transfer.consumer.coroutine.max-in-flight-bank-calls="$CAP" \
   --spring.datasource.hikari.maximum-pool-size="$HIKARI" \
-  --management.endpoints.web.exposure.include=health,info,metrics "${VT_APP_ARGS[@]}"
+  --management.endpoints.web.exposure.include=health,info,metrics "${VT_APP_ARGS[@]}" "${GW_ARGS[@]}"
+gw_check_mode "$WORK/api-process.log"
 INFO=$(curl -sf "$API/actuator/info") || die "actuator info 를 읽지 못했다"
 grep -q "\"mode\":\"$MODE\"" <<<"$INFO" || die "앱의 모드가 $MODE 가 아니다: $INFO"
 grep -qE "\"max-in-flight-bank-calls\":\"?$CAP\"?[,}]" <<<"$INFO" || die "앱의 상한이 $CAP 이 아니다: $INFO"
@@ -243,6 +250,7 @@ metric() {   # 읽지 못하면 '-' — 빈 값이면 cpu.txt 의 열이 밀린�
 }
 ( while :; do echo "$(date +%s%3N) $(metric system.cpu.usage) $(metric process.cpu.usage)"; sleep 1; done ) > "$WORK/cpu.txt" 2>/dev/null &
 SAMPLERS+=($!)
+if gw_on; then ( while :; do gw_sample_line; sleep 1; done ) > "$WORK/gw.txt" 2>/dev/null & SAMPLERS+=($!); fi
 MYSQL_NAME=$(dc ps --format '{{.Name}}' mysql)
 KAFKA_NAME=$(dc ps --format '{{.Name}}' kafka)
 # docker stats --no-stream 은 한 번에 1 ~ 2초 걸린다 — 쉬지 않고 이어 부른다 — 실패하면 1초 쉰다 (계속 실패할 때 CPU 를 태우지 않게)
@@ -259,12 +267,14 @@ while :; do
   sleep 1
 done
 sleep 2   # 마지막 표본
+gw_dump "$WORK/gw-threads.txt"   # 게이트웨이 스레드 덤프 (판 비교용 — servlet: http-nio-*-exec-*, WebFlux: reactor-http-nio-*)
 for p in "${SAMPLERS[@]}"; do kill "$p" 2>/dev/null || true; done
 SAMPLERS=()
 WARNS=$(grep -cE " (WARN|ERROR) " "$WORK/api-process.log" || true)
 PINNED=null
 if [ "${VT:-0}" = 1 ]; then PINNED=$(vt_pinned "$API_PORT" "$WORK/app.jfr" "$WORK/pinned.txt") || die "JFR 덤프 · pinning 집계 실패 — $WORK"; fi
 stop_api
+gw_stop || die "게이트웨이가 포트 $GW_PORT 를 놓지 않는다"
 stop_pid "$BANK_PID"; BANK_PID=
 
 # --- 5. 계산 (DB 시각) ---
@@ -275,12 +285,17 @@ START_MS=$(v start_ms); END_MS=$(v end_ms)
 DURATION=$(awk -v s="$START_MS" -v e="$END_MS" 'BEGIN { printf "%.3f", (e - s) / 1000 }')
 TPS=$(awk -v n="$N" -v d="$DURATION" 'BEGIN { printf "%.1f", (d > 0) ? n / d : 0 }')
 # CPU 표본은 처리 구간(첫 sending_at ~ 마지막 updated_at) 안의 것만. Actuator 값은 0 ~ 1 → %, docker 는 이미 % (100% = 코어 1개)
-cpu_stat() { awk -v s="$START_MS" -v e="$END_MS" -v c="$1" '$1 >= s && $1 <= e && $c ~ /^[0-9]/ { x = $c * 100; t += x; n++; if (x > m) m = x } END { if (n) printf "%.1f %.1f %d\n", t / n, m, n; else print "null null 0" }' "$WORK/cpu.txt"; }
+cpu_stat_file() { awk -v s="$START_MS" -v e="$END_MS" -v c="$2" '$1 >= s && $1 <= e && $c ~ /^[0-9]/ { x = $c * 100; t += x; n++; if (x > m) m = x } END { if (n) printf "%.1f %.1f %d\n", t / n, m, n; else print "null null 0" }' "$1"; }   # $1 = 표본 파일, $2 = 열
+cpu_stat() { cpu_stat_file "$WORK/cpu.txt" "$1"; }
 docker_stat() { awk -v s="$START_MS" -v e="$END_MS" -v name="$1" '$1 >= s && $1 <= e && $2 == name { x = $3; sub("%", "", x); x += 0; t += x; n++; if (x > m) m = x } END { if (n) printf "%.1f %.1f\n", t / n, m; else print "null null" }' "$WORK/docker.txt"; }
 read -r SYS_AVG SYS_MAX SAMPLES < <(cpu_stat 2)
 read -r API_AVG API_MAX _ < <(cpu_stat 3)
 read -r MYSQL_AVG MYSQL_MAX < <(docker_stat "$MYSQL_NAME")
 read -r KAFKA_AVG KAFKA_MAX < <(docker_stat "$KAFKA_NAME")
+if gw_on; then   # 게이트웨이 앱 CPU · 스레드 — 같은 창 START_MS ~ END_MS
+  read -r GW_CPU_AVG GW_CPU_MAX _ < <(cpu_stat_file "$WORK/gw.txt" 2)
+  GW_THREADS_MAX=$(awk -v s="$START_MS" -v e="$END_MS" '$1 >= s && $1 <= e && $3 ~ /^[0-9]/ { n++; if ($3 > m) m = $3 } END { if (n) print m + 0; else print "null" }' "$WORK/gw.txt")
+else GW_CPU_AVG=null; GW_CPU_MAX=null; GW_THREADS_MAX=null; fi
 [ "$MYSQL_AVG" != null ] && [ "$KAFKA_AVG" != null ] || echo "[$RUN] 경고: 처리 구간 안의 docker stats 표본이 없다 (MySQL $MYSQL_AVG · Kafka $KAFKA_AVG) — 구간이 너무 짧다. N 을 늘린다" >&2
 [ "${SAMPLES:-0}" -ge 10 ] || echo "[$RUN] 경고: Actuator CPU 표본이 ${SAMPLES:-0}개 (< 10) — 구간이 너무 짧다. N 을 늘린다" >&2
 BANK_PEAK=$(grep -o 'mock bank peak pending responses: [0-9]*' "$WORK/mock-bank.log" | tail -1 | grep -o '[0-9]*$' || true)
@@ -290,6 +305,7 @@ cat > "$OUT" <<EOF
   "seconds": $DURATION, "tps": $TPS, "p50_ms": $(v p50_ms), "p95_ms": $(v p95_ms),
   "sys_cpu_avg": $SYS_AVG, "sys_cpu_max": $SYS_MAX, "api_cpu_avg": $API_AVG, "api_cpu_max": $API_MAX,
   "mysql_cpu_avg": $MYSQL_AVG, "mysql_cpu_max": $MYSQL_MAX, "kafka_cpu_avg": $KAFKA_AVG, "kafka_cpu_max": $KAFKA_MAX,
+  "gateway": "${GATEWAY:-direct}$(gw_tag)", "gw_cpu_avg": $GW_CPU_AVG, "gw_cpu_max": $GW_CPU_MAX, "gw_threads_max": $GW_THREADS_MAX,
   "cpu_samples": $SAMPLES, "bank_peak": ${BANK_PEAK:-0}, "api_warn_error_lines": ${WARNS:-0}, "code": "$(git rev-parse --short HEAD)"
 }
 EOF

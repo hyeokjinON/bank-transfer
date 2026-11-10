@@ -26,10 +26,18 @@ server:
 
 bank:
   gateway:
-    host: localhost
-    port: 9090
-    response-timeout: 3s
-    poll-interval: 30s
+    mode: direct               # direct(기본, Netty 직결) | http(게이트웨이 앱 — apps/bank-gateway, P8-1)
+    host: localhost            # direct 만
+    port: 9090                 # direct 만
+    response-timeout: 3s       # direct 만
+    poll-interval: 30s         # direct 만
+    http:                      # http 만 (스펙 §6). 시간 순서: 연결 · 풀 대기 1s < 게이트웨이 은행 응답 3s < 응답 5s
+      base-url: http://localhost:8082
+      client: webclient        # webclient | jdk (P8-1 비교)
+      max-connections: 500     # WebClient 만. 기본(코어×2 = 32)이면 동시 대기 수백에서 천장이 된다
+      connect-timeout: 1s
+      pending-acquire-timeout: 1s
+      response-timeout: 5s
   maintenance:                        # apps/api 와 같은 점검 시간 (P5-1, KST)
     enabled: true
     start: "23:50"

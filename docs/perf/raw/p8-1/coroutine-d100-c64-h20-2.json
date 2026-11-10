@@ -1,0 +1,8 @@
+{
+  "run": "coroutine-d100-c64-h20-2", "mode": "coroutine", "delay_ms": 100, "round": "2", "virtual_threads": false, "pinned_events": null, "cap": 64, "hikari": 20, "n": 5000,
+  "seconds": 13.842, "tps": 361.2, "p50_ms": 133.1, "p95_ms": 170.9,
+  "sys_cpu_avg": 57.3, "sys_cpu_max": 78.2, "api_cpu_avg": 17.6, "api_cpu_max": 31.8,
+  "mysql_cpu_avg": 86.8, "mysql_cpu_max": 103.6, "kafka_cpu_avg": 35.7, "kafka_cpu_max": 86.5,
+  "gateway": "direct", "gw_cpu_avg": null, "gw_cpu_max": null, "gw_threads_max": null,
+  "cpu_samples": 7, "bank_peak": 64, "api_warn_error_lines": 5, "code": "79be982"
+}

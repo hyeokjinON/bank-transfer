@@ -2,7 +2,7 @@ package io.github.hyeokjinon.banktransfer.api.messaging
 
 import io.github.hyeokjinon.banktransfer.api.alert.AlertNotifier
 import io.github.hyeokjinon.banktransfer.api.config.SuspendBankTransferAdapter
-import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
+import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.transfer.TransferProcessor
 import kotlinx.coroutines.sync.Semaphore
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
@@ -63,7 +63,7 @@ class ConsumerConfiguration {
     @ConditionalOnProperty(prefix = "transfer.consumer", name = ["mode"], havingValue = TransferConsumerProperties.COROUTINE)
     fun suspendingTransferRequestedListener(
         processor: TransferProcessor,
-        client: BankGatewayClient,
+        client: BankGateway,
         alerts: AlertNotifier,
         props: TransferConsumerProperties,
     ) = SuspendingTransferRequestedListener(

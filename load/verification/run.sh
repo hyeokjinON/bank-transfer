@@ -7,6 +7,8 @@
 # 사용 (Git Bash, 저장소 루트):
 #   [VT=1] [RAW_SUB=p7] bash load/verification/run.sh <blocking|async|coroutine|reactor> <지연ms 0~2999> <도착률 1~5000> <회차> [톰캣 최대 스레드=200]
 #   VT=1: 가상 스레드 + JFR pinning 집계 (MVC 판만, P7 설계 §6-3). RAW_SUB: 원자료 폴더 docs/perf/raw/<RAW_SUB> (기본 p6-2)
+#   [GATEWAY=http [SERVER=reactive|servlet] [CLIENT=webclient|jdk] [GW_POOL=n] [NET_DELAY=ms]] — P8-1: 앱이 게이트웨이 앱(18082)을 HTTP 로 부른다. RAW_SUB=p8-1 과 함께. async 판만 (P8-1 묶음 E)
+#   (GATEWAY 를 안 주면 지금까지와 똑같다 — 원자료 이름도 같다. 먼저: ./gradlew :apps:bank-gateway:bootJar, NET_DELAY 면 Compose chaos 프로필의 toxiproxy. 측정 포트에 18082 · 28082 가 더해진다)
 #   bash load/verification/run.sh cleanup      # 측정이 끝나면 반드시
 # 먼저 (OPERATION §12): infra up (MySQL · Kafka — apps/api 는 리스너를 꺼도 기동 때 Kafka 관리 클라이언트가 붙는다),
 #   ./gradlew :apps:api:bootJar :apps:api-reactive:bootJar :apps:mock-bank:installDist
@@ -25,6 +27,7 @@ sql() { dc exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" exec mysql -u"$MYSQL
 RUN=verification
 die() { echo "[$RUN] $*" >&2; exit 1; }
 . load/lib/proc.sh
+. load/lib/gateway.sh
 USERS="user_id LIKE 'p62-u%' AND user_id REGEXP '^p62-u(00[1-9]|0[1-9][0-9]|100)\$'"   # cleanup.sql 과 같은 조건
 
 if [ "${1:-}" = cleanup ]; then
@@ -51,16 +54,18 @@ esac
 . load/lib/vt.sh
 vt_validate "$([ "$APP" = api ] && echo 1 || echo 0)"
 RAW_SUB=${RAW_SUB:-p6-2}; raw_sub_validate "$RAW_SUB"
+BANK_PORT=9190
+gw_validate   # GATEWAY=http 일 때 jar · 포트 18082 · Toxiproxy 를 읽기만 확인 (lib/gateway.sh)
+{ ! gw_on || [ "$MODE" = async ]; } || die "GATEWAY=http 는 async 판만 (P8-1 묶음 E)"
 NAME="$MODE$(vt_tag)-d$DELAY-r$RATE"
 [ "$TOMCAT" != 200 ] && NAME="$NAME-t$TOMCAT"
-NAME="$NAME-$ROUND"
+NAME="$NAME$(gw_tag)-$ROUND"
 RUN=$NAME
 RAW="docs/perf/raw/$RAW_SUB"
 OUT="$RAW/$NAME.json"
 WORK="build/load-p62/$NAME"
 BANK_FILES="$WORK/bank-files"   # 회차마다 새로 — 1원 이체 수(DV 줄)를 이 회차만 센다. 개발용 ./bank-files 와 따로
 vt_args "$WORK/app.jfr"   # VT=1 이면 VT_JVM_ARGS · VT_APP_ARGS (lib/vt.sh)
-BANK_PORT=9190
 API="http://localhost:$PORT"
 JAR="apps/$APP/build/libs/$APP-0.1.0-SNAPSHOT.jar"
 BANK_CP="apps/mock-bank/build/install/mock-bank/lib/*"
@@ -70,7 +75,7 @@ MEASURE_S=30
 ls apps/mock-bank/build/install/mock-bank/lib/*.jar >/dev/null 2>&1 || die "모의 은행 배포본이 없다 — ./gradlew :apps:mock-bank:installDist"
 
 # --- 프로세스 · 정리 ---
-APP_PID=; BANK_PID=; SAMPLER=
+APP_PID=; BANK_PID=; SAMPLER=; GW_SAMPLER=
 OWN_APP=0; OWN_BANK=0   # 이 실행이 그 포트에서 프로세스를 띄운 뒤에만 1 — 사전 확인에서 멈출 때 남의 프로세스를 강제 종료하지 않게
 OK=0
 STARTED=0   # 이전 결과를 지우는 지점부터 1 — 그 앞에서 멈추면 이전 회차 결과를 .invalid 로 바꾸지 않는다
@@ -83,7 +88,8 @@ free_port() {   # 그 포트를 쥔 프로세스가 끝날 때까지 (최대 15�
 }
 finish() {
   [ -n "$SAMPLER" ] && kill "$SAMPLER" 2>/dev/null || true
-  stop_pid "$APP_PID"; stop_pid "$BANK_PID"
+  [ -n "$GW_SAMPLER" ] && kill "$GW_SAMPLER" 2>/dev/null || true
+  stop_pid "$APP_PID"; gw_stop 2>/dev/null || true; stop_pid "$BANK_PID"   # 게이트웨이는 앱 다음 · 모의 은행 앞 (GW_PID 가 있을 때만 — lib/gateway.sh)
   # 우리가 띄운 포트만 비운다 (사전 확인에서 멈췄다면 그 포트는 남의 것이다 — free_port 의 taskkill 이 닿으면 안 된다)
   [ "$OWN_APP" = 1 ] && { free_port "$PORT" >/dev/null 2>&1 || true; }
   [ "$OWN_BANK" = 1 ] && { free_port "$BANK_PORT" >/dev/null 2>&1 || true; }
@@ -94,7 +100,7 @@ trap finish EXIT
 trap 'exit 130' INT TERM
 
 # --- 0. 사전 확인 (읽기만) ---
-for p in 18080 18081 "$BANK_PORT"; do
+for p in 18080 18081 "$BANK_PORT"; do   # 18082(게이트웨이)는 gw_validate 가 이미 봤다
   port_busy "$p" && die "포트 $p 를 이미 쓰고 있다 — 측정용 앱 · 모의 은행을 끈다 (아무것도 건드리지 않았다)"
 done
 mkdir -p "$RAW" "$WORK"
@@ -121,6 +127,7 @@ for _ in $(seq 30); do
   sleep 1
 done
 grep -q "mock bank listening on" "$WORK/mock-bank.log" || die "모의 은행이 30초 안에 뜨지 않았다"
+gw_start "$WORK/gateway.log"   # GATEWAY=http 일 때만: 게이트웨이 앱 (18082) 이 측정용 모의 은행에 붙는다
 
 # --- 3. 앱 ---
 echo "[$RUN] 3/6 앱 $APP :$PORT 판 $MODE (톰캣 $TOMCAT)"
@@ -132,6 +139,7 @@ if [ "$APP" = api ]; then
   ARGS+=(--spring.kafka.listener.auto-startup=false --transfer.outbox.relay.enabled=false --transfer.reconcile.enabled=false
     --daily-recon.schedule.enabled=false --data-retention.schedule.enabled=false --server.tomcat.threads.max="$TOMCAT")
 fi
+mapfile -t GW_ARGS < <(gw_api_args); ARGS+=("${GW_ARGS[@]}")   # direct 면 빈 배열
 java -Xms1g -Xmx1g "${VT_JVM_ARGS[@]}" -Dstdout.encoding=UTF-8 -jar "$JAR" "${ARGS[@]}" "${VT_APP_ARGS[@]}" > "$WORK/app.log" 2>&1 &
 APP_PID=$!; OWN_APP=1
 for _ in $(seq 120); do
@@ -140,6 +148,7 @@ for _ in $(seq 120); do
   sleep 1
 done
 curl -sf "$API/actuator/health" >/dev/null 2>&1 || die "앱이 120초 안에 뜨지 않았다 — $WORK/app.log"
+gw_check_mode "$WORK/app.log"
 INFO=$(curl -sf "$API/actuator/info") || die "actuator info 를 읽지 못했다"
 grep -q "\"web-mode\":\"$MODE\"" <<<"$INFO" || die "앱의 판이 $MODE 가 아니다: $INFO"
 grep -qE "\"maximum-pool-size\":\"?20\"?[,}]" <<<"$INFO" || die "앱의 Hikari 가 20 이 아니다: $INFO"
@@ -170,6 +179,7 @@ metric() {   # 읽지 못하면 '-' — 빈 값이면 열이 밀린다
 }
 ( while :; do echo "$(date +%s%3N) $(metric system.cpu.usage) $(metric process.cpu.usage) $(metric jvm.threads.live)"; sleep 1; done ) > "$WORK/samples.txt" 2>/dev/null &
 SAMPLER=$!
+if gw_on; then ( while :; do gw_sample_line; sleep 1; done ) > "$WORK/gw.txt" 2>/dev/null & GW_SAMPLER=$!; fi
 
 # --- 5. k6 ---
 echo "[$RUN] 4/6 k6 열린 모델 ${RATE}건/s (워밍업 ${WARMUP_S}s + 측정 ${MEASURE_S}s, 요청 시간 초과 10s)"
@@ -178,7 +188,9 @@ dc --profile load run --rm \
   -e RUN="$NAME" -e BASE_URL="http://host.docker.internal:$PORT" -e RATE="$RATE" \
   -e WARMUP_S="$WARMUP_S" -e MEASURE_S="$MEASURE_S" -e OUT_SUB="$RAW_SUB" \
   k6 run --quiet /scripts/verification/verification.js
+gw_dump "$WORK/gw-threads.txt"   # 게이트웨이 스레드 덤프 (판 비교용 — servlet: http-nio-*-exec-*, WebFlux: reactor-http-nio-*)
 kill "$SAMPLER" 2>/dev/null || true; SAMPLER=
+[ -z "$GW_SAMPLER" ] || { kill "$GW_SAMPLER" 2>/dev/null || true; GW_SAMPLER=; }
 K6_JSON="$RAW/$NAME.k6.json"
 [ -f "$K6_JSON" ] || die "k6 요약이 없다: $K6_JSON"
 mv -f "$K6_JSON" "$WORK/k6.json"
@@ -187,6 +199,7 @@ WARNS=$(grep -cE " (WARN|ERROR) " "$WORK/app.log" || true)
 PINNED=null
 if [ "${VT:-0}" = 1 ]; then PINNED=$(vt_pinned "$PORT" "$WORK/app.jfr" "$WORK/pinned.txt") || die "JFR 덤프 · pinning 집계 실패 — $WORK"; fi
 stop_pid "$APP_PID"; APP_PID=; free_port "$PORT" || die "앱이 포트 $PORT 를 놓지 않는다"
+gw_stop || die "게이트웨이가 포트 $GW_PORT 를 놓지 않는다"
 stop_pid "$BANK_PID"; BANK_PID=; free_port "$BANK_PORT" || die "모의 은행이 포트 $BANK_PORT 를 놓지 않는다"
 
 # --- 6. 계산 ---
@@ -194,10 +207,14 @@ echo "[$RUN] 5/6 계산"
 k() { grep -o "\"$1\": *[-0-9.eE+]*" "$K6_JSON" | head -1 | sed 's/.*: *//'; }
 # 측정 구간 표본만 (k6 시작 + 워밍업 ~ + 측정). docker run 의 컨테이너 기동만큼(1 ~ 2초, 추정) 앞당겨 잡힌다 — 결과 문서 조건 표에 적는다
 S=$(( K6_START + WARMUP_S * 1000 )); E=$(( S + MEASURE_S * 1000 ))
-stat() { awk -v s="$S" -v e="$E" -v c="$1" -v mul="$2" '$1 >= s && $1 <= e && $c ~ /^[0-9]/ { x = $c * mul; t += x; n++; if (x > m) m = x } END { if (n) printf "%.1f %.1f %d\n", t / n, m, n; else print "null null 0" }' "$WORK/samples.txt"; }
+stat() { awk -v s="$S" -v e="$E" -v c="$1" -v mul="$2" '$1 >= s && $1 <= e && $c ~ /^[0-9]/ { x = $c * mul; t += x; n++; if (x > m) m = x } END { if (n) printf "%.1f %.1f %d\n", t / n, m, n; else print "null null 0" }' "${3:-$WORK/samples.txt}"; }   # $3 = 표본 파일 (기본 samples.txt)
 read -r SYS_AVG SYS_MAX SAMPLES < <(stat 2 100)
 read -r APP_AVG APP_MAX _ < <(stat 3 100)
 read -r _ THREADS_MAX _ < <(stat 4 1)
+if gw_on; then   # 게이트웨이 앱 CPU · 스레드 — 같은 측정 구간
+  read -r GW_CPU_AVG GW_CPU_MAX _ < <(stat 2 100 "$WORK/gw.txt")
+  read -r _ GW_THREADS_MAX _ < <(stat 3 1 "$WORK/gw.txt")
+else GW_CPU_AVG=null; GW_CPU_MAX=null; GW_THREADS_MAX=null; fi
 [ "${SAMPLES:-0}" -ge 20 ] || echo "[$RUN] 경고: 측정 구간 표본이 ${SAMPLES:-0}개 (< 20)" >&2
 
 # --- 7. 정확성 (스펙과 다른 점 5) ---
@@ -216,6 +233,7 @@ cat > "$OUT" <<EOF
   "created_all": $CREATED, "timeouts_all": $TIMEOUTS, "rows": $ROWS, "one_won": ${ONE_WON:-0},
   "rows_minus_created": $RMC, "one_won_minus_rows": $OMR,
   "threads_max": $THREADS_MAX, "sys_cpu_avg": $SYS_AVG, "sys_cpu_max": $SYS_MAX, "app_cpu_avg": $APP_AVG, "app_cpu_max": $APP_MAX,
+  "gateway": "${GATEWAY:-direct}$(gw_tag)", "gw_cpu_avg": $GW_CPU_AVG, "gw_cpu_max": $GW_CPU_MAX, "gw_threads_max": $GW_THREADS_MAX,
   "samples": $SAMPLES, "app_warn_error_lines": ${WARNS:-0}, "code": "$(git rev-parse --short HEAD)"
 }
 EOF

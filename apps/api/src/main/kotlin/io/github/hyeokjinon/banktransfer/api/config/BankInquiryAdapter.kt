@@ -1,6 +1,6 @@
 package io.github.hyeokjinon.banktransfer.api.config
 
-import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
+import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.gateway.BankNotSentException
 import io.github.hyeokjinon.banktransfer.protocol.InquiryResponse
 import io.github.hyeokjinon.banktransfer.protocol.ResponseCodes
@@ -15,7 +15,7 @@ import java.util.concurrent.ExecutionException
  * 그 밖(조회 전문 거절, 모르는 처리결과, 시간 초과, 보낸 뒤 끊김 …)은 Unknown — 다음 주기에 다시 묻는다.
  * 예외를 던지지 않는다.
  */
-class BankInquiryAdapter(private val client: BankGatewayClient) : BankInquiryPort {
+class BankInquiryAdapter(private val client: BankGateway) : BankInquiryPort {
     private val log = LoggerFactory.getLogger(javaClass)
 
     override fun inquire(reference: String): InquiryOutcome =

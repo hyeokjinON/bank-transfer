@@ -39,6 +39,13 @@ docker compose -f infra/docker-compose.yml exec kafka /opt/kafka/bin/kafka-conso
 docker compose -f infra/docker-compose.yml exec redis redis-cli
 ```
 
+### 망 지연 주입 — `chaos` 프로필 (P8-1)
+api 와 게이트웨이 앱을 같은 PC 에서 띄우면 망 지연이 거의 0 이다. Toxiproxy 를 사이에 두어 "다른 서버를 부르는" 지연을 만든다 (측정은 `latency` 만, 테스트는 지연 · 응답 막힘). 연결 끊김은 Toxiproxy 가 아니라 테스트 픽스처 `TcpCutProxy` 로 다룬다.
+- 띄우기: `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile chaos up -d toxiproxy`
+- 제어 API `http://localhost:8474` — 측정 스크립트(`load/lib/gateway.sh`)가 프록시 `p81-gateway`(:28082 → `host.docker.internal:18082`)와 지연 toxic 을 만들고 지운다.
+- 손으로: `curl -s localhost:8474/proxies` 로 남은 프록시 · toxic 확인, `curl -X DELETE localhost:8474/proxies/p81-gateway` 로 지운다.
+- 내리기: `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile chaos stop toxiproxy`
+
 ## 자주 막히는 곳
 | 증상 | 원인 | 해결 |
 |---|---|---|

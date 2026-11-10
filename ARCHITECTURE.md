@@ -1,6 +1,6 @@
 # ARCHITECTURE — 구조와 흐름
 
-> 기준: P5-1 일마감 대사 · 점검 시간 · 알림 완료 (2026-10-30, PR #15 머지). P4-2 잔고 차감 락 전략 완료 (2026-10-28, PR #13 머지). P4-1 원화 잔고 완료 (2026-10-26, PR #11 머지). P3 완료(P3-3b PR #9 머지). P3 ~ P5 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p5)에 적는다.
+> 기준: P8-1 은행 게이트웨이 서비스 분리 (2026-11-10, PR 대기 — [ADR-0015](docs/adr/0015-bank-gateway-service.md), 기본은 `direct` 라 아래 그림의 직결 경로가 평소 모양). P5-1 일마감 대사 · 점검 시간 · 알림 완료 (2026-10-30, PR #15 머지). P4-2 잔고 차감 락 전략 완료 (2026-10-28, PR #13 머지). P4-1 원화 잔고 완료 (2026-10-26, PR #11 머지). P3 완료(P3-3b PR #9 머지). P3 ~ P5 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p5)에 적는다.
 
 ## 1. 한눈에 보기
 
@@ -33,6 +33,8 @@ flowchart LR
     ADP --> GW["modules/bank-gateway<br/>Netty 클라이언트"]
     TADP --> GW
     IADP --> GW
+    API -- "HTTP (mode=http)" --> GWAPP["apps/bank-gateway<br/>게이트웨이 서비스 8082 (P8-1)"]
+    GWAPP --> GW
     GW -- "TCP 고정길이 전문<br/>4B ASCII 길이 + EUC-KR" --> BANK["apps/mock-bank<br/>모의 은행 FEP"]
     RECON -- "RECON_yyyyMMdd.dat" --> FILES[(bank-files)]
     BANK -- "00:05 일마감" --> FILES
@@ -62,6 +64,8 @@ flowchart LR
 | `modules/account-infra` | 1원인증의 바깥 어댑터를 두 앱이 같이 쓰도록 모았다 (P6-2): JPA 엔티티 · 저장소(`JpaVerificationRepository`), 은행 응답 해석(`holderNameOf` · `requireOk` · `BankRejectedException`), 오류 계약 기대표(test fixtures). 테이블 소유(Flyway)는 `apps/api` 그대로 | `account`, `bank-gateway` | Spring Data JPA |
 | `apps/api` | REST API, 예외 → HTTP 매핑, 조립(`AppConfiguration`), 어댑터, 잔고 SQL(`WalletLedger` · 차감 전략 `WalletDebit`), JPA 저장소(`persistence/`), Kafka 발행 · 소비(`messaging/`) | `account`, `transfer`, `bank-gateway` | Spring Boot 4 (MVC, JPA, Kafka) |
 | `apps/api-reactive` | WebFlux(Reactor Netty) 별도 앱, 포트 8081. 1원인증 요청 `POST /api/v1/account-verifications` 하나만 (코루틴 · Reactor 두 판). Kafka · 스케줄러 · 배치 · Flyway 없음 (P6-2, [ADR-0013](docs/adr/0013-web-verification-webflux-comparison.md)) | `account`, `account-infra`, `bank-gateway`, `transfer` (참조 번호 생성기 `RandomReferenceGenerator` 하나) | Spring WebFlux |
+| `modules/bank-gateway-http` | 게이트웨이 HTTP 계약(DTO · 경로 · 오류 코드), 실패 분류(`BankNotSentException` 만 "안 보냄"), `BankGateway` 의 HTTP 클라이언트 두 판(WebClient · JDK `HttpClient`), 테스트 픽스처(`TcpCutProxy` · `GatewayProcess`) (P8-1, [ADR-0015](docs/adr/0015-bank-gateway-service.md)) | `bank-gateway` (api) | Reactor Netty WebClient · JDK HttpClient |
+| `apps/bank-gateway` | 은행 FEP 연결 하나를 가지고 내부 HTTP API 3개로 노출. 포트 8082, 서버 두 판(WebFlux 기본 · MVC 비동기), 오류 → 503 `BANK_NOT_SENT` · 504 · 502, `/actuator/health/bankConnection`. DB · Kafka 없음 (P8-1) | `bank-gateway`, `bank-gateway-http` | Spring WebFlux / MVC |
 | `apps/mock-bank` | 모의 은행 FEP 서버. 실행 가능 + 테스트 픽스처 | `bank-protocol` (api) | Netty |
 
 의존 방향 (화살표 = "의존한다"):
@@ -74,9 +78,13 @@ apps/api ──▶ modules/account            (도메인, 의존 없음)
    └──────▶ modules/bank-gateway ──▶ modules/bank-protocol ──▶ netty
 apps/api ──▶ modules/account-infra     (1원인증 JPA 저장소 · 은행 응답 해석)
 apps/api-reactive ──▶ modules/account, modules/account-infra, modules/bank-gateway, modules/transfer (RandomReferenceGenerator)
+apps/api, apps/api-reactive ──▶ modules/bank-gateway-http   (mode=http 일 때 쓰는 클라이언트)
+apps/bank-gateway ──▶ modules/bank-gateway, modules/bank-gateway-http
 apps/mock-bank ─────────────────────▶ modules/bank-protocol
 (test) bank-gateway, apps/api ──▶ apps/mock-bank
 ```
+
+참고: `bank-gateway-http` 가 spring-webflux · reactor-netty 를 끌고 오므로 `apps/api` 런타임 클래스패스에도 `direct` 모드에서 들어 있다 (웹 타입은 그대로 SERVLET, Boot 의 `WebClient.Builder` 자동 설정과 기본 `RestClient.create()` 의 요청 팩토리가 Reactor Netty 로 바뀌는 정도).
 
 규칙: `account` 의 build 파일에 Netty·Spring 이 없으므로, 도메인에서 import 하면 **컴파일이 실패한다**. 경계는 문서가 아니라 빌드가 강제한다.
 
@@ -404,3 +412,4 @@ flowchart TB
 | [0012](docs/adr/0012-consumer-coroutines.md) | 출금 컨슈머의 은행 대기를 suspend 리스너로도 만들어 설정으로 고르고, 판정은 한 곳, DB 는 IO 디스패처, 은행 동시 호출 상한 (제안) |
 | [0013](docs/adr/0013-web-verification-webflux-comparison.md) | 웹 1원인증 경로는 네 판(MVC 블로킹 · 비동기, WebFlux 코루틴 · Reactor)을 같은 도구로 비교하고, WebFlux 는 별도 앱, 판정 · 어댑터는 한 벌, 끊기면 취소 (제안) |
 | [0014](docs/adr/0014-virtual-threads.md) | 가상 스레드는 Boot 설정 하나로 켜고, 성능은 코루틴만큼이지만 Java 21 냉시동 교착 때문에 기본은 끈다 |
+| [0015](docs/adr/0015-bank-gateway-service.md) | 은행 게이트웨이를 별도 서비스(동기 HTTP)로 분리, 실패 분류 · 재시도 끔 · 송신 취소 안 함은 그대로, 기본은 `direct` 유지 (제안) |

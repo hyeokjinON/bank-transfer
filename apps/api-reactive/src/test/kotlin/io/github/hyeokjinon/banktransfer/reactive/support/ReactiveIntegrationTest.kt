@@ -1,6 +1,7 @@
 package io.github.hyeokjinon.banktransfer.reactive.support
 
 import io.github.hyeokjinon.banktransfer.account.infra.contract.VerificationErrorContract
+import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.mockbank.MockBankServer
 import org.junit.jupiter.api.AfterEach
@@ -39,11 +40,14 @@ abstract class ReactiveIntegrationTest {
     @Value("\${local.server.port}")
     protected var port: Int = 0
 
-    @Autowired protected lateinit var gateway: BankGatewayClient
+    @Autowired protected lateinit var gateway: BankGateway
     @Autowired protected lateinit var jdbc: JdbcTemplate
     @Autowired protected lateinit var testClock: TestClock
 
     protected val client: RestClient by lazy { RestClient.create("http://localhost:$port") }
+
+    /** 직결은 Netty 연결, http 모드 하위 클래스는 게이트웨이 앱 health 로 덮어쓴다 (P8-1). */
+    protected open fun bankConnected(): Boolean = (gateway as? BankGatewayClient)?.isConnected ?: true
 
     protected fun newUserId(): String = UUID.randomUUID().toString()
 
@@ -53,7 +57,7 @@ abstract class ReactiveIntegrationTest {
     @BeforeEach
     fun waitForBankConnection() {
         val deadline = System.currentTimeMillis() + 5_000
-        while (!gateway.isConnected) { check(System.currentTimeMillis() < deadline) { "gateway not connected" }; Thread.sleep(20) }
+        while (!bankConnected()) { check(System.currentTimeMillis() < deadline) { "bank not connected" }; Thread.sleep(20) }
     }
 
     @AfterEach

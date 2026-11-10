@@ -5,7 +5,7 @@ import io.github.hyeokjinon.banktransfer.api.alert.AlertLevel
 import io.github.hyeokjinon.banktransfer.api.alert.AlertNotifier
 import io.github.hyeokjinon.banktransfer.api.alert.notifySafely
 import io.github.hyeokjinon.banktransfer.api.config.BankInquiryAdapter
-import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
+import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.transfer.ReconcileResult
 import io.github.hyeokjinon.banktransfer.transfer.Transfer
 import io.github.hyeokjinon.banktransfer.transfer.TransferReconciler
@@ -72,7 +72,7 @@ class ReconcileConfiguration {
     private val log = LoggerFactory.getLogger(javaClass)
 
     @Bean
-    fun transferReconciler(store: TransferStore, client: BankGatewayClient, props: ReconcileProperties, clock: Clock, alerts: AlertNotifier) =
+    fun transferReconciler(store: TransferStore, client: BankGateway, props: ReconcileProperties, clock: Clock, alerts: AlertNotifier) =
         TransferReconciler(
             store = store,
             bank = BankInquiryAdapter(client),

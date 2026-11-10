@@ -54,10 +54,18 @@ spring:
 
 bank:
   gateway:
-    host: localhost
-    port: 9090
-    response-timeout: 3s
-    poll-interval: 30s
+    mode: direct               # direct(기본, Netty 직결) | http(게이트웨이 앱 — apps/bank-gateway, P8-1)
+    host: localhost            # direct 만
+    port: 9090                 # direct 만
+    response-timeout: 3s       # direct 만
+    poll-interval: 30s         # direct 만
+    http:                      # http 만 (스펙 §6). 시간 순서: 연결 · 풀 대기 1s < 게이트웨이 은행 응답 3s < 응답 5s
+      base-url: http://localhost:8082
+      client: webclient        # webclient | jdk (P8-1 비교)
+      max-connections: 500     # WebClient 만. 기본(코어×2 = 32)이면 동시 대기 수백에서 천장이 된다
+      connect-timeout: 1s
+      pending-acquire-timeout: 1s
+      response-timeout: 5s
   maintenance:                 # 은행 점검 시간 (P5-1, KST). 점검 중에는 출금 접수 · 1원인증 503, 은행 송신 보류
     enabled: true
     start: "23:50"             # 따옴표 필수 — YAML 은 23:50 을 60진수 정수로 읽는다. 시작 포함 · 끝 제외, 자정을 넘어도 된다

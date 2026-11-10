@@ -7,7 +7,7 @@ import io.github.hyeokjinon.banktransfer.account.VerificationRequestRules
 import io.github.hyeokjinon.banktransfer.account.infra.holderNameOf
 import io.github.hyeokjinon.banktransfer.account.infra.maskAccount
 import io.github.hyeokjinon.banktransfer.account.infra.requireOk
-import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
+import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.transfer.ReferenceGenerator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -26,7 +26,7 @@ import org.slf4j.LoggerFactory
  *   1원 이체를 기다리는 중 취소되면 1원이 나갔을 수 있어 경고를 남긴다. 사용자는 다시 요청한다 (설계 §4-3: 대가는 최악에 1원 두 번).
  */
 class CoroutineVerificationFlow(
-    private val client: BankGatewayClient,
+    private val client: BankGateway,
     private val rules: VerificationRequestRules,
     private val repository: VerificationRepository,
     private val references: ReferenceGenerator,

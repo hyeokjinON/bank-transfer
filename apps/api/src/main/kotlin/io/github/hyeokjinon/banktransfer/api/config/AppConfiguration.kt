@@ -13,16 +13,21 @@ import io.github.hyeokjinon.banktransfer.api.persistence.OutboxEventJpaRepositor
 import io.github.hyeokjinon.banktransfer.api.persistence.TransferJpaRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletDebit
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletLedger
+import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
 import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceGuard
 import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceWindow
+import io.github.hyeokjinon.banktransfer.gateway.http.HttpBankGateway
+import io.github.hyeokjinon.banktransfer.gateway.http.HttpGatewaySettings
 import io.github.hyeokjinon.banktransfer.transfer.RandomReferenceGenerator
 import io.github.hyeokjinon.banktransfer.transfer.ReferenceGenerator
 import io.github.hyeokjinon.banktransfer.transfer.TransferService
 import io.github.hyeokjinon.banktransfer.transfer.TransferStore
 import io.github.hyeokjinon.banktransfer.transfer.VerifiedAccounts
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -35,13 +40,45 @@ import java.time.ZoneId
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
 
+/**
+ * 은행 게이트웨이 (P8-1). mode: direct(기본 — 이 프로세스가 Netty 로 FEP 에 직결) | http(게이트웨이 앱을 HTTP 로 부름, apps/bank-gateway).
+ * host · port · response-timeout · poll-interval 은 direct 일 때만 쓴다. http.* 는 http 일 때만 (스펙 §6).
+ */
 @ConfigurationProperties("bank.gateway")
 data class BankGatewayProperties(
+    val mode: String = DIRECT,
     val host: String = "localhost",
     val port: Int = 9090,
     val responseTimeout: Duration = Duration.ofSeconds(3),
     val pollInterval: Duration = Duration.ofSeconds(30),
-)
+    val http: Http = Http(),
+) {
+    init {
+        require(mode in MODES) { "bank.gateway.mode must be one of $MODES (lower case): '$mode'" }
+    }
+
+    data class Http(
+        val baseUrl: String = "http://localhost:8082",
+        val client: String = HttpBankGateway.WEBCLIENT,
+        val maxConnections: Int = 500,
+        val connectTimeout: Duration = Duration.ofSeconds(1),
+        val pendingAcquireTimeout: Duration = Duration.ofSeconds(1),
+        val responseTimeout: Duration = Duration.ofSeconds(5),
+    ) {
+        init {
+            require(client in CLIENTS) { "bank.gateway.http.client must be one of $CLIENTS (lower case): '$client'" }
+        }
+
+        fun toSettings() = HttpGatewaySettings(baseUrl, maxConnections, connectTimeout, pendingAcquireTimeout, responseTimeout)
+    }
+
+    companion object {
+        const val DIRECT = "direct"
+        const val HTTP = "http"
+        val MODES = listOf(DIRECT, HTTP)
+        val CLIENTS = HttpBankGateway.KINDS
+    }
+}
 
 /**
  * 은행 점검 시간 (P5-1). KST 벽시계 "HH:mm" — 시작 포함 · 끝 제외, 시작 > 끝이면 자정을 넘는다.
@@ -81,13 +118,13 @@ data class VerificationProperties(
 
 /**
  * 조립(wiring)은 여기서만 한다. account 모듈은 BankPort 인터페이스만 알고,
- * 실제로 Netty 게이트웨이를 붙이는 건 이 어댑터다 (포트-어댑터 구조).
+ * BankPort 를 은행 게이트웨이(BankGateway — direct: Netty 직결, http: 게이트웨이 앱)에 붙이는 건 이 어댑터다 (포트-어댑터 구조).
  *
- * 은행 응답 future 는 Netty 이벤트 루프가 완료한다. 그 뒤의 처리(DB 저장 등 블로킹)가 이벤트 루프에서 돌지 않도록
+ * 은행 응답 future 는 은행 게이트웨이 구현의 I/O 스레드(Netty 이벤트 루프 · HTTP 클라이언트 스레드)가 완료한다. 그 뒤의 처리(DB 저장 등 블로킹)가 이벤트 루프에서 돌지 않도록
  * thenApplyAsync 로 앱 실행기에 넘긴다. 이벤트 루프가 막히면 같은 루프의 모든 은행 통신이 멈춘다.
  */
 class BankGatewayAdapter(
-    private val client: BankGatewayClient,
+    private val client: BankGateway,
     private val executor: Executor,
     /** 1원인증 이체의 이용기관 거래번호 (V 접두). 결과조회 대상이 아니라 저장하지 않는다. */
     private val references: ReferenceGenerator = RandomReferenceGenerator(prefix = 'V'),
@@ -101,6 +138,8 @@ class BankGatewayAdapter(
 
 @Configuration(proxyBeanMethods = false)
 class AppConfiguration {
+
+    private val log = LoggerFactory.getLogger(javaClass)
 
     /**
      * 앱 전체가 보는 시계 하나 (P5-1). 점검 시간 판단 · 상태 시각(sending_at · updated_at) · 대사가 같은 "지금" 을 보게 한다 —
@@ -116,6 +155,7 @@ class AppConfiguration {
     fun bankMaintenanceGuard(window: BankMaintenanceWindow, clock: Clock) = BankMaintenanceGuard(window, clock)
 
     @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(prefix = "bank.gateway", name = ["mode"], havingValue = BankGatewayProperties.DIRECT, matchIfMissing = true)
     fun bankGatewayClient(props: BankGatewayProperties, maintenance: BankMaintenanceWindow, clock: Clock): BankGatewayClient =
         BankGatewayClient(
             BankGatewayConfig(
@@ -129,8 +169,22 @@ class AppConfiguration {
             sendGate = { if (maintenance.isActive(clock.instant())) "bank maintenance window" else null },
         ).start()
 
+    /**
+     * mode=http (P8-1): 은행 연결은 게이트웨이 앱이 가진다. 이 프로세스는 HTTP 로만 부른다.
+     * 응답 시간 초과가 게이트웨이의 은행 응답 시간 초과(3s) + 여유보다 짧으면 "모름" 이 쓸데없이 는다 — 경고만 (측정 · 테스트가 일부러 줄일 수 있게).
+     */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(prefix = "bank.gateway", name = ["mode"], havingValue = BankGatewayProperties.HTTP)
+    fun httpBankGateway(props: BankGatewayProperties): HttpBankGateway {
+        if (props.http.responseTimeout < HttpGatewaySettings.RECOMMENDED_MIN_RESPONSE_TIMEOUT) {
+            log.warn("bank.gateway.http.response-timeout={} is shorter than {} (gateway bank timeout 3s + margin) — more results will be unknown", props.http.responseTimeout, HttpGatewaySettings.RECOMMENDED_MIN_RESPONSE_TIMEOUT)
+        }
+        log.info("bank gateway mode=http client={} baseUrl={}", props.http.client, props.http.baseUrl)
+        return HttpBankGateway.create(props.http.client, props.http.toSettings())
+    }
+
     @Bean
-    fun bankPort(client: BankGatewayClient, @Qualifier("applicationTaskExecutor") executor: Executor, clock: Clock): BankPort =
+    fun bankPort(client: BankGateway, @Qualifier("applicationTaskExecutor") executor: Executor, clock: Clock): BankPort =
         BankGatewayAdapter(client, executor, RandomReferenceGenerator(prefix = 'V', clock = clock))
 
     @Bean

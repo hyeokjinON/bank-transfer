@@ -1,7 +1,7 @@
 package io.github.hyeokjinon.banktransfer.api.messaging
 
 import io.github.hyeokjinon.banktransfer.api.config.BankTransferAdapter
-import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
+import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.transfer.TransferProcessor
 import io.github.hyeokjinon.banktransfer.transfer.TransferStore
 import org.apache.kafka.clients.admin.NewTopic
@@ -72,7 +72,7 @@ class MessagingConfiguration {
 
     /** 판정은 두 컨슈머 모드가 같이 쓴다 (P6-1). 리스너 조립은 ConsumerConfiguration — 블로킹 판만 이 BankTransferAdapter 를 부른다. */
     @Bean
-    fun transferProcessor(store: TransferStore, client: BankGatewayClient, clock: Clock) =
+    fun transferProcessor(store: TransferStore, client: BankGateway, clock: Clock) =
         TransferProcessor(store, BankTransferAdapter(client), clock)
 
     /**

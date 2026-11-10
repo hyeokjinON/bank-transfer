@@ -6,8 +6,10 @@ include(":modules:bank-gateway")    // 은행 FEP 접속 클라이언트 (폴링
 include(":modules:account")         // 1원 계좌인증 도메인 (Spring·Netty 의존 없음)
 include(":modules:transfer")        // 출금이체 도메인 (Spring·JPA·Kafka 의존 없음)
 include(":modules:account-infra")   // account 도메인의 바깥 어댑터 (JPA 저장소 · 은행 응답 해석) — apps/api 와 apps/api-reactive 가 같이 쓴다 (P6-2)
+include(":modules:bank-gateway-http")  // 게이트웨이 앱의 HTTP 계약 · 클라이언트(WebClient · JDK) · 실패 분류 (P8-1)
 
 // 실행 모듈
 include(":apps:api")                // Spring Boot REST API
 include(":apps:api-reactive")       // 1원인증 요청만 하는 WebFlux 앱 (P6-2 — MVC 와 비교용, 운영 기본 아님)
 include(":apps:mock-bank")          // 모의 은행 FEP 서버 (Netty)
+include(":apps:bank-gateway")       // 은행 FEP 연결을 혼자 가진 게이트웨이 앱, 내부 HTTP API (P8-1)

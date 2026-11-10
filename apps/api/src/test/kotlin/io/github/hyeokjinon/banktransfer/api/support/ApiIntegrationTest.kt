@@ -4,6 +4,7 @@ import io.github.hyeokjinon.banktransfer.account.AccountVerification
 import io.github.hyeokjinon.banktransfer.account.VerificationRepository
 import io.github.hyeokjinon.banktransfer.account.VerificationStatus
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletLedger
+import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.mockbank.MockBankServer
 import org.junit.jupiter.api.AfterEach
@@ -71,7 +72,12 @@ abstract class ApiIntegrationTest {
     protected var port: Int = 0
 
     @Autowired
-    protected lateinit var gateway: BankGatewayClient
+    protected lateinit var gateway: BankGateway
+
+    /**
+     * 은행 회선이 붙어 있나. 직결(기본)은 Netty 클라이언트의 연결, http 모드 하위 클래스는 게이트웨이 앱의 bankConnection health 로 덮어쓴다 (P8-1).
+     */
+    protected open fun bankConnected(): Boolean = (gateway as? BankGatewayClient)?.isConnected ?: true
 
     protected val client: RestClient by lazy { RestClient.create("http://localhost:$port") }
 
@@ -161,8 +167,8 @@ abstract class ApiIntegrationTest {
 
     private fun awaitGateway(connected: Boolean, timeout: Duration) {
         val deadline = System.currentTimeMillis() + timeout.toMillis()
-        while (gateway.isConnected != connected) {
-            check(System.currentTimeMillis() < deadline) { "gateway connected=${gateway.isConnected}, expected $connected within $timeout" }
+        while (bankConnected() != connected) {
+            check(System.currentTimeMillis() < deadline) { "bank connected=${bankConnected()}, expected $connected within $timeout" }
             Thread.sleep(20)
         }
     }
