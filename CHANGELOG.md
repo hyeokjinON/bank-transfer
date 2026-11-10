@@ -25,6 +25,8 @@
 - 측정 요약 스크립트(`load/consumer/summarize.sh` · `load/verification/summarize.sh`)가 원자료 종류별로 자기 JSON 만 읽는다 (컨슈머 `"tps"` · 웹 `"rate"` 키) — 한 폴더에 섞여 있어도 돈다 (`70c8ead`).
 ### Fixed
 - 연결 풀 대기열 상한 초과(`PoolAcquirePendingLimitException`, Reactor Netty 기본 = 최대 연결 × 2)가 "모름" 으로 분류되던 것을 "안 보냄" 으로 (`7afaf5b`). 측정 D 풀 32 첫 두 회차가 정확성 확인에서 실패해 드러났다 (이중 송신은 없었다). 실제 라이브러리 예외로 분류 테스트, 풀 1 · 동시 4건 재현 테스트 추가.
+### Fixed (머지 후 정리)
+- CI `build` 가 P7 가상 스레드 실험 컨텍스트를 닫다가 30분 멈추던 것 (#26 첫 실행에서 재발, 자동 스레드 덤프로 원인 확인): 가상 스레드 컨슈머 약 16개가 한꺼번에 close 하며 Kafka 의 synchronized 안(`AppInfoParser.unregisterAppInfo` 등)에서 INFO 로그를 찍고, JDK 21 에서 모니터를 쥔 채 logback 출력 잠금을 기다려 캐리어를 붙잡았다 (냉시동 교착과 같은 모양). 실험 컨텍스트에서만 `org.apache.kafka` · `org.springframework.kafka` 로그를 WARN 으로 낮춰 잠금 안 로그 경로를 없앴다. 캐리어 4개로 3회 · api 모듈 330개 통과.
 
 ## [P7] 가상 스레드 비교 — 2026-11-09 ([#23](https://github.com/hyeokjinON/bank-transfer/pull/23), 머지 후 정리 [#24](https://github.com/hyeokjinON/bank-transfer/pull/24))
 ### Added
