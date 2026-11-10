@@ -9,7 +9,7 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
-## [P8-1] 은행 게이트웨이 서비스 분리 — 2026-11-10 (PR 링크는 PR 을 연 뒤)
+## [P8-1] 은행 게이트웨이 서비스 분리 — 2026-11-10 ([#25](https://github.com/hyeokjinON/bank-transfer/pull/25), 머지 후 정리 PR)
 ### Added
 - 신규 앱 `apps/bank-gateway` (포트 8082): 은행 FEP 연결 하나를 내부 HTTP API 3개(`/internal/v1/bank/{name-inquiries,transfers,inquiries}`)로 노출. 오류는 503 `BANK_NOT_SENT` · 504 `BANK_TIMEOUT` · 502 `BANK_UNAVAILABLE` · 400 · 500, 점검 시간 송신 보류, `/actuator/health/bankConnection`. 서버 두 판: WebFlux(기본) · MVC 비동기 (`spring.main.web-application-type`). 요청이 끊겨도 은행 송신은 취소하지 않는다 (클라이언트 응답 시간 초과로 연결을 닫는 계약 ⑨ 에서 "은행 1회 · 대기 표 비움" 을 네 조합 모두 확인).
 - 신규 모듈 `modules/bank-gateway-http`: 계약 DTO · 실패 분류(`BankNotSentException` 만 "안 보냄", 503 은 코드가 있을 때만) · 클라이언트 두 판(WebClient 기본 · JDK `HttpClient`, `bank.gateway.http.client`), 자동 재시도 끔, 테스트 픽스처(`GatewayProcess` · `TcpCutProxy`).
@@ -17,7 +17,7 @@
 - Toxiproxy (Compose 프로필 `chaos`): 망 지연 주입(측정), 지연 · 응답 막힘(latency · timeout toxic) 테스트(Testcontainers). 연결 끊김은 `TcpCutProxy`(계약 ⑦ · 흐름 테스트)로 다룬다. 계약 테스트 4조합(서버 2 × 클라이언트 2): 클라이언트가 연결을 닫아도 은행 1회(⑨), 호출자 future 취소는 HTTP 교환을 취소하지 않음(⑩, 의존 future), 받고 끊긴 뒤 은행 1회(⑦ · ⑪ — 재시도 설정 단독이 아니라 Reactor Netty 의 헤더 송신 뒤 재시도 안 함 동작과 함께 고정).
 - 측정 도구 확장: `GATEWAY` · `SERVER` · `CLIENT` · `GW_POOL` · `NET_DELAY`, 게이트웨이 CPU · 스레드 표본 · 스레드 덤프. 측정 42회 + 재측정 2회 (원자료 `docs/perf/raw/p8-1/`).
 - 테스트: 전체 608개 (P7 524 + P8-1 84, 건너뜀 2).
-- ADR-0015 (제안), OPERATION "게이트웨이 장애 때", [측정 결과](docs/perf/p8-1-gateway-split.md), SETUP 2-3-1, 실행 구성 `11. Bank Gateway (8082)` · `12. API (http 게이트웨이)`.
+- ADR-0015 (채택), OPERATION "게이트웨이 장애 때", [측정 결과](docs/perf/p8-1-gateway-split.md), SETUP 2-3-1, 실행 구성 `11. Bank Gateway (8082)` · `12. API (http 게이트웨이)`.
 ### Changed
 - 처리 코드(`TransferProcessor` · 어댑터)가 구현(Netty 직결)이 아니라 `BankGateway` 인터페이스를 본다 (동작 변화 없음, 기본 `direct`).
 - `BankTimeoutException` 에 `timeout` 이 들어갔다 (HTTP 504 해석에 필요).

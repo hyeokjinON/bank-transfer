@@ -202,7 +202,7 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
   - [x] P6-2 웹 1원인증 WebFlux 비교: 네 판 · 별도 앱 `apps/api-reactive` · 끊기면 취소 → [ADR-0013](docs/adr/0013-web-verification-webflux-comparison.md) · [측정 결과](docs/perf/p6-2-web-reactive.md)
 - [x] **P7** Virtual Thread 적용 비교: 설정 하나 · 진행 조건 실험(V1 · V2 · V3) · 같은 도구로 웹 · 컨슈머 비교, Java 21 냉시동 교착 → [ADR-0014](docs/adr/0014-virtual-threads.md) · [측정 결과](docs/perf/p7-virtual-threads.md)
 - [ ] **P8** 모듈 분리(MSA), Docker Compose → Kubernetes
-  - [ ] P8-1 은행 게이트웨이 서비스 분리: HTTP · 실패 분류 유지 · 서버 2판 × 클라이언트 2판 · Toxiproxy → [ADR-0015](docs/adr/0015-bank-gateway-service.md) · [측정 결과](docs/perf/p8-1-gateway-split.md)
+  - [x] P8-1 은행 게이트웨이 서비스 분리: HTTP · 실패 분류 유지 · 서버 2판 × 클라이언트 2판 · Toxiproxy → [ADR-0015](docs/adr/0015-bank-gateway-service.md) · [측정 결과](docs/perf/p8-1-gateway-split.md)
 - [ ] **P9** 관측성: Micrometer, Prometheus, Grafana
 
 ## 기술 스택
