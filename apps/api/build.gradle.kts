@@ -13,6 +13,7 @@ dependencies {
     implementation(project(":modules:account"))
     implementation(project(":modules:transfer"))
     implementation(project(":modules:bank-gateway"))
+    implementation(project(":modules:bank-gateway-http"))   // mode=http: 게이트웨이 앱을 부르는 클라이언트 (P8-1)
     implementation(project(":modules:account-infra"))   // 1원인증 JPA 저장소 · 은행 응답 해석 (P6-2 에서 apps/api-reactive 와 같이 쓰려고 옮김)
 
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
@@ -36,6 +37,7 @@ dependencies {
     runtimeOnly("com.mysql:mysql-connector-j")
 
     testImplementation(project(":apps:mock-bank"))
+    testImplementation(testFixtures(project(":modules:bank-gateway-http")))   // TcpCutProxy · GatewayProcess (P8-1)
     testImplementation(testFixtures(project(":modules:account-infra")))   // 오류 계약 기대표
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
@@ -48,7 +50,22 @@ dependencies {
 
 // 테스트 JVM 시간대를 UTC 로 고정한다. 기본값(개발자 PC 의 KST)에 기대어 KST 변환 테스트가 우연히 통과하지 않게,
 // 앱이 JVM 기본 시간대와 무관하게 Asia/Seoul 로 저장하는지를 서버(UTC)와 같은 조건에서 검증한다.
+// http 모드 흐름 테스트가 게이트웨이 앱을 별도 JVM 으로 띄운다 (P8-1). 같은 JVM 에 올리면 이 앱의 JPA · Kafka 자동 설정이
+// 게이트웨이 컨텍스트에도 걸린다 — 클래스패스를 따로 받아 java -cp 로 실행한다.
+val bankGatewayRuntime: Configuration by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    attributes {
+        attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_RUNTIME))
+        attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category.LIBRARY))
+        attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements.JAR))
+    }
+}
+dependencies { bankGatewayRuntime(project(":apps:bank-gateway")) }
+
 tasks.withType<Test> {
+    inputs.files(bankGatewayRuntime)
+    jvmArgumentProviders.add(CommandLineArgumentProvider { listOf("-Dbank-gateway.classpath=" + bankGatewayRuntime.asPath) })
     jvmArgs("-Duser.timezone=UTC")
 }
 
