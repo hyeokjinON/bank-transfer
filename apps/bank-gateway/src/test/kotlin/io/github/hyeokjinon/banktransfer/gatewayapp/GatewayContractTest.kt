@@ -169,6 +169,11 @@ class GatewayContractTest {
     }
 
     @ParameterizedTest @MethodSource("combos")
+    /**
+     * 증명하는 것: 호출자가 응답 전에 끊어도 은행은 이체를 정확히 한 번 받았고, 은행 응답이 와서 게이트웨이의 대기 표가 비었다.
+     * 이 보장의 근거는 GatewayEndpoints 가 은행 future 가 아니라 그 의존 future(handle)를 돌려주는 구조다 — CompletableFuture 의 취소는
+     * 위로 번지지 않는다. Mono.fromFuture(.., suppressCancel = true) 는 두 번째 안전장치이며, 이 테스트가 그것의 유무를 가르지는 않는다.
+     */
     fun `10 - 호출자가 끊어도 은행 송신은 취소되지 않는다`(combo: Combo) {
         awaitConnected(combo)
         bank.responseDelay = Duration.ofMillis(300)

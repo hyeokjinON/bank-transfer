@@ -45,7 +45,9 @@ object GatewayEndpoints {
         } catch (e: Exception) {
             return CompletableFuture.completedFuture(error(HttpStatus.BAD_REQUEST, GatewayError(GatewayErrorCodes.INVALID_REQUEST, "unreadable request body")))
         }
-        return send(body).handle { okJson, failure -> if (failure == null) ok(okJson) else fromFailure(failure, type.simpleName) }
+        // send 가 동기로 던져도(어댑터 버그 · 즉시 거절 등) 같은 오류 변환을 거치게 한다 — 안 그러면 프레임워크의 500 이 나간다
+        val sent = try { send(body) } catch (e: Exception) { CompletableFuture.failedFuture(e) }
+        return sent.handle { okJson, failure -> if (failure == null) ok(okJson) else fromFailure(failure, type.simpleName) }
     }
 
     private fun fromFailure(failure: Throwable, what: String): ResponseEntity<String> {

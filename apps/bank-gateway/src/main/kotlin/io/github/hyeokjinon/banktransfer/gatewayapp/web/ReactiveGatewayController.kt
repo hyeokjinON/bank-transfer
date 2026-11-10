@@ -12,7 +12,8 @@ import reactor.core.publisher.Mono
 /**
  * WebFlux 판 (기본, P8-1 스펙 §5-1). Reactor Netty 이벤트 루프가 요청을 받고, 은행 Netty 이벤트 루프가 future 를 완료하면
  * 이벤트 루프가 응답을 쓴다 — 요청당 스레드가 없다.
- * Mono.fromFuture(f, suppressCancel = true): 호출자가 끊겨 구독이 취소돼도 future 를 취소하지 않는다 (은행 송신은 되돌릴 수 없다).
+ * Mono.fromFuture(f, suppressCancel = true) 는 두 번째 안전장치다: 호출자가 끊겨 구독이 취소돼도 future 를 취소하지 않는다.
+ * 첫 번째 근거는 GatewayEndpoints 가 은행 future 의 의존 future 를 돌려주는 것 — 의존 future 의 취소는 은행 future 로 번지지 않아 은행 송신은 되돌릴 수 없는 채로 그대로 간다.
  */
 @RestController
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.REACTIVE)
