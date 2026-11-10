@@ -237,6 +237,7 @@ start_api "$WORK/api-process.log" --transfer.outbox.relay.enabled=false \
   --transfer.consumer.mode="$MODE" --transfer.consumer.coroutine.max-in-flight-bank-calls="$CAP" \
   --spring.datasource.hikari.maximum-pool-size="$HIKARI" \
   --management.endpoints.web.exposure.include=health,info,metrics "${VT_APP_ARGS[@]}" "${GW_ARGS[@]}"
+gw_check_mode "$WORK/api-process.log"
 INFO=$(curl -sf "$API/actuator/info") || die "actuator info 를 읽지 못했다"
 grep -q "\"mode\":\"$MODE\"" <<<"$INFO" || die "앱의 모드가 $MODE 가 아니다: $INFO"
 grep -qE "\"max-in-flight-bank-calls\":\"?$CAP\"?[,}]" <<<"$INFO" || die "앱의 상한이 $CAP 이 아니다: $INFO"
@@ -293,7 +294,7 @@ read -r MYSQL_AVG MYSQL_MAX < <(docker_stat "$MYSQL_NAME")
 read -r KAFKA_AVG KAFKA_MAX < <(docker_stat "$KAFKA_NAME")
 if gw_on; then   # 게이트웨이 앱 CPU · 스레드 — 같은 창 START_MS ~ END_MS
   read -r GW_CPU_AVG GW_CPU_MAX _ < <(cpu_stat_file "$WORK/gw.txt" 2)
-  GW_THREADS_MAX=$(awk -v s="$START_MS" -v e="$END_MS" '$1 >= s && $1 <= e && $3 ~ /^[0-9]/ && $3 > m { m = $3 } END { print m + 0 }' "$WORK/gw.txt")
+  GW_THREADS_MAX=$(awk -v s="$START_MS" -v e="$END_MS" '$1 >= s && $1 <= e && $3 ~ /^[0-9]/ { n++; if ($3 > m) m = $3 } END { if (n) print m + 0; else print "null" }' "$WORK/gw.txt")
 else GW_CPU_AVG=null; GW_CPU_MAX=null; GW_THREADS_MAX=null; fi
 [ "$MYSQL_AVG" != null ] && [ "$KAFKA_AVG" != null ] || echo "[$RUN] 경고: 처리 구간 안의 docker stats 표본이 없다 (MySQL $MYSQL_AVG · Kafka $KAFKA_AVG) — 구간이 너무 짧다. N 을 늘린다" >&2
 [ "${SAMPLES:-0}" -ge 10 ] || echo "[$RUN] 경고: Actuator CPU 표본이 ${SAMPLES:-0}개 (< 10) — 구간이 너무 짧다. N 을 늘린다" >&2

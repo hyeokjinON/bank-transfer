@@ -66,7 +66,6 @@ OUT="$RAW/$NAME.json"
 WORK="build/load-p62/$NAME"
 BANK_FILES="$WORK/bank-files"   # 회차마다 새로 — 1원 이체 수(DV 줄)를 이 회차만 센다. 개발용 ./bank-files 와 따로
 vt_args "$WORK/app.jfr"   # VT=1 이면 VT_JVM_ARGS · VT_APP_ARGS (lib/vt.sh)
-BANK_PORT=9190
 API="http://localhost:$PORT"
 JAR="apps/$APP/build/libs/$APP-0.1.0-SNAPSHOT.jar"
 BANK_CP="apps/mock-bank/build/install/mock-bank/lib/*"
@@ -149,6 +148,7 @@ for _ in $(seq 120); do
   sleep 1
 done
 curl -sf "$API/actuator/health" >/dev/null 2>&1 || die "앱이 120초 안에 뜨지 않았다 — $WORK/app.log"
+gw_check_mode "$WORK/app.log"
 INFO=$(curl -sf "$API/actuator/info") || die "actuator info 를 읽지 못했다"
 grep -q "\"web-mode\":\"$MODE\"" <<<"$INFO" || die "앱의 판이 $MODE 가 아니다: $INFO"
 grep -qE "\"maximum-pool-size\":\"?20\"?[,}]" <<<"$INFO" || die "앱의 Hikari 가 20 이 아니다: $INFO"

@@ -35,6 +35,14 @@ gw_api_args() {
   gw_on || return 0
   printf '%s\n' --bank.gateway.mode=http --bank.gateway.http.base-url="$(gw_url)" --bank.gateway.http.client="${CLIENT:-webclient}"
   [ -z "${GW_POOL:-}" ] || printf '%s\n' --bank.gateway.http.max-connections="$GW_POOL"
+  # 측정 앱은 로그를 WARN 으로 낮추므로, http 판 기동 줄(gw_check_mode 가 읽는다)이 보이게 설정 패키지만 INFO
+  printf '%s\n' --logging.level.io.github.hyeokjinon.banktransfer.api.config=INFO
+}
+
+# API 가 정말 http 판으로 떴는지 (조용히 direct 로 떨어져 원자료 이름이 거짓이 되지 않게) — 기동 줄 "bank gateway mode=http client=<client>"
+gw_check_mode() {   # $1 = API 로그 파일
+  gw_on || return 0
+  grep -q "bank gateway mode=http client=${CLIENT:-webclient}" "$1" || die "API 가 게이트웨이 http 판(client=${CLIENT:-webclient})으로 뜨지 않았다 — $1"
 }
 
 gw_start() {   # $1 = 로그 파일

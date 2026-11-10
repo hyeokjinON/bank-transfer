@@ -28,10 +28,10 @@ table() {   # $1 = 회차 정규식, $2 = 제목
   echo
   echo "### $2"
   echo
-  local gh="" gs=""
-  [ "$GWCOLS" = 1 ] && { gh="| 게이트웨이 "; gs="|---"; }
-  echo "| 모드 $gh| 지연 (ms) | 상한 | Hikari | N | 회차 | 처리량 (건/s) | 예상 (건/s) | p50 (ms) | p95 (ms) | 시스템 CPU 평균 / 최대 (%) | CPU 표본 | API CPU 평균 (%) | MySQL CPU 평균 (%) | 은행 최대 동시 | 편차 |$([ "$GWCOLS" = 1 ] && echo " gw CPU 평균 / 최대 (%) | gw 스레드 최대 |")"
-  echo "|---${gs}|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+  local gh="" gw2=""
+  [ "$GWCOLS" = 1 ] && { gh="| 게이트웨이 "; gw2=" gw CPU 평균 / 최대 (%) | gw 스레드 최대 |"; }
+  echo "| 모드 $gh| 지연 (ms) | 상한 | Hikari | N | 회차 | 처리량 (건/s) | 예상 (건/s) | p50 (ms) | p95 (ms) | 시스템 CPU 평균 / 최대 (%) | CPU 표본 | API CPU 평균 (%) | MySQL CPU 평균 (%) | 은행 최대 동시 | 편차 |$gw2"
+  echo "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|$([ "$GWCOLS" = 1 ] && echo "---|---|---|")"
   [ ${#files[@]} -gt 0 ] || return 0
   # 파이프 뒤 while 은 하위 셸이라 local 을 쓰지 않는다 (변수는 그 안에서만 산다)
   for f in "${files[@]}"; do key "$f"; done | sort -u -k1,1 -k2,2n -k3,3n -k4,4n -k5,5 | while read -r mode delay cap hikari gw; do
