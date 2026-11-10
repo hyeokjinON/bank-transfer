@@ -92,7 +92,9 @@ abstract class HttpBankGatewayClientContract {
         assertIs<BankUnavailableException>(e)
         assertFalse(e is BankNotSentException)
         Thread.sleep(300)
-        assertEquals(1, requests.get())   // 자동 재시도 없음 (WebClient: disableRetry, JDK: enableAllMethodRetry 기본 false)
+        // 자동 재시도 없음. 주의: 이 테스트는 disableRetry(true) 만 따로 가르지 못한다 — FIN 종료는 PrematureCloseException 이고
+        // Reactor Netty 1.3.7 은 헤더를 보낸 뒤에는 스스로 재시도하지 않는다. 라이브러리 동작 + 설정을 함께 고정한다.
+        assertEquals(1, requests.get())
     }
 
     private companion object {

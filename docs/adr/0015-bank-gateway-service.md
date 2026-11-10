@@ -13,7 +13,7 @@
 2. **api ↔ 게이트웨이는 동기 HTTP** 다 (`apps/bank-gateway`, 포트 8082, 경로 `/internal/v1/bank/{name-inquiries,transfers,inquiries}`). 은행 호출은 결과를 알아야 다음 상태를 정하는 요청/응답이고, 출금은 이미 아웃박스 → Kafka 뒤에서 호출되어 사용자 쪽 비동기와 버퍼가 있다. 처리량은 전송 방식이 아니라 **동시에 기다릴 수 있는 수**가 정한다 (P6-1: 같은 Kafka 컨슈머가 블로킹 20.9 → 코루틴 387건/s).
 3. **실패 분류는 기존 규칙 그대로**: `BankNotSentException` 만 "안 보냄", 나머지는 "모름" (다시 보내는 쪽이 더 위험하다). HTTP 클라이언트는 "은행에 확실히 안 갔다" 를 증명할 수 있을 때만 "안 보냄" 을 만든다 — 연결 실패, 연결 풀에서 연결을 못 얻음, 게이트웨이의 `503 BANK_NOT_SENT`. **503 은 `BANK_NOT_SENT` 코드가 있을 때만** "안 보냄" 이다 — 프록시 · 로드밸런서가 만든 503 은 요청이 게이트웨이에 닿았는지 모르므로 "모름" 이다. 응답 읽기 시간 초과 · 응답 전 끊김 · 502 · 504 · 본문 해석 실패는 모두 "모름" → 결과조회.
 4. **HTTP 클라이언트 자동 재시도는 끈다** (WebClient `disableRetry(true)`, JDK 는 POST 를 다시 보내지 않는 기본값을 테스트로 고정). 재시도는 지금처럼 재시도 토픽 · 정리 작업만 한다.
-5. **api 가 끊어도 게이트웨이는 은행 송신을 취소하지 않는다.** 보낸 전문은 되돌릴 수 없다. 늦은 응답은 버려지고 api 쪽 건은 "모름" → 결과조회로 확정된다 (`Mono.fromFuture(f, suppressCancel = true)`, MVC 판은 테스트로 고정).
+5. **api 가 끊어도 게이트웨이는 은행 송신을 취소하지 않는다.** 보낸 전문은 되돌릴 수 없다. 늦은 응답은 버려지고 api 쪽 건은 "모름" → 결과조회로 확정된다 (`Mono.fromFuture(f, suppressCancel = true)`, MVC 판 포함 4조합에서 "클라이언트가 응답 시간 초과로 연결을 닫아도 은행에는 한 번 갔고 대기 표가 빈다" 를 테스트로 고정. 호출자 future 취소는 의존 future 라 HTTP 교환에 닿지 않는다는 것도 별도 테스트).
 6. **서버 기본은 WebFlux** (DB · Kafka 없이 HTTP → 은행 TCP 를 기다리기만 하는 앱이라 이벤트 루프가 맞다), **클라이언트 기본은 WebClient** (`toFuture()` 로 기존 `CompletableFuture` 유지, 연결 풀 조절, P9 지표). 비교 판으로 MVC 비동기 서버 · JDK `HttpClient` 를 같이 구현하고 설정으로 고른다 (`spring.main.web-application-type`, `bank.gateway.http.client`).
 7. **계약 DTO 는 한 모듈(`modules/bank-gateway-http`)을 서버 · 클라이언트가 같이 쓴다.** 같은 저장소 · 같은 버전 배포라 어긋날 일이 없다.
 8. **게이트웨이는 1대** 다 (분리 목적이 은행 연결을 한 곳으로 모으는 것). 이중화는 P8-3.

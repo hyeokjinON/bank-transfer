@@ -64,7 +64,7 @@ flowchart LR
 | `modules/account-infra` | 1원인증의 바깥 어댑터를 두 앱이 같이 쓰도록 모았다 (P6-2): JPA 엔티티 · 저장소(`JpaVerificationRepository`), 은행 응답 해석(`holderNameOf` · `requireOk` · `BankRejectedException`), 오류 계약 기대표(test fixtures). 테이블 소유(Flyway)는 `apps/api` 그대로 | `account`, `bank-gateway` | Spring Data JPA |
 | `apps/api` | REST API, 예외 → HTTP 매핑, 조립(`AppConfiguration`), 어댑터, 잔고 SQL(`WalletLedger` · 차감 전략 `WalletDebit`), JPA 저장소(`persistence/`), Kafka 발행 · 소비(`messaging/`) | `account`, `transfer`, `bank-gateway` | Spring Boot 4 (MVC, JPA, Kafka) |
 | `apps/api-reactive` | WebFlux(Reactor Netty) 별도 앱, 포트 8081. 1원인증 요청 `POST /api/v1/account-verifications` 하나만 (코루틴 · Reactor 두 판). Kafka · 스케줄러 · 배치 · Flyway 없음 (P6-2, [ADR-0013](docs/adr/0013-web-verification-webflux-comparison.md)) | `account`, `account-infra`, `bank-gateway`, `transfer` (참조 번호 생성기 `RandomReferenceGenerator` 하나) | Spring WebFlux |
-| `modules/bank-gateway-http` | 게이트웨이 HTTP 계약(DTO · 경로 · 오류 코드), 실패 분류(`BankNotSentException` 만 "안 보냄"), `BankGateway` 의 HTTP 클라이언트 두 판(WebClient · JDK `HttpClient`), 테스트 픽스처(Toxiproxy · `GatewayProcess`) (P8-1, [ADR-0015](docs/adr/0015-bank-gateway-service.md)) | `bank-gateway` (api) | Reactor Netty WebClient · JDK HttpClient |
+| `modules/bank-gateway-http` | 게이트웨이 HTTP 계약(DTO · 경로 · 오류 코드), 실패 분류(`BankNotSentException` 만 "안 보냄"), `BankGateway` 의 HTTP 클라이언트 두 판(WebClient · JDK `HttpClient`), 테스트 픽스처(`TcpCutProxy` · `GatewayProcess`) (P8-1, [ADR-0015](docs/adr/0015-bank-gateway-service.md)) | `bank-gateway` (api) | Reactor Netty WebClient · JDK HttpClient |
 | `apps/bank-gateway` | 은행 FEP 연결 하나를 가지고 내부 HTTP API 3개로 노출. 포트 8082, 서버 두 판(WebFlux 기본 · MVC 비동기), 오류 → 503 `BANK_NOT_SENT` · 504 · 502, `/actuator/health/bankConnection`. DB · Kafka 없음 (P8-1) | `bank-gateway`, `bank-gateway-http` | Spring WebFlux / MVC |
 | `apps/mock-bank` | 모의 은행 FEP 서버. 실행 가능 + 테스트 픽스처 | `bank-protocol` (api) | Netty |
 
@@ -83,6 +83,8 @@ apps/bank-gateway ──▶ modules/bank-gateway, modules/bank-gateway-http
 apps/mock-bank ─────────────────────▶ modules/bank-protocol
 (test) bank-gateway, apps/api ──▶ apps/mock-bank
 ```
+
+참고: `bank-gateway-http` 가 spring-webflux · reactor-netty 를 끌고 오므로 `apps/api` 런타임 클래스패스에도 `direct` 모드에서 들어 있다 (웹 타입은 그대로 SERVLET, Boot 의 `WebClient.Builder` 자동 설정과 기본 `RestClient.create()` 의 요청 팩토리가 Reactor Netty 로 바뀌는 정도).
 
 규칙: `account` 의 build 파일에 Netty·Spring 이 없으므로, 도메인에서 import 하면 **컴파일이 실패한다**. 경계는 문서가 아니라 빌드가 강제한다.
 

@@ -148,6 +148,8 @@ class GatewayContractTest {
         assertIs<BankUnavailableException>(e)
         assert(e !is BankNotSentException)
         Thread.sleep(500)
+        // 재시도 없음: FIN 종료(PrematureCloseException)는 Reactor Netty 가 재시도 대상으로 보지 않고, 헤더를 보낸 뒤에는 재시도를 스스로 끈다.
+        // 이 테스트는 disableRetry 만 따로 가르지 못한다 — 라이브러리 동작 + 설정을 함께 고정한다.
         assertEquals(1, bank.depositsOf(OK_ACCOUNT).count { it.reference == r })
     }
 
@@ -163,21 +165,27 @@ class GatewayContractTest {
     }
 
     @ParameterizedTest @MethodSource("combos")
-    fun `9 - 응답 읽기 시간 초과는 모름`(combo: Combo) {
+    fun `9 - 응답 읽기 시간 초과는 모름, 클라이언트가 연결을 닫아도 은행에는 한 번 갔고 대기 표는 빈다`(combo: Combo) {
         awaitConnected(combo)
         bank.responseDelay = Duration.ofMillis(400)   // 게이트웨이 은행 시간 초과(500ms) 안, 클라이언트(200ms) 밖
-        val e = client(combo) { it.copy(responseTimeout = Duration.ofMillis(200)) }.transfer("090", OK_ACCOUNT, 1_000, "C9", ref()).failure()
+        val r = ref()
+        val e = client(combo) { it.copy(responseTimeout = Duration.ofMillis(200)) }.transfer("090", OK_ACCOUNT, 1_000, "C9", r).failure()
         assertIs<BankUnavailableException>(e)
         assert(e !is BankNotSentException)
+        // 실제로 진행 중인 HTTP 연결이 클라이언트 쪽에서 닫혔다 — 그래도 게이트웨이는 송신을 취소하지 않는다.
+        await.atMost(Duration.ofSeconds(5)) untilAsserted {
+            assertEquals(1, bank.depositsOf(OK_ACCOUNT).count { it.reference == r })   // 은행은 정확히 한 번 받았다
+            assertEquals(0, appBank(combo).pendingCount)                                // 응답을 받고 대기 표를 비웠다
+        }
     }
 
     @ParameterizedTest @MethodSource("combos")
     /**
-     * 증명하는 것: 호출자가 응답 전에 끊어도 은행은 이체를 정확히 한 번 받았고, 은행 응답이 와서 게이트웨이의 대기 표가 비었다.
-     * 이 보장의 근거는 GatewayEndpoints 가 은행 future 가 아니라 그 의존 future(handle)를 돌려주는 구조다 — CompletableFuture 의 취소는
-     * 위로 번지지 않는다. Mono.fromFuture(.., suppressCancel = true) 는 두 번째 안전장치이며, 이 테스트가 그것의 유무를 가르지는 않는다.
+     * 증명하는 것: 호출자가 돌려받은 future 를 취소해도 HTTP 교환은 계속되어 은행은 이체를 한 번 받고 대기 표가 빈다.
+     * 두 클라이언트 모두 handle {} 가 만든 의존 future 를 돌려주므로 취소가 HTTP 교환으로 번지지 않는다 — 이 테스트는 연결을 닫지 않는다.
+     * 연결이 진행 중에 닫히는 경우(게이트웨이가 끊김을 받는 경우)는 ⑨ 가 다룬다.
      */
-    fun `10 - 호출자가 끊어도 은행 송신은 취소되지 않는다`(combo: Combo) {
+    fun `10 - 호출자 future 를 취소해도 HTTP 교환은 계속된다 (의존 future)`(combo: Combo) {
         awaitConnected(combo)
         bank.responseDelay = Duration.ofMillis(300)
         val r = ref()

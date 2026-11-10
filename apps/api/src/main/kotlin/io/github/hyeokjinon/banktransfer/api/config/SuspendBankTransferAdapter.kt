@@ -12,7 +12,8 @@ import java.util.concurrent.CompletionException
  * 분류는 블로킹 판과 같은 [classifyBankFailure] 다. 다른 것은 취소 하나:
  * 기다리는 중 코루틴이 취소되면(앱 종료 등) 은행에 갔는지 모른다 — 분류하지 않고 취소를 다시 던진다.
  * NotSent 로 돌려주면 RECEIVED 로 되돌아가 다시 보내진다(이중 지급). 출금은 SENDING 으로 남고 정리 작업이 30초 뒤 UNKNOWN → 결과조회로 확정한다.
- * await 는 취소될 때 게이트웨이의 future 도 취소한다 — 대기 표 항목은 응답 시간 초과(3초) 뒤 지워진다 (BankGatewayClientTest 가 고정).
+ * direct: await 는 취소될 때 게이트웨이의 future 도 취소한다 — 대기 표 항목은 응답 시간 초과(3초) 뒤 지워진다 (BankGatewayClientTest 가 고정).
+ * http: await 취소는 의존 future 만 취소해 HTTP 교환은 끝까지 가고 응답은 버려진다 (대기 표는 게이트웨이 프로세스에 있다).
  */
 class SuspendBankTransferAdapter(private val client: BankGateway) : SuspendBankTransferPort {
 

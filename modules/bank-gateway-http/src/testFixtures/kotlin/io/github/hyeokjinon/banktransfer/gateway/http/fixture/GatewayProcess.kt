@@ -36,7 +36,11 @@ class GatewayProcess private constructor(private val process: Process, val port:
         }
     }
 
+    /** 테스트 JVM 이 강제 종료돼도 자식 게이트웨이 JVM 이 남지 않게 한다. */
+    private val shutdownHook = Thread { process.destroyForcibly() }.also { Runtime.getRuntime().addShutdownHook(it) }
+
     override fun close() {
+        try { Runtime.getRuntime().removeShutdownHook(shutdownHook) } catch (_: IllegalStateException) { /* 종료 중 */ }
         process.destroy()
         if (!process.waitFor(10, TimeUnit.SECONDS)) process.destroyForcibly().waitFor(5, TimeUnit.SECONDS)
     }

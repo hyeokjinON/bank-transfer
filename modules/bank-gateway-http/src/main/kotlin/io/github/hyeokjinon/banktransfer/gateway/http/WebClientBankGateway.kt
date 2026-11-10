@@ -9,6 +9,7 @@ import org.springframework.http.client.reactive.ReactorClientHttpConnector
 import org.springframework.web.reactive.function.client.WebClient
 import reactor.netty.http.client.HttpClient
 import reactor.netty.resources.ConnectionProvider
+import java.time.Duration
 import java.util.concurrent.CompletableFuture
 
 /**
@@ -24,6 +25,9 @@ class WebClientBankGateway(private val settings: HttpGatewaySettings) : HttpBank
     private val provider: ConnectionProvider = ConnectionProvider.builder("bank-gateway")
         .maxConnections(settings.maxConnections)
         .pendingAcquireTimeout(settings.pendingAcquireTimeout)
+        // 서버(servlet 판)의 유휴 keep-alive 종료보다 짧게 — 닫히는 중인 연결을 재사용해 생기는 쓸데없는 UNKNOWN 을 피한다.
+        .maxIdleTime(Duration.ofSeconds(15))
+        .evictInBackground(Duration.ofSeconds(30))
         .build()
 
     private val webClient: WebClient = WebClient.builder()

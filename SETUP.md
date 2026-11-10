@@ -86,7 +86,7 @@ cd bank-transfer
 | 8081 | `apps/api-reactive` (개발용, WebFlux 별도 앱 — 실행 구성 8 · 9) |
 | 8082 | `apps/bank-gateway` (개발용, 실행 구성 11, P8-1) |
 | 9090 | 모의 은행 (개발용) |
-| 18080 · 18081 · 9190 | 측정 전용 `apps/api` · `apps/api-reactive` · 모의 은행 (`load/verification/run.sh` 가 띄우고 내린다, 평소엔 비어 있어야 한다. [OPERATION §12](OPERATION.md#12-웹-1원인증-판--webflux-측정-p6-2)) |
+| 18080 · 18081 · 9190 · 18082 · 28082 · 8474 | 측정 전용 `apps/api` · `apps/api-reactive` · 모의 은행 · 게이트웨이(18082) · Toxiproxy 프록시(28082) · Toxiproxy 제어(8474) (`load/verification/run.sh` · `load/lib/gateway.sh` 가 띄우고 내린다, 평소엔 비어 있어야 한다. [OPERATION §12](OPERATION.md#12-웹-1원인증-판--webflux-측정-p6-2)) |
 | 3306 · 6379 · Kafka | MySQL · Redis · Kafka (`infra/`) |
 
 ## 3. Windows 에서 알아둘 것

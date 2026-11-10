@@ -35,7 +35,7 @@ data class GatewayMaintenanceProperties(
 class GatewayConfiguration {
 
     @Bean
-    fun clock(): Clock = Clock.systemUTC()
+    fun clock(): Clock = Clock.system(ZoneId.of("Asia/Seoul"))   // 저장소 시간대 정책은 KST (docs/database.md)
 
     /** 점검 중에는 전문을 보내지 않는다 (P5-1) — 503 BANK_NOT_SENT 로 돌려준다 (호출자에게 "안 보냄"). */
     @Bean(destroyMethod = "close")

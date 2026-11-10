@@ -91,7 +91,7 @@ services:
       kafka:
         condition: service_healthy
 
-  # 망 지연 · 끊김 주입 (P8-1). 기본 실행에는 포함 안 됨 — 측정 스크립트(load/lib/gateway.sh)가 쓴다:
+  # 망 지연 주입 (P8-1; 측정은 latency toxic 만, 연결 끊김은 TcpCutProxy 테스트 픽스처). 기본 실행에는 포함 안 됨 — 측정 스크립트(load/lib/gateway.sh)가 쓴다:
   #   docker compose -f infra/docker-compose.yml --env-file infra/.env --profile chaos up -d toxiproxy
   # 제어 API :8474 (프록시 · toxic 만들기), 프록시 :28082 → PC 에서 띄운 측정용 게이트웨이(host.docker.internal:18082)
   toxiproxy:
