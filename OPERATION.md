@@ -230,6 +230,18 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env down -v        
 | 기동 시 `Communications link failure` | MySQL 실행 여부 | infra 먼저 `up -d --wait` |
 | 기동 시 `Schema-validation` / Flyway 체크섬 오류 | 엔티티 · 마이그레이션 변경 | 적용된 V 파일을 고치지 않았는지 확인. 로컬은 `down -v` 로 초기화 |
 
+### 게이트웨이 장애 때 (P8-1, `bank.gateway.mode=http` 일 때만)
+api 가 은행이 아니라 게이트웨이(`apps/bank-gateway`, 8082)를 부른다. 순서대로 본다.
+1. **게이트웨이 상태**: `GET :8082/actuator/health/bankConnection` — `UP` 이면 게이트웨이가 은행에 붙어 있다, `DOWN` 이면 은행 쪽 문제(모의 은행 · 포트 · 재접속 로그). 응답이 아예 없으면 게이트웨이 프로세스가 내려가 있다.
+2. **api 로그로 "안 보냄" 과 "모름" 을 가른다**:
+   - `bank transfer not sent` (INFO) — 은행에 확실히 안 갔다 (게이트웨이 연결 실패 · 연결 풀 대기 초과 · 대기열 초과 · 503 `BANK_NOT_SENT`). 출금은 **재시도 토픽**으로 간다.
+   - `bank transfer result unknown` (WARN) — 보냈을 수 있다 (응답 시간 초과 · 응답 전 끊김 · 502 · 504). **결과조회**로 확정한다 (다시 보내지 않는다). 이 로그가 늘면 게이트웨이 ↔ 은행 구간 지연부터 본다.
+3. **게이트웨이 로그**: `bank call failed: request=… status=… code=… cause=…` — 상태 · 코드(`BANK_NOT_SENT` · `BANK_TIMEOUT` · `BANK_UNAVAILABLE` · `INVALID_REQUEST` · `INTERNAL`)로 어느 분류였는지 본다.
+4. **게이트웨이를 내린 채 출금**하면 재시도 토픽 → DLT → 재발행 한도(약 26분) 뒤 `FAILED E001` 이다. 그 안에 게이트웨이를 올리면 완료된다. 1원인증은 그동안 오류 응답이다 (단일 장애점, [ADR-0015](docs/adr/0015-bank-gateway-service.md)).
+5. **점검 설정 두 곳을 같게**: `bank.maintenance.*` 는 api(접수 503)와 게이트웨이(송신 보류) 양쪽에 있다. 어긋나면 api 는 접수하고 게이트웨이는 보류하거나 그 반대가 된다 — 돈은 안전하지만(보류는 "안 보냄") 동작이 헷갈린다.
+6. **연결 풀**: `bank.gateway.http.max-connections`(기본 500)를 줄여 둔 경우 동시 호출이 풀 × 2 를 넘으면 즉시 "안 보냄" 이 되어 재시도로 넘어간다 (측정 D, [결과](docs/perf/p8-1-gateway-split.md)).
+7. 게이트웨이 포트(8082)는 **인증이 없다** — 내부망 밖에 열지 않는다.
+
 ### 자주 막히는 곳
 - PowerShell 에서 `bash …` 실패 → Git Bash 로 실행 ([SETUP §3](SETUP.md#3-windows-에서-알아둘-것)).
 - Git Bash 에서 `/opt/...` 경로 깨짐 → `MSYS_NO_PATHCONV=1` (`verify.sh` 는 처리돼 있음).

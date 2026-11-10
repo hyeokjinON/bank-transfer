@@ -3,6 +3,22 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 를 따르고, 릴리스 단위는 로드맵 단계(P0~P9)다.
 항목은 "무엇이 바뀌었나"를 쓰고, 이유는 PR · ADR 로 연결한다.
 
+## P8-1 은행 게이트웨이 서비스 분리 (PR 대기, [ADR-0015](docs/adr/0015-bank-gateway-service.md) 제안)
+### Added
+- 신규 앱 `apps/bank-gateway` (포트 8082): 은행 FEP 연결 하나를 내부 HTTP API 3개(`/internal/v1/bank/{name-inquiries,transfers,inquiries}`)로 노출. 오류는 503 `BANK_NOT_SENT` · 504 `BANK_TIMEOUT` · 502 `BANK_UNAVAILABLE` · 400 · 500, 점검 시간 송신 보류, `/actuator/health/bankConnection`. 서버 두 판: WebFlux(기본) · MVC 비동기 (`spring.main.web-application-type`). 요청이 끊겨도 은행 송신은 취소하지 않는다.
+- 신규 모듈 `modules/bank-gateway-http`: 계약 DTO · 실패 분류(`BankNotSentException` 만 "안 보냄", 503 은 코드가 있을 때만) · 클라이언트 두 판(WebClient 기본 · JDK `HttpClient`, `bank.gateway.http.client`), 자동 재시도 끔, 테스트 픽스처(`GatewayProcess` · `TcpCutProxy`).
+- `apps/api` · `apps/api-reactive` 설정 `bank.gateway.mode` (`direct` 기본 | `http`)와 `bank.gateway.http.*` (base-url · max-connections 500 · connect-timeout 1s · pending-acquire-timeout 1s · response-timeout 5s).
+- Toxiproxy (Compose 프로필 `chaos`): 망 지연 · 끊김 주입, Testcontainers 끊김 테스트. 계약 테스트 4조합(서버 2 × 클라이언트 2), "취소되지 않음" · "재시도 없음" 고정 테스트.
+- 측정 도구 확장: `GATEWAY` · `SERVER` · `CLIENT` · `GW_POOL` · `NET_DELAY`, 게이트웨이 CPU · 스레드 표본 · 스레드 덤프. 측정 42회 + 재측정 2회 (원자료 `docs/perf/raw/p8-1/`).
+- 테스트: 전체 608개 (P7 524 + P8-1 84, 건너뜀 2).
+- ADR-0015 (제안), OPERATION "게이트웨이 장애 때", [측정 결과](docs/perf/p8-1-gateway-split.md), SETUP 2-3-1, 실행 구성 `11. Bank Gateway (8082)` · `12. API (http 게이트웨이)`.
+### Changed
+- 처리 코드(`TransferProcessor` · 어댑터)가 구현(Netty 직결)이 아니라 `BankGateway` 인터페이스를 본다 (동작 변화 없음, 기본 `direct`).
+- `BankTimeoutException` 에 `timeout` 이 들어갔다 (HTTP 504 해석에 필요).
+- 측정 요약 스크립트(`load/consumer/summarize.sh` · `load/verification/summarize.sh`)가 원자료 종류별로 자기 JSON 만 읽는다 (컨슈머 `"tps"` · 웹 `"rate"` 키) — 한 폴더에 섞여 있어도 돈다 (`70c8ead`).
+### Fixed
+- 연결 풀 대기열 상한 초과(`PoolAcquirePendingLimitException`, Reactor Netty 기본 = 최대 연결 × 2)가 "모름" 으로 분류되던 것을 "안 보냄" 으로 (`7afaf5b`). 측정 D 풀 32 첫 두 회차가 정확성 확인에서 실패해 드러났다 (이중 송신은 없었다). 실제 라이브러리 예외로 분류 테스트, 풀 1 · 동시 4건 재현 테스트 추가.
+
 ## [Unreleased]
 ### Added
 - 프로젝트 안내 문서: `CLAUDE.md`, `ARCHITECTURE.md`, `SETUP.md`, `OPERATION.md`, `HANDOVER.md`, `CHANGELOG.md`.

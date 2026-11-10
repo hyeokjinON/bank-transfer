@@ -35,6 +35,13 @@ cd bank-transfer
 4. 실행 목록의 `0. Mock Bank + API` 실행 → `http/account-verification.http` 의 ▶ 로 요청 (Ultimate).
    Community Edition 은 `.http` 실행이 없다 → Postman 에서 저장소 폴더를 열면 `postman/collections/bank-transfer` 컬렉션이 보인다 (요청마다 Test Results 로 통과/실패 표시).
 
+### 2-3-1. 은행 게이트웨이 띄우기 (선택, P8-1)
+기본(`bank.gateway.mode=direct`)에서는 api 가 은행에 직접 붙으므로 게이트웨이가 필요 없다. 게이트웨이를 거치려면 **모의 은행 → 게이트웨이 → api** 순서로 띄운다.
+1. 실행 구성 `1. Mock Bank (9090)` (인프라는 2-4 에서 먼저)
+2. 실행 구성 `11. Bank Gateway (8082)` — 또는 `./gradlew :apps:bank-gateway:bootRun`
+3. 실행 구성 `12. API (http 게이트웨이)` — 또는 `./gradlew :apps:api:bootRun --args="--bank.gateway.mode=http"` (`2. API (8080)` 과 같이 띄우지 않는다, 포트 8080 이 같다)
+4. 확인: `GET http://localhost:8082/actuator/health/bankConnection` → `UP` (은행에 붙어 있을 때)
+
 ### 2-4. Docker Desktop (P3 부터 필요)
 1. **관리자 PowerShell**: `wsl --install` → 재부팅.
 2. Docker Desktop 설치 (WSL 2 엔진 체크) → 실행 → 엔진이 Running 이 될 때까지 대기.
@@ -77,6 +84,7 @@ cd bank-transfer
 |---|---|
 | 8080 | `apps/api` (개발용) |
 | 8081 | `apps/api-reactive` (개발용, WebFlux 별도 앱 — 실행 구성 8 · 9) |
+| 8082 | `apps/bank-gateway` (개발용, 실행 구성 11, P8-1) |
 | 9090 | 모의 은행 (개발용) |
 | 18080 · 18081 · 9190 | 측정 전용 `apps/api` · `apps/api-reactive` · 모의 은행 (`load/verification/run.sh` 가 띄우고 내린다, 평소엔 비어 있어야 한다. [OPERATION §12](OPERATION.md#12-웹-1원인증-판--webflux-측정-p6-2)) |
 | 3306 · 6379 · Kafka | MySQL · Redis · Kafka (`infra/`) |
