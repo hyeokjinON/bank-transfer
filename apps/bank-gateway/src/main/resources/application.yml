@@ -1,0 +1,36 @@
+# 은행 게이트웨이 앱 (P8-1). 은행 FEP 연결 하나를 가지고 내부 HTTP API 3개로 노출한다. 내부망 전용 — 인증 없음 (P8-3 에서 NetworkPolicy).
+server:
+  port: 8082
+  shutdown: graceful
+spring:
+  application:
+    name: bank-gateway
+  main:
+    web-application-type: reactive   # reactive = WebFlux 판(기본) | servlet = MVC 비동기 판 (P8-1 비교)
+
+bank:
+  gateway:                     # api 의 direct 모드와 같은 값
+    host: localhost
+    port: 9090
+    response-timeout: 3s       # 호출자의 HTTP 응답 시간 초과(5s)보다 짧아야 한다 (스펙 §4-4)
+    poll-interval: 30s
+  maintenance:                 # 송신 보류 (P5-1). api 의 접수 503 과 같은 창이어야 한다 (두 곳 설정 — 스펙 §10)
+    enabled: true
+    start: "23:50"
+    end: "00:10"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics   # metrics: 측정 스크립트가 CPU · 스레드 수를 읽는다
+  endpoint:
+    health:
+      show-details: always             # bankConnection 상태를 본다 (내부망 전용)
+  info:
+    env:
+      enabled: true
+
+info:
+  gateway:
+    server: ${spring.main.web-application-type}

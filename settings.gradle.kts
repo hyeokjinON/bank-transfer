@@ -12,3 +12,4 @@ include(":modules:bank-gateway-http")  // 게이트웨이 앱의 HTTP 계약 · 
 include(":apps:api")                // Spring Boot REST API
 include(":apps:api-reactive")       // 1원인증 요청만 하는 WebFlux 앱 (P6-2 — MVC 와 비교용, 운영 기본 아님)
 include(":apps:mock-bank")          // 모의 은행 FEP 서버 (Netty)
+include(":apps:bank-gateway")       // 은행 FEP 연결을 혼자 가진 게이트웨이 앱, 내부 HTTP API (P8-1)
