@@ -34,6 +34,10 @@ case "$ACTION" in steady|restart|kill) ;; *) die "모르는 동작: $ACTION" ;; 
 [[ "$ROUND" =~ ^[0-9]{1,2}$ ]] || die "회차는 숫자 1 ~ 2자리: $ROUND"
 RATE=${RATE:-20}; DURATION=${DURATION:-60s}; ACTION_AT=${ACTION_AT:-20}; SETTLE=${SETTLE:-240}
 RUN="$ACTION-$ROUND"
+for v in RATE ACTION_AT SETTLE; do [[ "${!v}" =~ ^[1-9][0-9]*$ ]] || die "$v 는 양의 정수여야 한다: ${!v}"; done
+[[ "$DURATION" =~ ^([1-9][0-9]*)s$ ]] || die "DURATION 은 <숫자>s 형식이어야 한다: $DURATION"
+DURATION_S=${BASH_REMATCH[1]}
+if [ "$ACTION" != steady ] && [ "$ACTION_AT" -ge "$DURATION_S" ]; then die "ACTION_AT($ACTION_AT)는 DURATION(${DURATION_S}s)보다 작아야 한다 — 부하가 끝난 뒤의 동작은 확인할 수 없다"; fi
 OUT_DIR=docs/perf/raw/p8-2; OUT="$OUT_DIR/$RUN.json"; K6J="$OUT_DIR/$RUN.k6.json"; WORK="build/load-p82/$RUN"
 rm -rf "$WORK"; mkdir -p "$OUT_DIR" "$WORK"; rm -f "$OUT" "$OUT.invalid" "$K6J"
 
@@ -53,7 +57,10 @@ T0=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # --- 3. 부하 + 동작 ---
 echo "[$RUN] k6 ${RATE}건/s × $DURATION → nginx:80, 동작 $ACTION @ ${ACTION_AT}s"
-dc --profile load run --rm -e BASE_URL=http://nginx:80 -e RUN="$RUN" -e RATE="$RATE" -e DURATION="$DURATION" \
+K6_NAME="p82-k6-$RUN"
+docker rm -f "$K6_NAME" >/dev/null 2>&1 || true
+trap 'docker rm -f "$K6_NAME" >/dev/null 2>&1 || true' EXIT   # 중간에 실패해도 k6 컨테이너가 남지 않게
+dc --profile load run --rm --name "$K6_NAME" -e BASE_URL=http://nginx:80 -e RUN="$RUN" -e RATE="$RATE" -e DURATION="$DURATION" \
   k6 run --quiet /scripts/compose/withdraw.js > "$WORK/k6.out" 2>&1 &
 K6_PID=$!
 T_ACTION=null; AUTO_RESTART=null
@@ -68,7 +75,7 @@ fi
 wait "$K6_PID" || die "k6 가 실패했다 — $WORK/k6.out"
 [ -f "$K6J" ] || die "k6 요약이 없다 — $WORK/k6.out"
 if [ "$ACTION" = kill ]; then
-  # restart: unless-stopped 가 kill 뒤에 다시 띄웠나 (Docker 는 사람이 멈춘 컨테이너를 다시 띄우지 않는다 — kill 이 그 경우인지 기록)
+  # kill 뒤 Docker 가 api-1 을 스스로 다시 띄웠는지 기록한다 (unless-stopped 는 사람이 멈춘 컨테이너를 다시 띄우지 않는다 — docker kill 이 그 경우인지 확인)
   st=$(docker inspect -f '{{.State.Status}}' "$(dc --profile app ps -aq api-1)")
   if [ "$st" = running ]; then AUTO_RESTART=true; else AUTO_RESTART=false; fi
 fi
@@ -118,6 +125,11 @@ cp "$WORK/rebalance.txt" "$OUT_DIR/$RUN.rebalance.txt"
 cp "$WORK/nginx-errors.txt" "$OUT_DIR/$RUN.nginx-errors.txt"
 
 FAILS=()
+[[ "$ACCEPTED" =~ ^[1-9][0-9]*$ ]] || FAILS+=("접수된 키가 양의 정수가 아님: ${ACCEPTED:-없음}")
+ITER=$(k6v iterations); GAVE=$(k6v gave_up_keys)
+[ $(( ${ACCEPTED:-0} + ${GAVE:-0} )) = "${ITER:-x}" ] || FAILS+=("접수 ${ACCEPTED:-?} + 포기 ${GAVE:-?} ≠ k6 반복 ${ITER:-?}")
+REFS_N=$(wc -l < "$WORK/refs.txt" | tr -d ' ')
+[ "${C[transfers]:-x}" = "$REFS_N" ] || FAILS+=("출금 행 ${C[transfers]:-?} ≠ 거래번호 $REFS_N")
 [ "${C[not_completed]:-x}" = 0 ] || FAILS+=("COMPLETED 아님 ${C[not_completed]:-?} (대기 ${SETTLE_S}초)")
 for k in refunds negative_balance balance_ne_ledger transfer_ne_withdraw unpublished_outbox; do
   [ "${C[$k]:-x}" = 0 ] || FAILS+=("$k ${C[$k]:-?}")
@@ -131,5 +143,9 @@ if [ ${#FAILS[@]} -gt 0 ]; then
 fi
 # 5xx 는 판정이 아니라 결과다 (스펙: 재시작이면 0 이어야 한다 — 아니면 문서에 원인을 적는다)
 if [ "$ACTION" = restart ] && [ "$(k6v first_5xx)" != 0 ]; then echo "[$RUN] 주의: 재시작인데 첫 시도 5xx $(k6v first_5xx) — nginx-errors · api 로그로 원인을 본다" >&2; fi
+if [ "$ACTION" != steady ]; then
+  [ "$(wc -l < "$WORK/rebalance.txt")" -gt 0 ] || echo "[$RUN] 주의: 리밸런스 줄이 0 — 동작이 일어났는지 api 로그로 확인" >&2
+  [ -s "$WORK/nginx-errors.txt" ] || echo "[$RUN] 주의: nginx 오류 줄이 0 — 재시작이 부드러워 안 남았을 수도 있다. 동작이 일어났는지 확인" >&2
+fi
 echo "[$RUN] 통과 — $OUT"
 cat "$OUT"
