@@ -168,7 +168,7 @@ consumer-transfer-processor-13-…    /172.18.0.8   1
 - kill-1 · kill-2 는 5xx 0 이었는데 kill-3 에서 **502 가 1건** 나왔다. SIGKILL 이 떨어진 순간 api-1 이 **처리 중이던 POST** 가 있었다 (nginx 오류 줄: `upstream prematurely closed connection while reading response header` — POST `/api/v1/transfers`).
 - nginx 는 **이미 보낸 POST 를 다시 보내지 않는다** (`proxy_next_upstream` 에 `non_idempotent` 없음). 같은 요청이 api-2 에서 한 번 더 처리되어 출금이 두 번 되는 위험을 막는 기본 동작이다.
 - 클라이언트(k6)가 **1초 뒤 같은 멱등키로 다시 보냈고**, 한 번만 접수됐다 → 접수 키 1201 = 출금 행 1201. "보낸 요청은 nginx 가 재시도하지 않고, 클라이언트가 같은 키로" 규칙이 실제로 동작한 사례다. 이 한 건이 나올지는 SIGKILL 시각에 달려 있어 3회 중 1회였다.
-- 요청이 접수되기 전에 죽은 연결(connect 시간 초과)은 보내지 않은 것이라 nginx 가 다른 서버로 다시 보내므로 5xx 로 안 보인다 (kill-1 · kill-2).
+- 요청이 접수되기 전에 죽은 연결(connect 시간 초과)은 보내지 않은 것이라 nginx 가 다른 서버로 다시 보내므로 5xx 로 안 보인다. kill-1 · kill-2 는 SIGKILL 순간 api-1 이 처리 중인 POST 가 없었던 것으로 본다 (**추정** — p95 가 20ms 대라 순간에 걸린 요청이 없을 확률이 크다. nginx 오류 줄에 `prematurely closed` 가 없다).
 
 ### 7-4. Docker 는 `docker kill` 한 컨테이너를 다시 띄우지 않았다
 `restart: unless-stopped` 인데도 3회 모두 `auto_restart_after_kill=false` 였다. Docker 는 `kill` 을 "사람이 멈춤" 으로 본다. 실제 장애(OOM · 프로세스 크래시)는 다시 띄운다. 그래서 `run.sh` 가 `up -d` 로 올렸다 — "자동 복구를 확인했다" 는 주장은 하지 않는다.
@@ -210,9 +210,9 @@ consumer-transfer-processor-13-…    /172.18.0.8   1
 | E3 롤링 재시작 | 5xx 0, 접수 전부 `COMPLETED`, 이중 0, 리밸런스 시각 | 2회 모두 5xx 0 · 이중 0, 파티션 0.96s · 3.2s | 맞음 |
 | E4 강제 종료 · 502 수 | 502 가 몇 건 | 2회는 502 0, 1회(kill-3)는 502 1건 | **다름** — 2회는 요청이 접수되기 전에 죽은 연결만 시간 초과로 다른 서버로 돌아가서 보이지 않았고, 1회는 SIGKILL 순간 처리 중인 POST 가 있어 502. 이 한 건은 같은 키 재시도로 한 번만 접수 |
 | E4 nginx 가 빼는 시간 | 수 초 ~ | 약 39s 동안 10초마다 다시 시험 (그 요청만 1s 늦음) | 부분 — 완전히 "빼지" 않고 `fail_timeout` 마다 다시 시험 |
-| E4 파티션 넘김 · 처리 지연 | 세션 시간 초과 | 45.6s · 45.6s, kill-3 처리 지연 최대 45.04s (5s 넘음 22%) | 맞음 (예상한 대로 45s — 그러나 규모는 문서로 확인) |
+| E4 파티션 넘김 · 처리 지연 | 세션 시간 초과 | 45.6s · 45.6s, kill-3 처리 지연 최대 45.04s (5s 넘음 22%) | 맞음 (예상한 대로 45s. 처리 지연의 규모 — 22% 가 5s 넘음 — 는 이번에 처음 쟀다) |
 | E4 자동 재시작 | (예상 안 함 / 불확실) | Docker 는 `docker kill` 한 컨테이너를 `restart: unless-stopped` 로도 안 띄움 (3회) | 다름 — kill 은 "사람이 멈춤". `run.sh` 가 `up -d` |
-| E5 회차 수 · 주기 | 1분마다 5분 | **2분마다 약 10분, 6회차** (api-2 5 · api-1 1). 마다 한쪽만 | 맞음 (회차 수 조정) |
+| E5 회차 수 · 주기 | 1분마다 5분 | **2분마다 약 10분, 6회차** (api-2 5 · api-1 1). 회차마다 한쪽만 | 맞음 (주기는 계획 단계에서 2분으로 바꿈 — 1분이면 lockAtLeastFor 1분과 겹쳐 두 대 모두 건너뛰는 회차가 생긴다) |
 | E5 FAILED 행 수 | 5개 안내 | 실행 행 **6개** | 다름 — 6회차라 6개 |
 
 ## 10. 파티션을 늘리는 판단 기준 (설계 §5-4)
@@ -223,7 +223,7 @@ consumer-transfer-processor-13-…    /172.18.0.8   1
 ## 11. 한계
 - **한 PC · 같은 CPU.** api 2대는 같은 CPU 를 나눠 쓰므로 처리량 비교가 되지 않는다. 재지 않았고 늘었다고 주장하지 않는다.
 - **bank-gateway 1대 = 단일 장애점.** api 를 늘려도 은행 연결은 한 곳이다 (P8-1 의 의도). 게이트웨이가 죽는 경우는 실험하지 않았다.
-- **nginx 는 기동 때 upstream 이름을 한 번 푼다.** 컨테이너 IP 가 바뀌면 (재생성) nginx 가 모른다. E3 · E4 는 api-1 을 같은 이름으로 다시 올렸고 이번 측정에서는 문제가 없었으나 일반화하지 않는다.
+- **nginx 는 기동 때 upstream 이름을 한 번 푼다.** 컨테이너 IP 가 바뀌면 (재생성) nginx 가 모른다. `run.sh` 는 재시작 · 강제 종료 회차 뒤마다 nginx 를 재시작해 이름을 다시 풀게 했다 — 운영 절차도 같다 (OPERATION §14). 컨테이너를 다시 만들고 nginx 를 그대로 두면 옛 IP 로 보낸다.
 - **`kill` 은 컨테이너 단위다 — 노드 장애가 아니다.** 커널 · 네트워크 · 호스트가 죽는 경우, 디스크 장애는 보지 못했다. SIGKILL 은 프로세스만 즉시 끊는다.
 - **45s 의 손잡이는 `session.timeout.ms` · heartbeat 튜닝이다.** 줄이면 강제 종료 때 지연이 짧아지지만 일시 정지(GC · 느린 처리)에도 불필요한 리밸런스가 늘어난다. **이번 단계에서는 바꾸지 않았다** (기본값 그대로 측정).
 - 표본이 작다: 재시작 2회, 강제 종료 3회, E5 6회. 502 가 3회 중 1회 나온 것은 타이밍이라 반복 빈도를 말할 수 없다.
@@ -255,6 +255,6 @@ consumer-transfer-processor-13-…    /172.18.0.8   1
 | `<회차>.nginx-errors.txt` | 그 회차 동안의 nginx 오류 줄 (재시작 4줄 · 강제 종료 약 30줄 · steady 0줄) |
 | `<회차>.rebalance.txt` | 그 회차 동안의 Kafka 컨슈머 그룹 로그 (리밸런스 시각 · 파티션 넘김) |
 | `kill-3.processing-delay.txt` | 처리 지연 (접수 → 마지막 상태): 1201건 · 최대 45.04s · 5s 넘음 268 · 30s 넘음 119 |
-| `e5-recon-log.txt` | 대사 cron 6회차의 로그 · `BATCH_*` 실행 행 |
-| `e5-shedlock.txt` | `shedlock` 행 (`locked_by` · `locked_at` · `lock_until`) |
+| `e5-recon-log.txt` | 대사 cron 6회차의 api-1 · api-2 로그 (어느 컨테이너가 돌았나) |
+| `e5-shedlock.txt` | `shedlock` 행 (`locked_by` · `locked_at` · `lock_until`) · 최근 `BATCH_*` 실행 행 |
 | `batch-durations.txt` | 개발 DB 배치 실행 시간 통계 (§8-2) |
