@@ -41,12 +41,12 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
 
 /**
- * 은행 게이트웨이 (P8-1). mode: direct(기본 — 이 프로세스가 Netty 로 FEP 에 직결) | http(게이트웨이 앱을 HTTP 로 부름, apps/bank-gateway).
+ * 은행 게이트웨이 (P8-1). mode: http(기본, P8-2 — 게이트웨이 앱을 HTTP 로 부름, apps/bank-gateway) | direct(이 프로세스가 Netty 로 FEP 에 직결 — 테스트 · 측정이 명시).
  * host · port · response-timeout · poll-interval 은 direct 일 때만 쓴다. http.* 는 http 일 때만 (스펙 §6).
  */
 @ConfigurationProperties("bank.gateway")
 data class BankGatewayProperties(
-    val mode: String = DIRECT,
+    val mode: String = HTTP,
     val host: String = "localhost",
     val port: Int = 9090,
     val responseTimeout: Duration = Duration.ofSeconds(3),
@@ -155,7 +155,7 @@ class AppConfiguration {
     fun bankMaintenanceGuard(window: BankMaintenanceWindow, clock: Clock) = BankMaintenanceGuard(window, clock)
 
     @Bean(destroyMethod = "close")
-    @ConditionalOnProperty(prefix = "bank.gateway", name = ["mode"], havingValue = BankGatewayProperties.DIRECT, matchIfMissing = true)
+    @ConditionalOnProperty(prefix = "bank.gateway", name = ["mode"], havingValue = BankGatewayProperties.DIRECT)
     fun bankGatewayClient(props: BankGatewayProperties, maintenance: BankMaintenanceWindow, clock: Clock): BankGatewayClient =
         BankGatewayClient(
             BankGatewayConfig(
@@ -170,11 +170,11 @@ class AppConfiguration {
         ).start()
 
     /**
-     * mode=http (P8-1): 은행 연결은 게이트웨이 앱이 가진다. 이 프로세스는 HTTP 로만 부른다.
+     * mode=http (P8-1, P8-2 부터 기본): 은행 연결은 게이트웨이 앱이 가진다. 이 프로세스는 HTTP 로만 부른다.
      * 응답 시간 초과가 게이트웨이의 은행 응답 시간 초과(3s) + 여유보다 짧으면 "모름" 이 쓸데없이 는다 — 경고만 (측정 · 테스트가 일부러 줄일 수 있게).
      */
     @Bean(destroyMethod = "close")
-    @ConditionalOnProperty(prefix = "bank.gateway", name = ["mode"], havingValue = BankGatewayProperties.HTTP)
+    @ConditionalOnProperty(prefix = "bank.gateway", name = ["mode"], havingValue = BankGatewayProperties.HTTP, matchIfMissing = true)
     fun httpBankGateway(props: BankGatewayProperties): HttpBankGateway {
         if (props.http.responseTimeout < HttpGatewaySettings.RECOMMENDED_MIN_RESPONSE_TIMEOUT) {
             log.warn("bank.gateway.http.response-timeout={} is shorter than {} (gateway bank timeout 3s + margin) — more results will be unknown", props.http.responseTimeout, HttpGatewaySettings.RECOMMENDED_MIN_RESPONSE_TIMEOUT)

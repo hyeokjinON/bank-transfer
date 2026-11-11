@@ -266,7 +266,7 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait
 
 **앱 실행** (전략이 바뀔 때마다 다시 띄운다. 백그라운드 작업(발행기 · 정리 작업 · 일마감 대사 스케줄)을 끄고 로그를 줄인다 — 또는 IntelliJ 실행 구성 `5. API (부하 측정)`):
 ```bash
-java -Xms1g -Xmx1g -jar apps/api/build/libs/api-0.1.0-SNAPSHOT.jar   --wallet.debit-strategy=conditional   --transfer.outbox.relay.enabled=false --transfer.reconcile.enabled=false   --spring.kafka.listener.auto-startup=false   --server.tomcat.threads.max=200   --logging.level.io.github.hyeokjinon.banktransfer=WARN   --daily-recon.schedule.enabled=false --data-retention.schedule.enabled=false
+java -Xms1g -Xmx1g -jar apps/api/build/libs/api-0.1.0-SNAPSHOT.jar --bank.gateway.mode=direct   --wallet.debit-strategy=conditional   --transfer.outbox.relay.enabled=false --transfer.reconcile.enabled=false   --spring.kafka.listener.auto-startup=false   --server.tomcat.threads.max=200   --logging.level.io.github.hyeokjinon.banktransfer=WARN   --daily-recon.schedule.enabled=false --data-retention.schedule.enabled=false
 ```
 
 **회차 실행** (Git Bash): `bash load/run.sh <전략> <hotspot|spread> <회차>` — 정리 → 시드 → InnoDB 정리 대기 → k6 → 정확성 확인(음수 잔고 · 잔고 ≠ 원장 합 · k6 202 수 ≠ 출금 행 수 · RECEIVED 가 아닌 출금 · 발행된 아웃박스 — 뒤 둘은 다른 인스턴스나 끄지 않은 발행기 · 컨슈머가 부하 출금을 건드렸는지 잡는다)을 한 번에 한다. 떠 있는 앱의 전략(`/actuator/info`)이 인자와 다르면 거부한다. 확인을 통과하지 못했거나 중단된 회차의 요약은 `.json.invalid` 로 바뀌어 표에서 빠진다. 같은 회차 번호를 다시 돌리면 그 회차의 이전 결과를 지우고 새로 만든다. 결과 원본은 `docs/perf/raw/`.

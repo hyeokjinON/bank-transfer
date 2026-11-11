@@ -1,5 +1,5 @@
 ### IntelliJ HTTP Client 로 일마감 대사 · 점검 시간 확인 (P5-1)
-### 준비: infra up, 모의 은행은 "1. Mock Bank (9090)" (기록 · 대사 파일 = 저장소 루트 bank-files/).
+### 준비: infra up, 모의 은행은 "1. Mock Bank (9090)" (기록 · 대사 파일 = 저장소 루트 bank-files/). 게이트웨이 "11. Bank Gateway (8082)" 도 띄운다 (P8-2 부터 API 기본이 http).
 ### 출금은 user-1 이 1원인증한 계좌로 — account-verification.http 1)·2), 충전은 transfer.http 0).
 
 ### 대사 날짜 — 2) 에서 쓴다. 손 확인할 날짜(오늘, KST)로 직접 고친다 (Git Bash: date +%F). 2-3 의 --close-day 와 같은 날짜여야 한다.

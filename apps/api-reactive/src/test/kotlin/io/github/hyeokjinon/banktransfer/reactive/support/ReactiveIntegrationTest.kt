@@ -21,8 +21,9 @@ import java.util.UUID
  * apps/api-reactive 통합 테스트의 부모 (apps/api 의 ApiIntegrationTest 와 같은 원칙): 설정이 같으면 컨텍스트 · MySQL 컨테이너 · 모의 은행이 한 번만 뜬다.
  * 스키마는 apps/api 의 마이그레이션으로 Flyway 가 만든다 (build.gradle.kts 의 spring.flyway.locations). 테스트끼리 DB 를 공유하므로 사용자는 테스트마다 새로.
  * 모의 은행 지연을 바꾼 테스트가 다음 테스트에 남기지 않게 끝날 때 되돌린다.
+ * 은행은 직결(direct) — 앱 기본이 http 라 명시한다 (P8-2). http 흐름 테스트는 @DynamicPropertySource 로 덮어쓴다.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = ["bank.gateway.mode=direct"])
 @Import(MySqlTestContainer::class, TestClockConfiguration::class)
 abstract class ReactiveIntegrationTest {
 

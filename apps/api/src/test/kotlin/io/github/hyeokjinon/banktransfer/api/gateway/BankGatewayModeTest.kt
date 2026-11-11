@@ -8,9 +8,9 @@ import kotlin.test.assertFailsWith
 
 class BankGatewayModeTest {
     @Test
-    fun `기본은 direct, http 설정 기본값은 스펙 §6`() {
+    fun `기본은 http (P8-2), http 설정 기본값은 스펙 §6`() {
         val p = BankGatewayProperties()
-        assertEquals("direct", p.mode)
+        assertEquals("http", p.mode)
         assertEquals("http://localhost:8082", p.http.baseUrl)
         assertEquals("webclient", p.http.client)
         assertEquals(500, p.http.maxConnections)
