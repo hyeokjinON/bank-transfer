@@ -1,0 +1,4 @@
+JOB_NAME	STATUS	runs	avg_s	max_s
+dailyReconciliationJob	COMPLETED	8	1.62	2.2
+dailyReconciliationJob	FAILED	8	0.09	0.15
+dataRetentionJob	COMPLETED	4	0.2	0.23

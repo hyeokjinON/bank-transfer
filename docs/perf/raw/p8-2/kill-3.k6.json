@@ -1,0 +1,15 @@
+{
+  "run": "kill-3",
+  "rate": 20,
+  "duration": "60s",
+  "iterations": 1201,
+  "first_202": 1200,
+  "first_5xx": 1,
+  "first_502": 1,
+  "first_neterr": 0,
+  "retried_requests": 1,
+  "accepted_keys": 1201,
+  "gave_up_keys": 0,
+  "p95_ms": 23.049279300000002,
+  "max_ms": 1027.510891
+}

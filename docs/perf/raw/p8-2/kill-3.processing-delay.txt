@@ -1,0 +1,4 @@
+n	max_s	over_5s	over_30s	avg_s
+1201	45.04	268	119	6.528
+first_delayed	last_delayed
+2026-11-11 13:55:18.207139	2026-11-11 13:55:58.303185

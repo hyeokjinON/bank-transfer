@@ -1,0 +1,9 @@
+
+real	0m26.459s
+user	0m0.107s
+sys	0m0.030s
+0B	ENTRYPOINT ["java" "-XX:MaxRAMPercentage=75"…
+0B	EXPOSE map[8080/tcp:{}]
+1.67MB	COPY /out/api/application/ ./ # buildkit
+4.1kB	COPY /out/api/snapshot-dependencies/ ./ # bu…
+696kB	COPY /out/api/spring-boot-loader/ ./ # build…

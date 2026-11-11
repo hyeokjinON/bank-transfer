@@ -1,0 +1,7 @@
+
+real	0m3.652s
+user	0m0.045s
+sys	0m0.092s
+31
+#27 [api-2 build 7/8] RUN --mount=type=cache,id=gradle-caches,target=/root/.gradle/caches,sharing=locked     sh ./gradlew :apps:api:bootJar :apps:bank-gateway:bootJar :apps:mock-bank:installDist       -x test --no-daemon -Pkotlin.compiler.execution.strategy=in-process
+--

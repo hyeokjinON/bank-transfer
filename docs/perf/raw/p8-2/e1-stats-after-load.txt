@@ -1,0 +1,8 @@
+bank-transfer-api-1-1	429.6MiB / 768MiB	2.38%
+bank-transfer-api-2-1	503.7MiB / 768MiB	3.82%
+bank-transfer-bank-gateway-1	197.1MiB / 512MiB	0.09%
+bank-transfer-mock-bank-1	54.19MiB / 256MiB	0.06%
+bank-transfer-nginx-1	13.5MiB / 15.17GiB	0.00%
+bank-transfer-redis-1	7.188MiB / 15.17GiB	0.23%
+bank-transfer-mysql-1	1.518GiB / 15.17GiB	1.25%
+bank-transfer-kafka-1	1.143GiB / 15.17GiB	2.01%
