@@ -1,0 +1,15 @@
+     50 "instance":"api-1"
+     50 "instance":"api-2"
+
+GROUP              CONSUMER-ID                                                         HOST            CLIENT-ID                      #PARTITIONS     
+transfer-processor consumer-transfer-processor-14-a205cb59-1dfc-4024-8ab3-6251a5076b09 /172.18.0.7     consumer-transfer-processor-14 0               
+transfer-processor consumer-transfer-processor-15-ca073f6a-b8ba-42cb-b94e-606ecd4c0a76 /172.18.0.7     consumer-transfer-processor-15 0               
+transfer-processor consumer-transfer-processor-15-7d248ffe-e218-4883-9a97-c14111fa2c4b /172.18.0.8     consumer-transfer-processor-15 0               
+transfer-processor consumer-transfer-processor-14-0a1e76b8-cf2d-4969-8277-077f58cbc158 /172.18.0.8     consumer-transfer-processor-14 1               
+transfer-processor consumer-transfer-processor-13-23a5d88a-0175-488f-a399-1a5768304a89 /172.18.0.7     consumer-transfer-processor-13 1               
+transfer-processor consumer-transfer-processor-13-1958e582-b05f-4d93-ac64-c7f5644ab835 /172.18.0.8     consumer-transfer-processor-13 1               
+
+GROUP              TOPIC              PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG             CONSUMER-ID                                                         HOST            CLIENT-ID
+transfer-processor transfer.requested 2          256614          256614          0               consumer-transfer-processor-14-0a1e76b8-cf2d-4969-8277-077f58cbc158 /172.18.0.8     consumer-transfer-processor-14
+transfer-processor transfer.requested 1          256931          256931          0               consumer-transfer-processor-13-23a5d88a-0175-488f-a399-1a5768304a89 /172.18.0.7     consumer-transfer-processor-13
+transfer-processor transfer.requested 0          256836          256836          0               consumer-transfer-processor-13-1958e582-b05f-4d93-ac64-c7f5644ab835 /172.18.0.8     consumer-transfer-processor-13

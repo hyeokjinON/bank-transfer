@@ -1,6 +1,6 @@
 # ARCHITECTURE — 구조와 흐름
 
-> 기준: P8-1 은행 게이트웨이 서비스 분리 (2026-11-10, [#25](https://github.com/hyeokjinON/bank-transfer/pull/25) 머지 — [ADR-0015](docs/adr/0015-bank-gateway-service.md), 기본은 `direct` 라 아래 그림의 직결 경로가 평소 모양). P5-1 일마감 대사 · 점검 시간 · 알림 완료 (2026-10-30, PR #15 머지). P4-2 잔고 차감 락 전략 완료 (2026-10-28, PR #13 머지). P4-1 원화 잔고 완료 (2026-10-26, PR #11 머지). P3 완료(P3-3b PR #9 머지). P3 ~ P5 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p5)에 적는다.
+> 기준: P8-2 앱 이미지 · Compose 전체 실행 · api 2대 (2026-11-11, [ADR-0016](docs/adr/0016-app-images-compose.md) 제안 — 기본 `bank.gateway.mode` 가 `http` 로 바뀌었고, 컨테이너 실행은 아래 §1 의 "컨테이너 실행" 그림). 그 앞: P8-1 은행 게이트웨이 서비스 분리 (2026-11-10, [#25](https://github.com/hyeokjinON/bank-transfer/pull/25) 머지 — [ADR-0015](docs/adr/0015-bank-gateway-service.md), P8-2 전에는 기본이 `direct` 라 아래 그림의 직결 경로가 평소 모양이었다). P5-1 일마감 대사 · 점검 시간 · 알림 완료 (2026-10-30, PR #15 머지). P4-2 잔고 차감 락 전략 완료 (2026-10-28, PR #13 머지). P4-1 원화 잔고 완료 (2026-10-26, PR #11 머지). P3 완료(P3-3b PR #9 머지). P3 ~ P5 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p5)에 적는다.
 
 ## 1. 한눈에 보기
 
@@ -52,6 +52,26 @@ flowchart LR
 - **사용자 식별**: `X-User-Id` 를 `RequestUserResolver` 한 곳에서 꺼낸다 (인증은 범위 밖, P4-1).
 - **잔고 차감 방식**은 기동 설정 `wallet.debit-strategy` 로 하나를 고른다 (ADR-0009).
 - **은행 점검 시간**(23:50 ~ 00:10 KST)에는 은행을 건드리는 웹 요청이 503 이고 게이트웨이가 송신을 보류한다 — 날짜 경계를 은행 파일과 맞춘다 (ADR-0010).
+
+### 컨테이너 실행 (P8-2, Compose `app` 프로필)
+위 그림이 코드 경계라면, 아래는 `docker compose … --profile app up -d --build --wait` 로 띄우는 **실행 모양**이다 ([ADR-0016](docs/adr/0016-app-images-compose.md)). PC 에 열리는 포트는 nginx `8000` 하나이고 `127.0.0.1` 에만 열린다.
+
+```mermaid
+flowchart LR
+    PC["PC :8000"] --> N[nginx<br/>라운드 로빈 · zone api]
+    N --> A1[api-1]
+    N --> A2[api-2]
+    A1 & A2 -- "HTTP (mode=http)" --> G[bank-gateway :8082]
+    G -- "TCP 전문 1개" --> M[mock-bank :9090]
+    A1 & A2 --> DB[(MySQL)]
+    A1 & A2 -.-> K{{"Kafka kafka:29092"}}
+    A1 & A2 --> R[(Redis)]
+    M -- "쓴다" --> V[("볼륨 bank-files")]
+    V -- "읽는다 (읽기 전용)" --> A1 & A2
+    A1 & A2 -. "하루 배치 (대사 · 보존)" .-> S[("shedlock 테이블<br/>한 대만 잠금")]
+```
+- 은행 연결은 게이트웨이 한 곳이라 api 를 늘려도 응답 매칭이 깨지지 않는다 (P8-1). 아웃박스 발행 · 정리 작업은 두 대가 모두 돌고 DB(`SKIP LOCKED` · 조건부 UPDATE)가 중복을 막는다. 하루 배치 둘만 `shedlock` 으로 한 대가 돈다.
+- 컨테이너 api 는 IntelliJ 의 API 와 같은 DB · 같은 Kafka 그룹을 쓰므로 동시에 띄우지 않는다.
 
 ## 2. 모듈
 
@@ -412,4 +432,5 @@ flowchart TB
 | [0012](docs/adr/0012-consumer-coroutines.md) | 출금 컨슈머의 은행 대기를 suspend 리스너로도 만들어 설정으로 고르고, 판정은 한 곳, DB 는 IO 디스패처, 은행 동시 호출 상한 (제안) |
 | [0013](docs/adr/0013-web-verification-webflux-comparison.md) | 웹 1원인증 경로는 네 판(MVC 블로킹 · 비동기, WebFlux 코루틴 · Reactor)을 같은 도구로 비교하고, WebFlux 는 별도 앱, 판정 · 어댑터는 한 벌, 끊기면 취소 (제안) |
 | [0014](docs/adr/0014-virtual-threads.md) | 가상 스레드는 Boot 설정 하나로 켜고, 성능은 코루틴만큼이지만 Java 21 냉시동 교착 때문에 기본은 끈다 |
-| [0015](docs/adr/0015-bank-gateway-service.md) | 은행 게이트웨이를 별도 서비스(동기 HTTP)로 분리, 실패 분류 · 재시도 끔 · 송신 취소 안 함은 그대로, 기본은 `direct` 유지 |
+| [0015](docs/adr/0015-bank-gateway-service.md) | 은행 게이트웨이를 별도 서비스(동기 HTTP)로 분리, 실패 분류 · 재시도 끔 · 송신 취소 안 함은 그대로, 기본은 `direct` 유지 (P8-2 에서 `http` 로 변경 — ADR-0016) |
+| [0016](docs/adr/0016-app-images-compose.md) | 루트 Dockerfile 하나 · 타깃 3 · nginx 앞 api 2대(보낸 POST 는 다시 보내지 않음), 하루 배치만 ShedLock, `mode` 기본 `http`, 파티션 3 유지 (제안) |

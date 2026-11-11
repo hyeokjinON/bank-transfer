@@ -3,3 +3,7 @@
 *.jar binary
 *.sh text eol=lf
 *.yml text eol=lf
+# 컨테이너 빌드 파일 — Windows(autocrlf) 체크아웃에서도 LF (P8-2)
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+*.conf text eol=lf

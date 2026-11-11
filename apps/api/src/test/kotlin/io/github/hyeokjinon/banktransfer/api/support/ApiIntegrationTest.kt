@@ -33,10 +33,12 @@ import kotlin.random.Random
  * 잔고 단언이 다른 테스트에 흔들리지 않게 테스트마다 새 사용자를 쓴다 (P4-1): 정리 작업(RepublishFlowTest 의 1ms 대기)이 남은 RECEIVED 를 모두 훑어 환불할 수 있다.
  * Redis 컨테이너는 차감 전략 테스트(RedisWalletDebitTest)용이다 (P4-2). 앱은 기본 전략(conditional)이라 Redis 를 쓰지 않는다.
  * 앱 시계는 [testClock] 이다 (P5-1): 점검 시간 · 대사 테스트는 fix 로 시각을 정하고, 테스트가 끝나면 진짜 시각으로 돌아간다.
+ * 은행은 직결(direct)로 붙는다 (P8-2): 앱 기본이 http 가 됐으므로 여기서 명시한다. http 흐름 테스트는 @DynamicPropertySource 로 덮어쓴다 (그쪽이 우선).
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = [
+        "bank.gateway.mode=direct",
         "transfer.outbox.relay.enabled=false",
         "transfer.reconcile.enabled=false",
         // 재시도 간격 0.5초 → 1초 → 2초 (운영 5 · 30 · 60초). 뒤 메시지가 막히지 않는지 볼 여유(3.5초)는 남기고 테스트는 빨리 끝나게

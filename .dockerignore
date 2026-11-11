@@ -1,0 +1,22 @@
+# 빌드 컨텍스트에서 뺀다 (P8-2). 덜 보내면 빌드가 빠르고, 비밀 · 개인 파일이 이미지 층에 들어갈 길이 없다.
+build/
+**/build/
+.gradle/
+.kotlin/
+.git/
+.idea/
+.postman/
+.run/
+.superpowers/
+bank-files/
+docs/
+load/
+postman/
+http/
+# 비밀은 실행 때 Compose 가 환경변수로 넣는다 — 이미지에 굳지 않게 (CI app-smoke 가 확인)
+infra/.env
+# 앱 코드가 아닌 것 — 바뀌어도 COPY . . 층(→ Gradle 빌드)을 다시 만들지 않게 (P8-2 E1)
+infra/
+.github/
+**/*.md
+gradlew.bat

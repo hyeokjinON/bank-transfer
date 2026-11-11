@@ -1,0 +1,9 @@
+{"run":"kill-2","action":"kill","rate":20,"duration":"60s","action_at_s":20,"t0":"2026-11-11T03:26:23Z","t_action":"2026-11-11T03:26:43.959Z",
+ "auto_restart_after_kill":false,"settle_s":1,
+ "first_202":1201,"first_5xx":0,"first_502":0,"first_neterr":0,
+ "retried_requests":0,"accepted_keys":1201,"gave_up_keys":0,
+ "p95_ms":22.743921,"nginx_5xx":0,
+ "transfers":1201,"not_completed":0,"refunds":0,
+ "negative_balance":0,"balance_ne_ledger":0,
+ "transfer_ne_withdraw":0,"unpublished_outbox":0,
+ "journal_missing":0,"journal_dup":0,"rebalance_lines":150}

@@ -23,7 +23,7 @@ cd bank-transfer
 
 ### 2-2. 빌드 · 테스트
 ```bash
-./gradlew build      # 첫 실행은 의존성 다운로드로 몇 분 걸린다. 테스트 524개 통과해야 정상
+./gradlew build      # 첫 실행은 의존성 다운로드로 몇 분 걸린다. 테스트 622개 (건너뜀 2) 통과해야 정상
 ```
 테스트는 Testcontainers 로 MySQL · Kafka · Redis 를 띄우므로 Docker Desktop 이 켜져 있어야 한다 (설치는 2-4).
 
@@ -32,15 +32,19 @@ cd bank-transfer
 2. `Settings > Build, Execution, Deployment > Build Tools > Gradle > Gradle JVM` = 21, `File > Project Structure > SDK` = 21.
 3. (권장) `Settings > Tools > Terminal > Shell path` = `C:\Program Files\Git\bin\bash.exe` → 터미널에서 `bash infra/verify.sh` 가 그대로 동작.
 3-1. 인프라 먼저: `docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait` (API 는 MySQL 과 Kafka 를 쓴다)
-4. 실행 목록의 `0. Mock Bank + API` 실행 → `http/account-verification.http` 의 ▶ 로 요청 (Ultimate).
+4. 실행 목록의 `0. Mock Bank + API` (모의 은행 · 게이트웨이 · API 셋) 실행 → `http/account-verification.http` 의 ▶ 로 요청 (Ultimate).
    Community Edition 은 `.http` 실행이 없다 → Postman 에서 저장소 폴더를 열면 `postman/collections/bank-transfer` 컬렉션이 보인다 (요청마다 Test Results 로 통과/실패 표시).
 
-### 2-3-1. 은행 게이트웨이 띄우기 (선택, P8-1)
-기본(`bank.gateway.mode=direct`)에서는 api 가 은행에 직접 붙으므로 게이트웨이가 필요 없다. 게이트웨이를 거치려면 **모의 은행 → 게이트웨이 → api** 순서로 띄운다.
+### 2-3-1. 은행 게이트웨이 (P8-1, P8-2 부터 기본 경로)
+기본(`bank.gateway.mode=http`)이라 api 는 은행이 아니라 게이트웨이(8082)를 부른다. 그래서 평소 순서는 **모의 은행 → 게이트웨이 → api** 이고, 실행 구성 `0. Mock Bank + API` 가 셋을 함께 띄운다. 하나씩 띄우려면:
 1. 실행 구성 `1. Mock Bank (9090)` (인프라는 2-4 에서 먼저)
 2. 실행 구성 `11. Bank Gateway (8082)` — 또는 `./gradlew :apps:bank-gateway:bootRun`
-3. 실행 구성 `12. API (http 게이트웨이)` — 또는 `./gradlew :apps:api:bootRun --args="--bank.gateway.mode=http"` (`2. API (8080)` 과 같이 띄우지 않는다, 포트 8080 이 같다)
+3. 실행 구성 `2. API (8080)` — 또는 `./gradlew :apps:api:bootRun`
 4. 확인: `GET http://localhost:8082/actuator/health/bankConnection` → `UP` (은행에 붙어 있을 때)
+
+게이트웨이 없이 직결(`direct`)로 보려면 실행 구성 `12. API (direct 직결)` 또는 `--bank.gateway.mode=direct` 를 준다 (`2. API (8080)` 과 같이 띄우지 않는다, 포트 8080 이 같다).
+
+> 실행 구성 `4` · `6` · `7` · `10` 은 `--bank.gateway.mode` 를 지정하지 않아 이제 코드 기본(`http`)으로 뜬다 — **게이트웨이(`11. Bank Gateway (8082)`)도 함께 실행 중이어야 한다.** (`5. API (부하 측정)` 은 `direct` 를 명시해 게이트웨이가 필요 없다.)
 
 ### 2-4. Docker Desktop (P3 부터 필요)
 1. **관리자 PowerShell**: `wsl --install` → 재부팅.
@@ -87,7 +91,20 @@ cd bank-transfer
 | 8082 | `apps/bank-gateway` (개발용, 실행 구성 11, P8-1) |
 | 9090 | 모의 은행 (개발용) |
 | 18080 · 18081 · 9190 · 18082 · 28082 · 8474 | 측정 전용 `apps/api` · `apps/api-reactive` · 모의 은행 · 게이트웨이(18082) · Toxiproxy 프록시(28082) · Toxiproxy 제어(8474) (`load/verification/run.sh` · `load/lib/gateway.sh` 가 띄우고 내린다, 평소엔 비어 있어야 한다. [OPERATION §12](OPERATION.md#12-웹-1원인증-판--webflux-측정-p6-2)) |
+| 8000 | nginx (Compose `app` 프로필, P8-2 — 컨테이너 api 2대 앞. `127.0.0.1` 에만 열린다) |
 | 3306 · 6379 · Kafka | MySQL · Redis · Kafka (`infra/`) |
+
+### 2-8. 컨테이너로 전체 실행 (P8-2)
+모의 은행 · 게이트웨이 · api 2대 · nginx 를 Docker 로 한 번에 띄운다 (JDK 없이도 된다 — 이미지가 빌드한다, [ADR-0016](docs/adr/0016-app-images-compose.md)).
+1. **먼저 IntelliJ 의 API · 게이트웨이 · 모의 은행을 모두 끈다.** 컨테이너 api 와 같은 DB · 같은 Kafka 컨슈머 그룹을 쓰므로 함께 두면 출금이 다른 모의 은행으로 흘러 대사가 어긋난다.
+2. 띄우기 (Git Bash, 처음엔 이미지를 빌드해 몇 분 걸린다):
+   ```bash
+   docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app up -d --build --wait
+   bash infra/app-smoke.sh        # 1원인증 · 출금 · 멱등 · 분배 · 포트 · 이미지 비밀값 확인
+   ```
+3. base URL 은 **`http://localhost:8000`** (nginx). Postman · `http/*.http` 의 주소만 바꾼다. 어느 api 가 받았는지는 `curl -s localhost:8000/actuator/info` 의 `instance` (`api-1` · `api-2`).
+4. 1원인증 적요 코드는 모의 은행 로그에서: `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app logs mock-bank`.
+5. 내리기 (데이터 유지): 앱만 멈추려면 `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app stop nginx api-1 api-2 bank-gateway mock-bank` (인프라는 그대로). 서비스 이름 없이 `--profile app stop` 하면 인프라까지 모두 멈춘다.
 
 ## 3. Windows 에서 알아둘 것
 | 상황 | 해결 |

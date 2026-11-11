@@ -1,0 +1,41 @@
+ Container bank-transfer-mysql-1 Running 
+ Container bank-transfer-kafka-1 Running 
+ Container bank-transfer-redis-1 Running 
+ Container bank-transfer-mock-bank-1 Recreate 
+ Container bank-transfer-mock-bank-1 Recreated 
+ Container bank-transfer-bank-gateway-1 Recreate 
+ Container bank-transfer-bank-gateway-1 Recreated 
+ Container bank-transfer-api-2-1 Creating 
+ Container bank-transfer-api-2-1 Created 
+ Container bank-transfer-mock-bank-1 Starting 
+ Container bank-transfer-mock-bank-1 Started 
+ Container bank-transfer-mock-bank-1 Waiting 
+ Container bank-transfer-mock-bank-1 Healthy 
+ Container bank-transfer-bank-gateway-1 Starting 
+ Container bank-transfer-bank-gateway-1 Started 
+ Container bank-transfer-kafka-1 Waiting 
+ Container bank-transfer-redis-1 Waiting 
+ Container bank-transfer-bank-gateway-1 Waiting 
+ Container bank-transfer-mysql-1 Waiting 
+ Container bank-transfer-mysql-1 Healthy 
+ Container bank-transfer-redis-1 Healthy 
+ Container bank-transfer-kafka-1 Healthy 
+ Container bank-transfer-bank-gateway-1 Healthy 
+ Container bank-transfer-api-2-1 Starting 
+ Container bank-transfer-api-2-1 Started 
+ Container bank-transfer-mock-bank-1 Waiting 
+ Container bank-transfer-redis-1 Waiting 
+ Container bank-transfer-mysql-1 Waiting 
+ Container bank-transfer-api-2-1 Waiting 
+ Container bank-transfer-kafka-1 Waiting 
+ Container bank-transfer-bank-gateway-1 Waiting 
+ Container bank-transfer-redis-1 Healthy 
+ Container bank-transfer-bank-gateway-1 Healthy 
+ Container bank-transfer-mysql-1 Healthy 
+ Container bank-transfer-kafka-1 Healthy 
+ Container bank-transfer-mock-bank-1 Healthy 
+ Container bank-transfer-api-2-1 Healthy 
+
+real	0m30.299s
+user	0m0.030s
+sys	0m0.076s

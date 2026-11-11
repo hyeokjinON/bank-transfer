@@ -139,7 +139,7 @@ if [ "$APP" = api ]; then
   ARGS+=(--spring.kafka.listener.auto-startup=false --transfer.outbox.relay.enabled=false --transfer.reconcile.enabled=false
     --daily-recon.schedule.enabled=false --data-retention.schedule.enabled=false --server.tomcat.threads.max="$TOMCAT")
 fi
-mapfile -t GW_ARGS < <(gw_api_args); ARGS+=("${GW_ARGS[@]}")   # direct 면 빈 배열
+mapfile -t GW_ARGS < <(gw_api_args); ARGS+=("${GW_ARGS[@]}")   # direct 면 --bank.gateway.mode=direct 하나 (P8-2)
 java -Xms1g -Xmx1g "${VT_JVM_ARGS[@]}" -Dstdout.encoding=UTF-8 -jar "$JAR" "${ARGS[@]}" "${VT_APP_ARGS[@]}" > "$WORK/app.log" 2>&1 &
 APP_PID=$!; OWN_APP=1
 for _ in $(seq 120); do

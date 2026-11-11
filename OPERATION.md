@@ -6,17 +6,19 @@
 | 구성 요소 | 실행 | 포트 | 상태 확인 |
 |---|---|---|---|
 | API (`apps/api`) | `./gradlew :apps:api:bootRun` 또는 실행 구성 `2. API (8080)` | 8080 | `GET /actuator/health` · MySQL · Kafka 필요 (기동 시 Flyway 마이그레이션) |
+| 은행 게이트웨이 (`apps/bank-gateway`, P8-1) | `./gradlew :apps:bank-gateway:bootRun` 또는 `11. Bank Gateway (8082)` (기본 http 모드에서 api 가 부르는 곳 — 모의 은행보다 나중, api 보다 먼저) | 8082 | `GET /actuator/health` (`bankConnection` 포함 — `/actuator/health/bankConnection` → `UP` 이면 은행에 붙어 있다) |
 | 모의 은행 (`apps/mock-bank`) | `./gradlew :apps:mock-bank:run --args="9090"` (작업 디렉터리 = 저장소 루트, 거래 기록 · 대사 파일은 `./bank-files`) 또는 `1. Mock Bank (9090)` | 9090 (TCP) | 콘솔 `Mock bank FEP started on port 9090` |
 | MySQL 8.4 | `infra/docker-compose.yml` | 3306 | `docker compose ... ps` → healthy |
 | Kafka 4.1 (KRaft) | 〃 | 9092 (PC) / 29092 (컨테이너) | 〃 |
 | Redis 7.4 | 〃 | 6379 | 〃 |
 | kafka-ui (선택) | `--profile tools up -d` | 8089 | http://localhost:8089 |
+| 컨테이너 실행 (`app` 프로필, P8-2) | `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app up -d --build --wait` (§14) | 8000 (nginx — 뒤에 api-1 · api-2 · 게이트웨이 · 모의 은행) | `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app ps` → 5개 healthy, `curl localhost:8000/actuator/info` |
 
 모의 은행 · API 는 `./bank-files` 를 같이 본다 (Gradle `run` · `bootRun` 이 저장소 루트에서 돈다). `git status` 에 보이지 않는다(`.gitignore`).
 
 실행 구성 `0. Mock Bank + API` 와 `1. Mock Bank (9090)` 를 같이 띄우지 않는다: Windows 에서 모의 은행의 `SO_REUSEADDR` 가 같은 포트에 두 번 bind 하는 것을 허용해, 모의 은행이 둘 뜨고 어느 쪽에 붙을지 알 수 없다 (입금 내역이 갈린다).
 
-API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 뜨고, 게이트웨이가 1초→30초 간격으로 재접속을 시도한다(그동안 은행 호출은 503).
+기본(`bank.gateway.mode=http`, P8-2)에서 API 는 은행에 직접 붙지 않는다: api → 은행 게이트웨이 앱(8082) → 은행이다. 게이트웨이가 기동 시 모의 은행에 접속하고, 은행이 없어도 둘 다 뜨며 게이트웨이가 1초→30초 간격으로 재접속을 시도한다(그동안 은행 호출은 503). `direct` 모드에서만 API 가 기동 시 모의 은행에 직접 접속한다(같은 재접속 규칙).
 
 ## 2. 설정 (`apps/api/src/main/resources/application.yml`)
 | 키 | 기본값 | 의미 |
@@ -49,9 +51,18 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 | `wallet.optimistic.max-attempts` / `backoff-min` / `backoff-max` | `5` / `10ms` / `50ms` | `optimistic`: 충돌 재시도 횟수 · 사이 대기. 다 쓰면 409 |
 | `wallet.lock.wait-time` | `3s` | `redis`: 사용자 락 대기. 넘으면 503 |
 | `wallet.lock.redis-address` | `redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}` | `redis` 전략일 때만 연결 (첫 요청 때) |
-| `bank.gateway.host` / `port` | `localhost` / `9090` | 은행 FEP 주소 |
-| `bank.gateway.response-timeout` | `3s` | 응답 대기. 넘으면 504 `BANK_TIMEOUT` |
-| `bank.gateway.poll-interval` | `30s` | 쓰기 유휴 시 폴링 주기. ×3 동안 수신이 없으면 연결 종료 |
+| `bank.gateway.mode` | `http` | `http`(기본, P8-2) = 게이트웨이 앱(`apps/bank-gateway`)을 HTTP 로 부른다 · `direct` = 이 프로세스가 Netty 로 은행에 직결 (테스트 · 측정 기준선은 명시) |
+| `bank.gateway.http.base-url` | `http://localhost:8082` | `http` 일 때만. 게이트웨이 주소 |
+| `bank.gateway.http.client` | `webclient` | `http` 일 때만. `webclient` · `jdk` (P8-1 비교) |
+| `bank.gateway.http.max-connections` | `500` | `http` 일 때만 (WebClient). 연결 풀 상한 |
+| `bank.gateway.http.connect-timeout` / `pending-acquire-timeout` | `1s` / `1s` | `http` 일 때만. 연결 · 풀 대기 |
+| `bank.gateway.http.response-timeout` | `5s` | `http` 일 때만. 게이트웨이 응답 대기 (게이트웨이의 은행 응답 3s 보다 길게) |
+| `bank.gateway.host` / `port` | `localhost` / `9090` | `direct` 일 때만. 은행 FEP 주소 |
+| `bank.gateway.response-timeout` | `3s` | `direct` 일 때만. 응답 대기. 넘으면 504 `BANK_TIMEOUT` |
+| `bank.gateway.poll-interval` | `30s` | `direct` 일 때만. 쓰기 유휴 시 폴링 주기. ×3 동안 수신이 없으면 연결 종료 |
+| `server.shutdown` | `graceful` | 내려갈 때 새 연결을 받지 않고 처리 중인 요청을 끝낸다 (P8-2) |
+| `spring.lifecycle.timeout-per-shutdown-phase` | `20s` | 종료 **단계당** 상한 (Compose `stop_grace_period` 30s, §14-3) |
+| `info.instance` | `${INFO_INSTANCE:local}` | `GET /actuator/info` 의 어느 api 인가. Compose 가 api-1 · api-2 를 넣는다 |
 | `bank.maintenance.enabled` / `start` / `end` | `true` / `"23:50"` / `"00:10"` | 은행 점검 시간 (KST, 시작 포함 · 끝 제외, 자정 넘김 가능). yml 에서는 따옴표 필수. 길이는 재발행 포기(`E001`)까지의 약 26분보다 짧게 |
 | `account.verification.ttl` | `5m` | 1원인증 유효시간 |
 | `account.verification.max-attempts` | `5` | 코드 실패 허용 횟수 |
@@ -230,7 +241,7 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env down -v        
 | 기동 시 `Communications link failure` | MySQL 실행 여부 | infra 먼저 `up -d --wait` |
 | 기동 시 `Schema-validation` / Flyway 체크섬 오류 | 엔티티 · 마이그레이션 변경 | 적용된 V 파일을 고치지 않았는지 확인. 로컬은 `down -v` 로 초기화 |
 
-### 게이트웨이 장애 때 (P8-1, `bank.gateway.mode=http` 일 때만)
+### 게이트웨이 장애 때 (P8-1, `mode=http` — P8-2 부터 기본)
 api 가 은행이 아니라 게이트웨이(`apps/bank-gateway`, 8082)를 부른다. 순서대로 본다.
 1. **게이트웨이 상태**: `GET :8082/actuator/health/bankConnection` — `UP` 이면 게이트웨이가 은행에 붙어 있다, `DOWN` 이면 은행 쪽 문제(모의 은행 · 포트 · 재접속 로그). 응답이 아예 없으면 게이트웨이 프로세스가 내려가 있다.
 2. **api 로그로 "안 보냄" 과 "모름" 을 가른다**:
@@ -251,8 +262,9 @@ api 가 은행이 아니라 게이트웨이(`apps/bank-gateway`, 8082)를 부른
 |---|---|---|
 | `build` | JDK 21 → `./gradlew build` (테스트 전체) | 테스트 리포트 아티팩트(`test-reports`) 업로드 |
 | `infra-smoke` | Compose 로 인프라 기동(`--wait`, 240초) → `verify.sh` → 항상 `down -v` | 컨테이너 로그 출력 |
+| `app-smoke` (P8-2, 15분 제한) | 이미지 3개 빌드(GitHub Actions 캐시) → `--profile app up -d --wait` → `infra/app-smoke.sh` (nginx 로 1원인증 · 출금 `COMPLETED` · 분배 · 대사 파일 바인딩) → 항상 `down -v` | 컨테이너 로그 출력 |
 
-`main` push 와 모든 PR 에서 실행된다. PR 은 두 잡이 모두 초록이어야 머지한다.
+`main` push 와 모든 PR 에서 실행된다. PR 은 세 잡이 모두 초록이어야 머지한다.
 
 ## 8. 부하 측정 (P4-2, k6)
 네 차감 전략의 처리량 · 지연 · 실패율을 같은 조건에서 잰다 (핫스팟 `load-hot` 1명 / 분산 `load-u001` ~ `load-u500`, 50 VU, 워밍업 10초 + 측정 60초). 결과는 [docs/perf/p4-2-lock-comparison.md](docs/perf/p4-2-lock-comparison.md). 컨슈머 처리량 측정(P6-1)은 [§11](#11-컨슈머-모드--코루틴-측정-p6-1).
@@ -266,7 +278,7 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait
 
 **앱 실행** (전략이 바뀔 때마다 다시 띄운다. 백그라운드 작업(발행기 · 정리 작업 · 일마감 대사 스케줄)을 끄고 로그를 줄인다 — 또는 IntelliJ 실행 구성 `5. API (부하 측정)`):
 ```bash
-java -Xms1g -Xmx1g -jar apps/api/build/libs/api-0.1.0-SNAPSHOT.jar   --wallet.debit-strategy=conditional   --transfer.outbox.relay.enabled=false --transfer.reconcile.enabled=false   --spring.kafka.listener.auto-startup=false   --server.tomcat.threads.max=200   --logging.level.io.github.hyeokjinon.banktransfer=WARN   --daily-recon.schedule.enabled=false --data-retention.schedule.enabled=false
+java -Xms1g -Xmx1g -jar apps/api/build/libs/api-0.1.0-SNAPSHOT.jar --bank.gateway.mode=direct   --wallet.debit-strategy=conditional   --transfer.outbox.relay.enabled=false --transfer.reconcile.enabled=false   --spring.kafka.listener.auto-startup=false   --server.tomcat.threads.max=200   --logging.level.io.github.hyeokjinon.banktransfer=WARN   --daily-recon.schedule.enabled=false --data-retention.schedule.enabled=false
 ```
 
 **회차 실행** (Git Bash): `bash load/run.sh <전략> <hotspot|spread> <회차>` — 정리 → 시드 → InnoDB 정리 대기 → k6 → 정확성 확인(음수 잔고 · 잔고 ≠ 원장 합 · k6 202 수 ≠ 출금 행 수 · RECEIVED 가 아닌 출금 · 발행된 아웃박스 — 뒤 둘은 다른 인스턴스나 끄지 않은 발행기 · 컨슈머가 부하 출금을 건드렸는지 잡는다)을 한 번에 한다. 떠 있는 앱의 전략(`/actuator/info`)이 인자와 다르면 거부한다. 확인을 통과하지 못했거나 중단된 회차의 요약은 `.json.invalid` 로 바뀌어 표에서 빠진다. 같은 회차 번호를 다시 돌리면 그 회차의 이전 결과를 지우고 새로 만든다. 결과 원본은 `docs/perf/raw/`.
@@ -592,3 +604,72 @@ bash load/consumer/run.sh cleanup
 - `cleanup` 두 개는 반드시 (§12 · §11 과 같다 — 측정 사용자 데이터만 지운다).
 - 컨슈머 측정은 개발용 그룹 `transfer-processor` 에 밀린 메시지를 남긴다 — §11 의 `reset-dev-group` 안내를 따른다 (개발용 API 를 끈 채 사람이 직접).
 - 회차별 JFR · 표본 · 로그는 `build/load-p62/<이름>/` · `build/load-p61/<이름>/` 에 남는다 (커밋하지 않음). `jfr print --events jdk.VirtualThreadPinned <app.jfr>` 로 다시 볼 수 있다.
+
+## 14. 컨테이너 실행 (P8-2)
+Compose `app` 프로필: nginx(8000) → api-1 · api-2 → bank-gateway → mock-bank. 이유 · 숫자는 [ADR-0016](docs/adr/0016-app-images-compose.md) · [측정 결과](docs/perf/p8-2-compose.md). 모든 명령은 저장소 루트의 Git Bash 에서.
+
+### 14-1. 띄우기 · 확인 · 내리기
+```bash
+# 먼저 IntelliJ 의 API · 게이트웨이 · 모의 은행을 모두 끈다 (같은 DB · 같은 컨슈머 그룹 — 출금이 다른 모의 은행으로 흘러 대사가 어긋난다)
+docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app up -d --build --wait   # 이미지 빌드 + 기동, healthy 까지 대기
+docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app ps                      # 5개(mock-bank · bank-gateway · api-1 · api-2 · nginx)가 healthy
+bash infra/app-smoke.sh                                                                  # 1원인증 · 출금 · 멱등 · 분배 · 포트 · 이미지 비밀값
+docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app stop nginx api-1 api-2 bank-gateway mock-bank   # 앱만 멈춤 (인프라 유지)
+```
+- **기동 순서** (healthy 기준): MySQL · Kafka · Redis → mock-bank → bank-gateway(은행 연결 UP) → api-1 · api-2(readiness) → nginx. 두 api 가 동시에 떠도 Flyway 는 DB 잠금으로 한 번만 적용한다.
+- **IntelliJ 의 API 와 동시에 띄우지 않는다.** 컨테이너 api 도 **06:30 보존 배치를 개발 DB 에 돌린다** (되돌릴 수 없는 삭제 — HANDOVER §3 경고와 같다).
+- PC 에 열리는 포트는 nginx 8000 하나이고 `127.0.0.1` 에만 열린다 (인증 없는 `/admin/*` 가 LAN 에 안 열리게). 게이트웨이 · 모의 은행 · api 는 내부망 전용이다.
+
+### 14-2. 로그 · 안에서 보기
+```bash
+docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app logs -f api-1                                                    # 한 대의 로그
+docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app logs mock-bank                                                    # 1원인증 적요 코드
+docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app exec bank-gateway wget -qO- localhost:8082/actuator/health        # bankConnection 포함
+docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app exec api-1 wget -qO- localhost:8080/actuator/health/readiness
+curl -s localhost:8000/actuator/info                                   # 두 번 이상 — "instance" 가 api-1 · api-2 로 번갈아
+docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app logs nginx --since 10m                    # nginx 접근 · 오류 로그 (-f 로 따라 보기)
+```
+- nginx 접근 로그 열 (`log_format upstream`): `$msec $status $request_method $uri $upstream_addr $upstream_status $request_time` = 받은 시각(초.밀리초) · 상태 · 메서드 · 경로 · 어느 api(IP:포트) · 그 api 의 상태 · 걸린 시간(초). 실패해 다른 서버로 넘어갔으면 `$upstream_addr` · `$upstream_status` 에 `, ` 로 두 값이 나온다. 접근 로그는 stdout, 오류 로그는 stderr 로 나가므로 같은 `logs nginx` 에 둘 다 섞여 나온다 (오류 줄은 `YYYY/MM/DD … [error]` 로 시작). `exec nginx cat /var/log/nginx/…` 는 파일이 아니라 장치로 연결돼 있어 아무것도 안 나온다.
+- 응답 헤더 `X-Upstream` 도 어느 api 가 받았는지 알려 준다 (IP:포트, 이름은 `/actuator/info` 의 `instance`).
+- `/nginx-health` 는 nginx 자신만 본다 — api 가 살았는지는 `ps` 의 healthy 나 `/actuator/info` 로 본다.
+
+### 14-3. 롤링 재시작 (한 대씩)
+```bash
+docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app restart api-1
+docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app ps                       # api-1 이 healthy 가 될 때까지 (약 30초)
+docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app restart api-2
+```
+- 한 대씩, 앞의 것이 healthy 가 된 뒤에 다음. 내려가는 동안 nginx 가 다른 한 대로 보낸다 (E3: 첫 시도 5xx 0).
+- **graceful**: 앱은 `server.shutdown=graceful` 로 처리 중인 요청을 끝내고 Kafka 리스너를 정리한 뒤 내려간다. `spring.lifecycle.timeout-per-shutdown-phase: 20s` 는 **종료 단계 하나당** 상한이고 Compose `stop_grace_period` 는 30s 다 — "20s < 30s" 는 단계 하나씩 봤을 때 성립한다 (단계들이 모두 상한까지 쓰는 최악에는 합이 30s 를 넘어 Docker 가 SIGKILL 할 수 있다).
+- **설정을 바꿔 `up -d` 로 컨테이너를 다시 만들면 `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app restart nginx` 도 한다** — nginx 는 기동 때 upstream 이름(api-1 · api-2)을 한 번만 풀어서, 컨테이너 IP 가 바뀌면 옛 IP 로 보내 502 가 난다. (`load/compose/run.sh` 는 재시작 · 강제 종료 회차 뒤마다 nginx 를 재시작해 이름을 다시 풀게 한다.)
+
+### 14-4. 컨테이너가 죽었을 때
+- **nginx**: 연결이 안 되면 연결 시간 초과(1s) 뒤 다음 서버로 보낸다 (`max_fails=3 fail_timeout=10s` — 10초마다 한 번씩 다시 시험하고 그 요청만 1s 늦다). 연결 단계 실패만 다시 보내고, **이미 보낸 POST 는 다시 보내지 않는다** — 그 요청은 502 이고, 클라이언트가 **같은 `Idempotency-Key`** 로 다시 보내면 한 번만 접수된다 (E4 kill-3: 502 1건 → 1초 뒤 같은 키 재전송 → 접수 1).
+- **Kafka**: 정상 종료(restart)는 그룹에서 정상 탈퇴해 1 ~ 3초 안에 다른 api 가 파티션을 넘겨받는다 (E3: 0.96s · 3.2s). **강제 종료(SIGKILL · OOM · 호스트 장애)는 브로커가 세션 시간 초과(`session.timeout.ms` 기본 45초)를 기다린 뒤에야 파티션을 넘긴다** (E4: 45.6s). 그동안 죽은 api 의 파티션(3개 중 1개 몫, 메시지의 약 1/3)은 처리가 늦다 — kill-3 에서 1201건 중 268건(22%)이 5s 넘게, 최대 45.04s. **잃는 것은 없다** (은행 누락 · 중복 0).
+- **`SENDING` 으로 남은 건**은 정리 작업이 30초 뒤 결과조회로 확정한다 (재전송 없음 — ADR-0006).
+- **자동 재시작**: `restart: unless-stopped` 는 실제 크래시 · OOM 이면 다시 띄운다. 그러나 `docker kill` 은 "사람이 멈춤" 으로 보아 **다시 띄우지 않는다** (E4 3회 모두) — 실험 뒤에는 `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app up -d` 로 올린다.
+- api-1 이 `unhealthy` 로 멈추면 `logs api-1` (DB · Kafka 연결) 과 `docker stats` (메모리 한도 768m) 를 본다.
+
+### 14-5. 하루 배치 락 (ShedLock)
+대사(`daily-recon`)와 보존(`data-retention`)은 두 api 중 **한 대만** 돈다.
+```sql
+SELECT name, locked_by, locked_at, lock_until, lock_until > UTC_TIMESTAMP(3) AS held FROM shedlock;
+```
+- **값은 UTC** (KST 로 읽으려면 +9시간). `locked_by` 는 잡은 서버(api-1 · api-2, IntelliJ 는 `local`). `held = 1` 이면 아직 잡혀 있다.
+- 락이 남아 배치가 안 돈다고 의심되면: **`lock_until` 이 지나면 저절로 풀린다** (대사 50분 · 보존 30분, 끝나면 최소 1분). 급하면 그 행의 `lock_until` 을 `UTC_TIMESTAMP(3)` 로 바꾼다 — **다른 서버가 실제로 돌고 있지 않은지 로그로 먼저 확인**한다 (락은 1차 방어일 뿐 대사 · 보존은 두 대가 돌아도 돈이 틀어지지 않게 멱등이지만, 일부러 겹치게 하지 않는다).
+```sql
+UPDATE shedlock SET lock_until = UTC_TIMESTAMP(3) WHERE name = 'daily-recon';
+```
+
+### 14-6. 실험 도구 (`load/compose/`)
+api 2대에 출금을 일정 속도로 넣으면서 한 대를 재시작(E3) · 강제 종료(E4)한다. k6 컨테이너(`p82-k6-<회차>`)는 nginx 로 보낸다.
+```bash
+bash load/compose/run.sh steady 1      # 기준 회차 (아무것도 안 함)
+bash load/compose/run.sh restart 1     # api-1 재시작
+bash load/compose/run.sh kill 1        # api-1 강제 종료 (끝나면 run.sh 가 올린다)
+bash load/compose/run.sh cleanup       # 끝나면 반드시 — load-p82-u001 ~ u020 의 행만 지운다
+```
+- 실험 · 스모크 뒤 컨테이너 모의 은행의 `bank-files` 볼륨에는 거래 기록이 남지만 DB 행은 지워진다 → 그 날짜로 `--close-day` · 대사를 하면 "거래번호 모름" 이슈가 대량으로 나온다. 그 날짜는 대사하지 않거나 볼륨을 지운다 (`docker compose … --profile app down -v` 는 DB 볼륨까지 지우므로 주의 — `bank-files` 만 지우려면 앱 컨테이너를 내린 뒤 `docker volume rm bank-transfer_bank-files`).
+- 환경변수: `RATE`(초당 출금, 20) · `DURATION`(부하 시간, `60s`) · `ACTION_AT`(동작 시각 초, 20 — `DURATION` 보다 작아야 한다) · `SETTLE`(완료 대기 최대 초, 240).
+- 정확성 확인(접수 키 > 0, 접수 + 포기 = 반복 수, 출금 행 = 거래번호 수, 은행 누락 · 중복 0, 잔고 = 원장 …)을 통과하지 못하면 요약이 `.json.invalid` 로 남는다.
+- 결과: `docs/perf/raw/p8-2/<동작>-<회차>.json` (요약) · `.k6.json` · `.nginx-errors.txt` · `.rebalance.txt`, 작업 파일은 `build/load-p82/<동작>-<회차>/`. 먼저 앱을 띄우고 IntelliJ 의 API 는 끈다 (14-1).

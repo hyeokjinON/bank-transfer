@@ -211,7 +211,8 @@ reset_offsets "$GROUP-dlt" transfer.requested-dlt
 
 # --- 3. 발행만 ---
 echo "[$RUN] 3/6 발행만 (리스너 끔)"
-start_api "$WORK/api-publish.log" --spring.kafka.listener.auto-startup=false \
+# 발행 단계는 은행을 부르지 않지만 P8-1 까지와 같은 빈 구성(직결)으로 — P8-2 부터 앱 기본이 http (GW_ARGS 는 처리 단계에서 만든다)
+start_api "$WORK/api-publish.log" --spring.kafka.listener.auto-startup=false --bank.gateway.mode=direct \
   --transfer.outbox.relay.enabled=true --transfer.outbox.relay.batch-size=500 --transfer.outbox.relay.interval-ms=100
 PENDING_SQL="SELECT COUNT(*) FROM outbox_event o JOIN transfer t ON t.id = o.aggregate_id WHERE t.user_id LIKE 'load-p61-u%' AND o.published_at IS NULL"
 P=-1
@@ -231,7 +232,7 @@ for _ in $(seq 30); do
 done
 grep -q "mock bank listening on" "$WORK/mock-bank.log" || die "모의 은행이 30초 안에 뜨지 않았다"
 gw_start "$WORK/gateway.log"   # GATEWAY=http 일 때만: 게이트웨이 앱 (18082) 이 측정용 모의 은행에 붙는다
-mapfile -t GW_ARGS < <(gw_api_args)   # direct 면 빈 배열
+mapfile -t GW_ARGS < <(gw_api_args)   # direct 면 --bank.gateway.mode=direct 하나 (P8-2)
 API_JVM_ARGS=("${VT_JVM_ARGS[@]}")   # 발행 단계는 끈 채, 처리 단계만 VT · JFR
 start_api "$WORK/api-process.log" --transfer.outbox.relay.enabled=false \
   --transfer.consumer.mode="$MODE" --transfer.consumer.coroutine.max-in-flight-bank-calls="$CAP" \

@@ -5,6 +5,8 @@ server:
 spring:
   application:
     name: bank-gateway
+  lifecycle:
+    timeout-per-shutdown-phase: 20s   # 종료 단계마다 최대 20초 (P8-2). Compose stop_grace_period(30s)보다 짧게 — api 와 같은 규칙 (단계당 상한 — ADR-0016 결정 7)
   main:
     web-application-type: reactive   # reactive = WebFlux 판(기본) | servlet = MVC 비동기 판 (P8-1 비교)
   mvc:

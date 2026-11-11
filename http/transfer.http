@@ -149,10 +149,10 @@ X-User-Id: user-1
 
 ### ============================================================
 ### 손 확인: 은행 장애 → 재시도 토픽 → DLT → 은행 복구 → 정리 작업 재발행으로 COMPLETED (P3-3b)
-### 준비: 실행 구성 "1. Mock Bank (9090)" 과 "4. API (재발행 손 확인)" 을 띄운다 (2. 대신 4. — 재시도 2초·4초·8초, 재발행 대기 30초).
+### 준비: 실행 구성 "1. Mock Bank (9090)" · "11. Bank Gateway (8082)" · "4. API (재발행 손 확인)" 셋을 띄운다 (2. 대신 4. — 재시도 2초·4초·8초, 재발행 대기 30초).
 ###       1002123456789 는 account-verification.http 로 인증해 둔다. kafka-ui 를 띄우면 토픽 이동이 보인다 (OPERATION.md Kafka 절).
 ### 순서: ① IntelliJ 에서 "1. Mock Bank (9090)" 만 Stop → ② 8-1) 접수 → ③ kafka-ui 에서 transfer.requested → -retry-0 → -retry-1 → -retry-2 → -dlt (약 14초),
-###       API 콘솔 "moved to DLT" → ④ 8-2) 조회 → RECEIVED → ⑤ "1. Mock Bank (9090)" Run (API 콘솔 "connected to bank" — 재접속 백오프라 최대 30초)
+###       API 콘솔 "moved to DLT" → ④ 8-2) 조회 → RECEIVED → ⑤ "1. Mock Bank (9090)" Run (게이트웨이 콘솔 "connected to bank" — 재접속 백오프라 최대 30초. P8-2 부터 은행 연결은 게이트웨이가 가진다)
 ###       → ⑥ 마지막 시도 30초 + 최대 10초 주기 뒤 API 콘솔 "reconcile: ReconcileResult(… republished=1 …)" → 8-3) 조회 → COMPLETED 0000.
 ###       모의 은행 콘솔의 50000원 입금은 1건이다. 접수부터 약 1분.
 ### ============================================================

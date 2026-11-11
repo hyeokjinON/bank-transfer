@@ -41,7 +41,7 @@ class ReactiveConfiguration {
 
     /** 점검 중에는 전문을 보내지 않는다 (P5-1) — 웹 가드가 먼저 막아도 여기가 마지막 보장이다 (apps/api 와 같다). */
     @Bean(destroyMethod = "close")
-    @ConditionalOnProperty(prefix = "bank.gateway", name = ["mode"], havingValue = BankGatewayProperties.DIRECT, matchIfMissing = true)
+    @ConditionalOnProperty(prefix = "bank.gateway", name = ["mode"], havingValue = BankGatewayProperties.DIRECT)
     fun bankGatewayClient(props: BankGatewayProperties, maintenance: BankMaintenanceWindow, clock: Clock): BankGatewayClient =
         BankGatewayClient(
             BankGatewayConfig(host = props.host, port = props.port, responseTimeout = props.responseTimeout, pollInterval = props.pollInterval),
@@ -49,11 +49,11 @@ class ReactiveConfiguration {
         ).start()
 
     /**
-     * mode=http (P8-1): 은행 연결은 게이트웨이 앱이 가진다. 이 프로세스는 HTTP 로만 부른다.
+     * mode=http (P8-1, P8-2 부터 기본): 은행 연결은 게이트웨이 앱이 가진다. 이 프로세스는 HTTP 로만 부른다.
      * 응답 시간 초과가 게이트웨이의 은행 응답 시간 초과(3s) + 여유보다 짧으면 "모름" 이 쓸데없이 는다 — 경고만 (측정 · 테스트가 일부러 줄일 수 있게).
      */
     @Bean(destroyMethod = "close")
-    @ConditionalOnProperty(prefix = "bank.gateway", name = ["mode"], havingValue = BankGatewayProperties.HTTP)
+    @ConditionalOnProperty(prefix = "bank.gateway", name = ["mode"], havingValue = BankGatewayProperties.HTTP, matchIfMissing = true)
     fun httpBankGateway(props: BankGatewayProperties): HttpBankGateway {
         if (props.http.responseTimeout < HttpGatewaySettings.RECOMMENDED_MIN_RESPONSE_TIMEOUT) {
             log.warn("bank.gateway.http.response-timeout={} is shorter than {} (gateway bank timeout 3s + margin) — more results will be unknown", props.http.responseTimeout, HttpGatewaySettings.RECOMMENDED_MIN_RESPONSE_TIMEOUT)
