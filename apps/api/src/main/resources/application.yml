@@ -1,6 +1,11 @@
+server:
+  shutdown: graceful           # P8-2: 내려갈 때 새 연결을 받지 않고 처리 중인 요청을 끝낸다. Boot 4 기본값이지만 명시 (GracefulShutdownConfigTest)
+
 spring:
   application:
     name: bank-transfer
+  lifecycle:
+    timeout-per-shutdown-phase: 20s   # 종료 단계(웹 서버 · Kafka 리스너 …)마다 최대 20초. Compose stop_grace_period(30s)보다 짧게 — 바깥이 먼저 SIGKILL 하지 않게
   task:
     scheduling:
       pool:
@@ -82,6 +87,10 @@ management:
     web:
       exposure:
         include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true   # /actuator/health/liveness · readiness (P8-2 — Compose healthcheck 가 readiness 를 본다. P8-3 K8s probe 도). Boot 4 기본값이지만 명시
   info:
     env:
       enabled: true   # info.* 설정을 /actuator/info 에 보인다 (P4-2: 차감 전략)
@@ -150,6 +159,7 @@ alert:
     base-url: https://api.telegram.org
 
 info:
+  instance: ${INFO_INSTANCE:local}   # 어느 api 인가 (P8-2). Compose 가 api-1 · api-2 를 넣는다 — nginx 뒤 분배 확인 · ShedLock locked_by
   account:
     verification:
       web-mode: ${account.verification.web-mode}   # 지금 1원인증 요청 판 (P6-2, load/verification/run.sh 가 측정 전에 확인)
