@@ -51,3 +51,57 @@ jobs:
       - name: Stop
         if: always()
         run: docker compose -f infra/docker-compose.yml --env-file infra/.env.example down -v
+
+  # 앱 이미지 3개 · Compose app 프로필(모의 은행 · 게이트웨이 · api 2대 · nginx)이 실제로 뜨고, nginx 를 거쳐 1원인증 · 출금이 되는지 (P8-2, ADR-0016)
+  app-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      # .env.example 의 비밀번호는 application.yml 기본값과 같아 "이미지에 비밀번호 값이 없다" 를 확인할 수 없다 — 실행마다 임의 값으로 바꾼다
+      - name: CI 용 infra/.env (비밀번호는 임의 값)
+        run: |
+          cp infra/.env.example infra/.env
+          sed -i "s/^MYSQL_PASSWORD=.*/MYSQL_PASSWORD=ci-$(openssl rand -hex 12)/; s/^MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=ci-$(openssl rand -hex 12)/" infra/.env
+      - uses: docker/setup-buildx-action@v4
+      # 이미지마다 GitHub Actions 캐시(type=gha)에 층을 남긴다. 같은 잡 안에서는 빌더가 빌드 단계를 한 번만 돌리고 나머지 타깃이 재사용한다.
+      # Gradle 의존성 캐시 마운트는 gha 캐시로 넘어가지 않는다 — 코드가 바뀐 실행은 의존성을 다시 받는다 (15분 넘으면 스펙 §9)
+      - name: Build api image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: api
+          tags: bank-transfer/api:dev
+          load: true
+          cache-from: type=gha,scope=app-api
+          cache-to: type=gha,mode=max,scope=app-api
+      - name: Build bank-gateway image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: bank-gateway
+          tags: bank-transfer/bank-gateway:dev
+          load: true
+          cache-from: type=gha,scope=app-bank-gateway
+          cache-to: type=gha,mode=max,scope=app-bank-gateway
+      - name: Build mock-bank image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: mock-bank
+          tags: bank-transfer/mock-bank:dev
+          load: true
+          cache-from: type=gha,scope=app-mock-bank
+          cache-to: type=gha,mode=max,scope=app-mock-bank
+      - name: Start infra + app profile
+        env:
+          BANK_MAINTENANCE_ENABLED: "false"   # 점검 시간(23:50 ~ 00:10 KST)에 돌아도 503 이 나지 않게
+        run: docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app up -d --no-build --wait --wait-timeout 300
+      - name: Smoke through nginx
+        run: bash infra/app-smoke.sh
+      - name: Logs on failure
+        if: failure()
+        run: docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app logs --no-color
+      - name: Stop
+        if: always()
+        run: docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app down -v
