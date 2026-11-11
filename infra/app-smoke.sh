@@ -10,12 +10,13 @@
 #   먼저: docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app up -d --build --wait
 # 개발 DB 에는 사용자 load-p82-smoke-<시각> 의 행만 쓰고 끝에서 지운다 (측정 행 규칙).
 set -euo pipefail
-export MSYS_NO_PATHCONV=1   # Git Bash 가 /data/... 같은 인자를 Windows 경로로 바꾸지 않게
+# MSYS_NO_PATHCONV 는 docker 명령에만 건다 (dc 안) — /data/... 같은 컨테이너 경로 인자를 Git Bash 가 Windows 경로로 바꾸지 않게.
+# 전역으로 export 하면 curl 의 -o /dev/null 이 깨진다 (mingw curl 이 변환 안 된 경로를 못 연다, rc=23).
 cd "$(dirname "$0")"
 
 ENV_FILE=.env
 [ -f "$ENV_FILE" ] || ENV_FILE=.env.example
-dc() { docker compose -f docker-compose.yml --env-file "$ENV_FILE" --profile app "$@"; }
+dc() { MSYS_NO_PATHCONV=1 docker compose -f docker-compose.yml --env-file "$ENV_FILE" --profile app "$@"; }
 # 비밀번호는 mysql 컨테이너가 이미 가진 환경변수로만 (PC 명령행에 나오지 않게 — load/run.sh 와 같은 방식)
 sql() { dc exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" exec mysql -u"$MYSQL_USER" "$MYSQL_DATABASE" --default-character-set=utf8mb4 -N'; }
 ok() { printf '  \033[32mOK\033[0m %s\n' "$1"; }
@@ -93,9 +94,9 @@ R=$(post /api/v1/transfers "$TRANSFER" -H "Idempotency-Key: $KEY")
 ok "같은 출금 id, 200"
 
 echo "[4/7] 분배"
-UPS=$(for _ in $(seq 20); do { curl -s -D - -o /dev/null "$BASE/actuator/info" || true; } | tr -d '\r' | awk -F': ' 'tolower($1) == "x-upstream" { print $2 }'; done | sort -u)
+UPS=$(for _ in $(seq 20); do curl -s -D - -o /dev/null "$BASE/actuator/info" | tr -d '\r' | awk -F': ' 'tolower($1) == "x-upstream" { print $2 }'; done | sort -u)
 [ "$(grep -c . <<<"$UPS")" = 2 ] || fail "X-Upstream 이 두 값이 아니다: $(tr '\n' ' ' <<<"$UPS")"
-INST=$(for _ in $(seq 20); do { curl -s "$BASE/actuator/info" || true; } | json instance; done | sort -u | tr '\n' ' ')
+INST=$(for _ in $(seq 20); do curl -s "$BASE/actuator/info" | json instance; done | sort -u | tr '\n' ' ')
 [ "$INST" = "api-1 api-2 " ] || fail "instance 가 api-1 · api-2 둘이 아니다: $INST"
 ok "X-Upstream $(tr '\n' ' ' <<<"$UPS")· instance $INST"
 
