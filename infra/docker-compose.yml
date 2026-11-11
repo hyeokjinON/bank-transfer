@@ -1,10 +1,65 @@
 # 로컬 개발 인프라 (P3-0) — MySQL 8.4 · Kafka 4.1 (KRaft, 단일 노드) · Redis 7.4 · (선택) k6 2.3 부하 측정
+# 앱까지 컨테이너로 (P8-2, app 프로필) — 모의 은행 · 게이트웨이 · api 2대 · nginx(:8000). IntelliJ 의 API · 게이트웨이 · 모의 은행과 동시에 띄우지 않는다
 # 실행:  docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --wait
-# 확인:  bash infra/verify.sh
-# 종료:  docker compose -f infra/docker-compose.yml down        (데이터까지 지우려면 down -v)
-# 설계 이유: docs/adr/0003-local-infra-docker-compose.md
+#        docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app up -d --build --wait
+# 확인:  bash infra/verify.sh   ·   bash infra/app-smoke.sh (app 프로필)
+# 종료:  docker compose -f infra/docker-compose.yml down        (데이터까지 지우려면 down -v. app 프로필까지면 --profile app)
+# 설계 이유: docs/adr/0003-local-infra-docker-compose.md · docs/adr/0016-app-images-compose.md
 
 name: bank-transfer
+
+# --- P8-2 앱 컨테이너(app 프로필) 공통 블록 — YAML anchor 로 같은 값을 한 번만 쓴다 ---
+x-java-app: &java-app
+  restart: unless-stopped
+  stop_grace_period: 30s          # 앱의 graceful 단계(20s)보다 길게 — 처리 중인 요청 · 메시지를 끝낼 시간을 준 뒤 SIGKILL
+
+# 은행 점검 시간 (P5-1). api(접수 503)와 게이트웨이(송신 보류)가 같은 창이어야 한다 — 컨테이너 실행에서는 이 한 곳에서 둘에 넣는다 (스펙 §3-11)
+x-bank-maintenance: &bank-maintenance
+  BANK_MAINTENANCE_ENABLED: "${BANK_MAINTENANCE_ENABLED:-true}"
+  BANK_MAINTENANCE_START: "${BANK_MAINTENANCE_START:-23:50}"
+  BANK_MAINTENANCE_END: "${BANK_MAINTENANCE_END:-00:10}"
+
+# api 두 대의 환경변수. 이름은 Spring 의 느슨한 바인딩 표준형 (bank.gateway.http.base-url → BANK_GATEWAY_HTTP_BASEURL)
+x-api-env: &api-env
+  <<: *bank-maintenance
+  MYSQL_HOST: mysql
+  MYSQL_PORT: "3306"              # 명시: infra/.env 의 MYSQL_PORT 는 PC 쪽 포트(바꿔 쓸 수 있다) — 그대로 넘기면 컨테이너 안에서 틀린 포트로 붙는다
+  MYSQL_DATABASE: ${MYSQL_DATABASE:-bank_transfer}
+  MYSQL_USER: ${MYSQL_USER:-bank}
+  MYSQL_PASSWORD: ${MYSQL_PASSWORD:?infra/.env 에 MYSQL_PASSWORD 를 정하세요}
+  KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  REDIS_HOST: redis
+  BANK_GATEWAY_MODE: http         # 앱 기본값과 같지만 명시 (P8-2)
+  BANK_GATEWAY_HTTP_BASEURL: http://bank-gateway:8082
+  DAILYRECON_FILEDIR: /data/bank-files   # 모의 은행이 쓴 대사 파일 (공유 볼륨, 읽기 전용)
+  DAILYRECON_SCHEDULE_CRON: "${API_DAILY_RECON_CRON:-0 0 1-6 * * *}"   # 실험 E5 만 바꾼다 (2분마다)
+
+x-api: &api
+  <<: *java-app
+  image: bank-transfer/api:dev
+  build:
+    context: ..
+    dockerfile: Dockerfile
+    target: api
+  profiles: ["app"]
+  mem_limit: 768m
+  volumes:
+    - bank-files:/data/bank-files:ro
+  healthcheck:                    # readiness: 기동이 끝나 요청을 받을 수 있나 (종료 중이면 OUT_OF_SERVICE)
+    test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:8080/actuator/health/readiness"]
+    interval: 5s
+    timeout: 3s
+    retries: 30
+    start_period: 90s
+  depends_on:
+    mysql:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    bank-gateway:
+      condition: service_healthy
 
 services:
   mysql:
@@ -115,7 +170,84 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"   # 리눅스에서도 PC(호스트)에 닿게. Docker Desktop 은 원래 된다
 
+  # --- P8-2 app 프로필: 모의 은행 → 게이트웨이(은행 연결 UP) → api-1 · api-2 → nginx 순서로 뜬다. PC 포트는 nginx 8000 하나 ---
+  #   docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app up -d --build --wait
+  #   확인 bash infra/app-smoke.sh · 로그 docker compose ... --profile app logs -f api-1 · 안에서 보기 docker compose ... exec bank-gateway wget -qO- localhost:8082/actuator/health
+  mock-bank:
+    <<: *java-app
+    image: bank-transfer/mock-bank:dev
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: mock-bank
+    profiles: ["app"]
+    mem_limit: 256m
+    volumes:
+      - bank-files:/data/bank-files   # 거래 기록 · 대사 파일을 쓴다 (운영이면 은행 SFTP · 오브젝트 스토리지 자리)
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "9090"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  bank-gateway:
+    <<: *java-app
+    image: bank-transfer/bank-gateway:dev
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: bank-gateway
+    profiles: ["app"]
+    mem_limit: 512m
+    environment:
+      <<: *bank-maintenance
+      BANK_GATEWAY_HOST: mock-bank
+      BANK_GATEWAY_PORT: "9090"
+    healthcheck:                    # 전체 health 에 bankConnection 이 들어 있다 — 은행에 붙어야 UP
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:8082/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      mock-bank:
+        condition: service_healthy
+
+  # 같은 이미지 두 대. 이름을 나눠 로그 · 장애 실험 · 확인이 인스턴스별로 또렷하게 (--scale 대신, 스펙 §3-4)
+  api-1:
+    <<: *api
+    environment:
+      <<: *api-env
+      INFO_INSTANCE: api-1
+
+  api-2:
+    <<: *api
+    environment:
+      <<: *api-env
+      INFO_INSTANCE: api-2
+
+  nginx:
+    image: nginx:1.27-alpine
+    profiles: ["app"]
+    restart: unless-stopped
+    ports:
+      - "8000:80"                   # PC 에 여는 유일한 포트 (게이트웨이 · 모의 은행 · api 는 내부망 전용 — ADR-0015 위험의 첫 조치)
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1/nginx-health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      api-1:
+        condition: service_healthy
+      api-2:
+        condition: service_healthy
+
 volumes:
   mysql-data:
   kafka-data:
   redis-data:
+  bank-files:
