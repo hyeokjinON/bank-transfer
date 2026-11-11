@@ -17,7 +17,7 @@
 6. **서버 기본은 WebFlux** (DB · Kafka 없이 HTTP → 은행 TCP 를 기다리기만 하는 앱이라 이벤트 루프가 맞다), **클라이언트 기본은 WebClient** (`toFuture()` 로 기존 `CompletableFuture` 유지, 연결 풀 조절, P9 지표). 비교 판으로 MVC 비동기 서버 · JDK `HttpClient` 를 같이 구현하고 설정으로 고른다 (`spring.main.web-application-type`, `bank.gateway.http.client`).
 7. **계약 DTO 는 한 모듈(`modules/bank-gateway-http`)을 서버 · 클라이언트가 같이 쓴다.** 같은 저장소 · 같은 버전 배포라 어긋날 일이 없다.
 8. **게이트웨이는 1대** 다 (분리 목적이 은행 연결을 한 곳으로 모으는 것). 이중화는 P8-3.
-9. **기본 모드는 `direct` 유지** (`bank.gateway.mode` = `direct | http`). 기존 테스트 · 실행 구성 · 손 확인 절차가 그대로 돌고, 분리 비용을 같은 도구로 비교할 수 있다. `http` 기본은 P8-2 에서.
+9. **기본 모드는 `direct` 유지** (`bank.gateway.mode` = `direct | http`). 기존 테스트 · 실행 구성 · 손 확인 절차가 그대로 돌고, 분리 비용을 같은 도구로 비교할 수 있다. `http` 기본은 P8-2 에서. → **P8-2 에서 기본을 `http` 로 바꿨다** ([ADR-0016](0016-app-images-compose.md)). 테스트 공통 기반 · 측정 스크립트 · 실행 구성 `5. API (부하 측정)` · `12. API (direct 직결)` 은 `direct` 를 명시한다.
 10. **망 지연 주입은 Toxiproxy** (Compose 프로필 `chaos`, Testcontainers). 같은 PC 루프백은 망 지연이 거의 0 이라 분리 비용이 작게 나오기 때문이다.
 
 시간: 연결 1s · 연결 풀 대기 1s · HTTP 응답 5s (= 게이트웨이의 은행 응답 3s + 여유 2s — api 가 먼저 끊으면 게이트웨이는 답을 받았는데 api 는 "모름" 이 되는 건이 쓸데없이 는다).

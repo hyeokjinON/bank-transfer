@@ -98,7 +98,7 @@ sequenceDiagram
 
 1. **JDK 21 지정**: `Settings > Build, Execution, Deployment > Build Tools > Gradle > Gradle JVM` 을 21 로, `File > Project Structure > SDK` 도 21 로.
 2. 오른쪽 위 실행 목록에 `.run/` 의 구성이 자동으로 뜹니다.
-   - `0. Mock Bank + API` : 모의 은행(9090)과 API(8080)를 한 번에 실행
+   - `0. Mock Bank + API` : 모의 은행(9090) · 게이트웨이(8082) · API(8080)를 한 번에 실행 (P8-2 부터 기본 `bank.gateway.mode=http` 라 게이트웨이가 함께 뜬다)
    - `1. Mock Bank (9090)` / `2. API (8080)` : 하나씩 실행 (벌레 아이콘으로 디버그)
    - `3. All Tests` : 테스트 524개
    - `4. API (재발행 손 확인)` : 재시도 간격 2초 · 4초 · 8초, 재발행 대기 30초로 줄인 API (P3-3b 손 확인용, [`http/transfer.http`](http/transfer.http) 8절)
@@ -109,6 +109,8 @@ sequenceDiagram
    - `10. API (1원인증 블로킹)` : `--account.verification.web-mode=blocking` 으로 API 실행 (대조군, 측정 전용)
 3. `http/account-verification.http` 를 열고 요청 왼쪽 ▶ 버튼으로 호출합니다.
    1번 요청이 응답의 `id` 를 저장하고, 모의 은행 콘솔의 `적요='BT1234'` 숫자를 2번 요청의 `code` 에 넣으면 `VERIFIED` 가 됩니다.
+
+> 컨테이너로 한 번에 (P8-2): IntelliJ 의 API · 게이트웨이 · 모의 은행을 끄고 `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app up -d --build --wait` → `http://localhost:8000` (nginx 뒤 api 2대). 확인 `bash infra/app-smoke.sh`, 자세히는 [SETUP §2-8](SETUP.md) · [OPERATION §14](OPERATION.md).
 
 > 디버깅 추천 위치: `BankGatewayClient.send` (요청 등록), `ClientHandler.channelRead0` (전문번호로 응답 매칭), `AccountVerificationService.request` (성명조회 → 1원 이체 연결).
 
@@ -203,8 +205,9 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
 - [x] **P7** Virtual Thread 적용 비교: 설정 하나 · 진행 조건 실험(V1 · V2 · V3) · 같은 도구로 웹 · 컨슈머 비교, Java 21 냉시동 교착 → [ADR-0014](docs/adr/0014-virtual-threads.md) · [측정 결과](docs/perf/p7-virtual-threads.md)
 - [ ] **P8** 모듈 분리(MSA), Docker Compose → Kubernetes
   - [x] P8-1 은행 게이트웨이 서비스 분리: HTTP · 실패 분류 유지 · 서버 2판 × 클라이언트 2판 · Toxiproxy → [ADR-0015](docs/adr/0015-bank-gateway-service.md) · [측정 결과](docs/perf/p8-1-gateway-split.md)
+  - [ ] P8-2 앱 이미지 · Compose 전체 실행 · api 2대: Dockerfile 타깃 3 · nginx · ShedLock · mode 기본 http → [ADR-0016](docs/adr/0016-app-images-compose.md) · [실험 결과](docs/perf/p8-2-compose.md)
 - [ ] **P9** 관측성: Micrometer, Prometheus, Grafana
 
 ## 기술 스택
 
-Kotlin 2.3 · Java 21 · Spring Boot 4.1 (Spring MVC, WebFlux(Reactor Netty) — apps/api-reactive, Validation, Actuator) · Spring Data JPA (Hibernate 7) · Flyway · MySQL 8.4 · Spring Kafka (Kafka 4.1) · Testcontainers · Netty 4.2 · Spring Batch 6 (일마감 대사) · Kotlin Coroutines 1.10 (컨슈머 suspend 리스너 · WebFlux suspend 핸들러 + kotlinx-coroutines-reactor) · Redisson 4.8 (Redis 분산락) · Reactor Netty WebClient · JDK HttpClient · Toxiproxy · k6 2.3 (부하 측정) · JUnit 5 · Gradle 9 (Kotlin DSL) · GitHub Actions
+Kotlin 2.3 · Java 21 · Spring Boot 4.1 (Spring MVC, WebFlux(Reactor Netty) — apps/api-reactive, Validation, Actuator) · Spring Data JPA (Hibernate 7) · Flyway · MySQL 8.4 · Spring Kafka (Kafka 4.1) · Testcontainers · Netty 4.2 · Spring Batch 6 (일마감 대사) · Kotlin Coroutines 1.10 (컨슈머 suspend 리스너 · WebFlux suspend 핸들러 + kotlinx-coroutines-reactor) · Redisson 4.8 (Redis 분산락) · Reactor Netty WebClient · JDK HttpClient · Toxiproxy · Docker (멀티 스테이지 · 레이어 jar) · Docker Compose · nginx · ShedLock · k6 2.3 (부하 측정) · JUnit 5 · Gradle 9 (Kotlin DSL) · GitHub Actions

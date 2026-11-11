@@ -344,7 +344,7 @@ append-only — 사람이 `resolved_at` · `resolution_note` 만 채운다. DB �
 ## 7. 명명 · 타입 규칙
 - 테이블 · 컬럼: `snake_case`, 테이블은 단수형 (`transfer`).
 - PK 는 `id`. 인덱스 접두어: UNIQUE `uk_<table>_<컬럼>`, 일반 `idx_<table>_<용도>`.
-- 시각: `DATETIME(6)` (마이크로초, KST). 접미어 `_at`.
+- 시각: `DATETIME(6)` (마이크로초, KST). 접미어 `_at`. (예외: `shedlock` 표는 ShedLock 이 정한 컬럼 이름(`lock_until` · `locked_at` · `locked_by`)을 쓰고 타입은 `DATETIME(3)`, 값은 UTC — §4-10.)
 - 금액: `BIGINT` 원 단위. `DECIMAL`·부동소수점 쓰지 않는다 (원화는 소수점이 없다).
 - 불리언이 필요하면 `TINYINT(1)` 대신 상태 컬럼으로 표현할 수 있는지 먼저 본다.
 - 개인정보 원문(인증코드)은 저장하지 않는다. 계좌번호 마스킹: `Transfer.toString()` 은 뒤 4자리만 남겨 로그에 원문이 찍히지 않는다. API 응답 마스킹은 인증 도입 때 적용한다.
