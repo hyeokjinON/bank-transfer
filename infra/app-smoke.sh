@@ -104,8 +104,11 @@ echo "[5/7] 게이트웨이 · 포트"
 dc exec -T bank-gateway wget -qO- http://127.0.0.1:8082/actuator/health | grep -q '"status":"UP"' || fail "게이트웨이 health 가 UP 이 아니다"
 for sp in "bank-gateway 8082" "mock-bank 9090" "api-1 8080" "api-2 8080"; do
   set -- $sp
+  # 안 열린 포트를 Compose 버전마다 다르게 찍는다 (빈 줄 · ":0" · "invalid IP:0"). 열린 경우만 "주소:1 이상 포트" 로 끝난다
   out=$(dc port "$1" "$2" 2>/dev/null || true)
-  [ -z "$out" ] || [ "$out" = ":0" ] || fail "$1:$2 가 PC 에 열려 있다 ($out) — app 프로필에서 PC 포트는 nginx 8000 하나"
+  if [[ "$out" =~ :[1-9][0-9]*$ ]]; then
+    fail "$1:$2 가 PC 에 열려 있다 ($out) — app 프로필에서 PC 포트는 nginx 8000 하나"
+  fi
 done
 dc port nginx 80 | grep -q ':8000$' || fail "nginx 가 8000 에 열려 있지 않다"
 if [ "${CI:-false}" = true ]; then
