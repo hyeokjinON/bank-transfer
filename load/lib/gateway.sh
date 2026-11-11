@@ -33,8 +33,7 @@ gw_url() { if [ -n "${NET_DELAY:-}" ]; then echo "http://localhost:28082"; else 
 # API 에 더할 인자 (한 줄에 하나). direct 면 --bank.gateway.mode=direct 하나 — P8-2 부터 앱 기본이 http 라,
 # 명시해야 P6 ~ P8-1 기준선(API 가 측정용 모의 은행에 직결)과 같다
 gw_api_args() {
-  if ! gw_on; then printf '%s
-' --bank.gateway.mode=direct; return 0; fi
+  if ! gw_on; then printf '%s\n' --bank.gateway.mode=direct; return 0; fi
   printf '%s\n' --bank.gateway.mode=http --bank.gateway.http.base-url="$(gw_url)" --bank.gateway.http.client="${CLIENT:-webclient}"
   [ -z "${GW_POOL:-}" ] || printf '%s\n' --bank.gateway.http.max-connections="$GW_POOL"
   # 측정 앱은 로그를 WARN 으로 낮추므로, http 판 기동 줄(gw_check_mode 가 읽는다)이 보이게 설정 패키지만 INFO
