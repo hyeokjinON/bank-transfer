@@ -6,6 +6,7 @@
 | 구성 요소 | 실행 | 포트 | 상태 확인 |
 |---|---|---|---|
 | API (`apps/api`) | `./gradlew :apps:api:bootRun` 또는 실행 구성 `2. API (8080)` | 8080 | `GET /actuator/health` · MySQL · Kafka 필요 (기동 시 Flyway 마이그레이션) |
+| 은행 게이트웨이 (`apps/bank-gateway`, P8-1) | `./gradlew :apps:bank-gateway:bootRun` 또는 `11. Bank Gateway (8082)` (기본 http 모드에서 api 가 부르는 곳 — 모의 은행보다 나중, api 보다 먼저) | 8082 | `GET /actuator/health` (`bankConnection` 포함 — `/actuator/health/bankConnection` → `UP` 이면 은행에 붙어 있다) |
 | 모의 은행 (`apps/mock-bank`) | `./gradlew :apps:mock-bank:run --args="9090"` (작업 디렉터리 = 저장소 루트, 거래 기록 · 대사 파일은 `./bank-files`) 또는 `1. Mock Bank (9090)` | 9090 (TCP) | 콘솔 `Mock bank FEP started on port 9090` |
 | MySQL 8.4 | `infra/docker-compose.yml` | 3306 | `docker compose ... ps` → healthy |
 | Kafka 4.1 (KRaft) | 〃 | 9092 (PC) / 29092 (컨테이너) | 〃 |
@@ -17,7 +18,7 @@
 
 실행 구성 `0. Mock Bank + API` 와 `1. Mock Bank (9090)` 를 같이 띄우지 않는다: Windows 에서 모의 은행의 `SO_REUSEADDR` 가 같은 포트에 두 번 bind 하는 것을 허용해, 모의 은행이 둘 뜨고 어느 쪽에 붙을지 알 수 없다 (입금 내역이 갈린다).
 
-API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 뜨고, 게이트웨이가 1초→30초 간격으로 재접속을 시도한다(그동안 은행 호출은 503).
+기본(`bank.gateway.mode=http`, P8-2)에서 API 는 은행에 직접 붙지 않는다: api → 은행 게이트웨이 앱(8082) → 은행이다. 게이트웨이가 기동 시 모의 은행에 접속하고, 은행이 없어도 둘 다 뜨며 게이트웨이가 1초→30초 간격으로 재접속을 시도한다(그동안 은행 호출은 503). `direct` 모드에서만 API 가 기동 시 모의 은행에 직접 접속한다(같은 재접속 규칙).
 
 ## 2. 설정 (`apps/api/src/main/resources/application.yml`)
 | 키 | 기본값 | 의미 |
@@ -50,9 +51,18 @@ API 는 기동 시 모의 은행에 접속한다. 은행이 없어도 API 는 �
 | `wallet.optimistic.max-attempts` / `backoff-min` / `backoff-max` | `5` / `10ms` / `50ms` | `optimistic`: 충돌 재시도 횟수 · 사이 대기. 다 쓰면 409 |
 | `wallet.lock.wait-time` | `3s` | `redis`: 사용자 락 대기. 넘으면 503 |
 | `wallet.lock.redis-address` | `redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}` | `redis` 전략일 때만 연결 (첫 요청 때) |
-| `bank.gateway.host` / `port` | `localhost` / `9090` | 은행 FEP 주소 |
-| `bank.gateway.response-timeout` | `3s` | 응답 대기. 넘으면 504 `BANK_TIMEOUT` |
-| `bank.gateway.poll-interval` | `30s` | 쓰기 유휴 시 폴링 주기. ×3 동안 수신이 없으면 연결 종료 |
+| `bank.gateway.mode` | `http` | `http`(기본, P8-2) = 게이트웨이 앱(`apps/bank-gateway`)을 HTTP 로 부른다 · `direct` = 이 프로세스가 Netty 로 은행에 직결 (테스트 · 측정 기준선은 명시) |
+| `bank.gateway.http.base-url` | `http://localhost:8082` | `http` 일 때만. 게이트웨이 주소 |
+| `bank.gateway.http.client` | `webclient` | `http` 일 때만. `webclient` · `jdk` (P8-1 비교) |
+| `bank.gateway.http.max-connections` | `500` | `http` 일 때만 (WebClient). 연결 풀 상한 |
+| `bank.gateway.http.connect-timeout` / `pending-acquire-timeout` | `1s` / `1s` | `http` 일 때만. 연결 · 풀 대기 |
+| `bank.gateway.http.response-timeout` | `5s` | `http` 일 때만. 게이트웨이 응답 대기 (게이트웨이의 은행 응답 3s 보다 길게) |
+| `bank.gateway.host` / `port` | `localhost` / `9090` | `direct` 일 때만. 은행 FEP 주소 |
+| `bank.gateway.response-timeout` | `3s` | `direct` 일 때만. 응답 대기. 넘으면 504 `BANK_TIMEOUT` |
+| `bank.gateway.poll-interval` | `30s` | `direct` 일 때만. 쓰기 유휴 시 폴링 주기. ×3 동안 수신이 없으면 연결 종료 |
+| `server.shutdown` | `graceful` | 내려갈 때 새 연결을 받지 않고 처리 중인 요청을 끝낸다 (P8-2) |
+| `spring.lifecycle.timeout-per-shutdown-phase` | `20s` | 종료 **단계당** 상한 (Compose `stop_grace_period` 30s, §14-3) |
+| `info.instance` | `${INFO_INSTANCE:local}` | `GET /actuator/info` 의 어느 api 인가. Compose 가 api-1 · api-2 를 넣는다 |
 | `bank.maintenance.enabled` / `start` / `end` | `true` / `"23:50"` / `"00:10"` | 은행 점검 시간 (KST, 시작 포함 · 끝 제외, 자정 넘김 가능). yml 에서는 따옴표 필수. 길이는 재발행 포기(`E001`)까지의 약 26분보다 짧게 |
 | `account.verification.ttl` | `5m` | 1원인증 유효시간 |
 | `account.verification.max-attempts` | `5` | 코드 실패 허용 횟수 |
@@ -608,7 +618,7 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app s
 ```
 - **기동 순서** (healthy 기준): MySQL · Kafka · Redis → mock-bank → bank-gateway(은행 연결 UP) → api-1 · api-2(readiness) → nginx. 두 api 가 동시에 떠도 Flyway 는 DB 잠금으로 한 번만 적용한다.
 - **IntelliJ 의 API 와 동시에 띄우지 않는다.** 컨테이너 api 도 **06:30 보존 배치를 개발 DB 에 돌린다** (되돌릴 수 없는 삭제 — HANDOVER §3 경고와 같다).
-- PC 에 열리는 포트는 nginx 8000 하나다. 게이트웨이 · 모의 은행 · api 는 내부망 전용이다.
+- PC 에 열리는 포트는 nginx 8000 하나이고 `127.0.0.1` 에만 열린다 (인증 없는 `/admin/*` 가 LAN 에 안 열리게). 게이트웨이 · 모의 은행 · api 는 내부망 전용이다.
 
 ### 14-2. 로그 · 안에서 보기
 ```bash
@@ -659,6 +669,7 @@ bash load/compose/run.sh restart 1     # api-1 재시작
 bash load/compose/run.sh kill 1        # api-1 강제 종료 (끝나면 run.sh 가 올린다)
 bash load/compose/run.sh cleanup       # 끝나면 반드시 — load-p82-u001 ~ u020 의 행만 지운다
 ```
+- 실험 · 스모크 뒤 컨테이너 모의 은행의 `bank-files` 볼륨에는 거래 기록이 남지만 DB 행은 지워진다 → 그 날짜로 `--close-day` · 대사를 하면 "거래번호 모름" 이슈가 대량으로 나온다. 그 날짜는 대사하지 않거나 볼륨을 지운다 (`docker compose … --profile app down -v` 는 DB 볼륨까지 지우므로 주의 — `bank-files` 만 지우려면 앱 컨테이너를 내린 뒤 `docker volume rm bank-transfer_bank-files`).
 - 환경변수: `RATE`(초당 출금, 20) · `DURATION`(부하 시간, `60s`) · `ACTION_AT`(동작 시각 초, 20 — `DURATION` 보다 작아야 한다) · `SETTLE`(완료 대기 최대 초, 240).
 - 정확성 확인(접수 키 > 0, 접수 + 포기 = 반복 수, 출금 행 = 거래번호 수, 은행 누락 · 중복 0, 잔고 = 원장 …)을 통과하지 못하면 요약이 `.json.invalid` 로 남는다.
 - 결과: `docs/perf/raw/p8-2/<동작>-<회차>.json` (요약) · `.k6.json` · `.nginx-errors.txt` · `.rebalance.txt`, 작업 파일은 `build/load-p82/<동작>-<회차>/`. 먼저 앱을 띄우고 IntelliJ 의 API 는 끈다 (14-1).

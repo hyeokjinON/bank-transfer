@@ -23,7 +23,7 @@ cd bank-transfer
 
 ### 2-2. 빌드 · 테스트
 ```bash
-./gradlew build      # 첫 실행은 의존성 다운로드로 몇 분 걸린다. 테스트 524개 통과해야 정상
+./gradlew build      # 첫 실행은 의존성 다운로드로 몇 분 걸린다. 테스트 622개 (건너뜀 2) 통과해야 정상
 ```
 테스트는 Testcontainers 로 MySQL · Kafka · Redis 를 띄우므로 Docker Desktop 이 켜져 있어야 한다 (설치는 2-4).
 
@@ -91,7 +91,7 @@ cd bank-transfer
 | 8082 | `apps/bank-gateway` (개발용, 실행 구성 11, P8-1) |
 | 9090 | 모의 은행 (개발용) |
 | 18080 · 18081 · 9190 · 18082 · 28082 · 8474 | 측정 전용 `apps/api` · `apps/api-reactive` · 모의 은행 · 게이트웨이(18082) · Toxiproxy 프록시(28082) · Toxiproxy 제어(8474) (`load/verification/run.sh` · `load/lib/gateway.sh` 가 띄우고 내린다, 평소엔 비어 있어야 한다. [OPERATION §12](OPERATION.md#12-웹-1원인증-판--webflux-측정-p6-2)) |
-| 8000 | nginx (Compose `app` 프로필, P8-2 — 컨테이너 api 2대 앞) |
+| 8000 | nginx (Compose `app` 프로필, P8-2 — 컨테이너 api 2대 앞. `127.0.0.1` 에만 열린다) |
 | 3306 · 6379 · Kafka | MySQL · Redis · Kafka (`infra/`) |
 
 ### 2-8. 컨테이너로 전체 실행 (P8-2)

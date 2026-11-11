@@ -54,7 +54,7 @@ flowchart LR
 - **은행 점검 시간**(23:50 ~ 00:10 KST)에는 은행을 건드리는 웹 요청이 503 이고 게이트웨이가 송신을 보류한다 — 날짜 경계를 은행 파일과 맞춘다 (ADR-0010).
 
 ### 컨테이너 실행 (P8-2, Compose `app` 프로필)
-위 그림이 코드 경계라면, 아래는 `docker compose … --profile app up -d --build --wait` 로 띄우는 **실행 모양**이다 ([ADR-0016](docs/adr/0016-app-images-compose.md)). PC 에 열리는 포트는 nginx `8000` 하나다.
+위 그림이 코드 경계라면, 아래는 `docker compose … --profile app up -d --build --wait` 로 띄우는 **실행 모양**이다 ([ADR-0016](docs/adr/0016-app-images-compose.md)). PC 에 열리는 포트는 nginx `8000` 하나이고 `127.0.0.1` 에만 열린다.
 
 ```mermaid
 flowchart LR

@@ -12,7 +12,7 @@
 ## [P8-2] 앱 이미지 · Docker Compose 전체 실행 · api 2대 — 2026-11-11 (PR 번호는 머지 뒤 정리 PR 에서)
 ### Added
 - 루트 `Dockerfile` (타깃 `api` · `bank-gateway` · `mock-bank`, 멀티 스테이지 · Boot jar 레이어 추출 · JRE Alpine · root 아닌 사용자) · `.dockerignore` (`infra/.env` 제외), `.gitattributes` 에 `Dockerfile` · `.dockerignore` · `*.conf` LF.
-- Compose `app` 프로필: nginx(PC `8000` 하나, 라운드 로빈, 연결 단계 실패만 재시도, `zone api`) · api-1 · api-2 · bank-gateway · mock-bank, 공통 블록(`x-java-app` · `x-bank-maintenance` · `x-api-env` · `x-api`), 대사 파일 공유 볼륨 `bank-files`.
+- Compose `app` 프로필: nginx(PC `127.0.0.1:8000` 하나, 읽기 15s, 라운드 로빈, 연결 단계 실패만 재시도, `zone api`) · api-1 · api-2 · bank-gateway · mock-bank, 공통 블록(`x-java-app` · `x-bank-maintenance` · `x-api-env` · `x-api`), 대사 파일 공유 볼륨 `bank-files`.
 - ShedLock: 하루 배치 둘(`daily-recon` · `data-retention`)을 api 여러 대 중 한 대만 (JDBC · `usingDbTime`), Flyway `V6__shedlock.sql` (`DATETIME(3)`, 값은 UTC).
 - `/actuator/info` 의 `instance` (`INFO_INSTANCE`), liveness · readiness 헬스 그룹 명시.
 - `infra/app-smoke.sh` + CI 잡 `app-smoke` (15분 제한, 이미지 빌드 → 기동 → nginx 로 1원인증 · 출금 · 멱등 · 분배 · 포트 · 이미지 비밀값 · 대사 파일 바인딩).
