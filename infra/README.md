@@ -8,7 +8,7 @@
 | Kafka (KRaft) | `apache/kafka:4.1.0` | `localhost:9092` | `kafka:29092` |
 | Redis | `redis:7.4-alpine` | `localhost:6379` | `redis:6379` |
 | Kafka UI (선택) | `kafbat/kafka-ui` | http://localhost:8089 | – |
-| nginx (`app` 프로필) | `nginx:1.27-alpine` | http://localhost:8000 | – |
+| nginx (`app` 프로필) | `nginx:1.27-alpine` | http://localhost:8000 (127.0.0.1 만) | – |
 | 모의 은행 · 게이트웨이 · api-1 · api-2 (`app` 프로필) | `bank-transfer/*:dev` (루트 `Dockerfile`) | 열지 않음 | `mock-bank:9090` · `bank-gateway:8082` · `api-1:8080` · `api-2:8080` |
 
 ## 처음 한 번 (Windows)

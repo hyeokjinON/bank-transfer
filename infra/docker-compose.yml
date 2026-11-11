@@ -232,7 +232,7 @@ services:
     profiles: ["app"]
     restart: unless-stopped
     ports:
-      - "8000:80"                   # PC 에 여는 유일한 포트 (게이트웨이 · 모의 은행 · api 는 내부망 전용 — ADR-0015 위험의 첫 조치)
+      - "127.0.0.1:8000:80"         # PC 에 여는 유일한 포트. 127.0.0.1 만 — 인증 없는 /admin/* 가 LAN 에 열리지 않게 PC 에서만 (게이트웨이 · 모의 은행 · api 는 내부망 전용 — ADR-0015 위험의 첫 조치)
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     healthcheck:

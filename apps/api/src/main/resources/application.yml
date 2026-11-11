@@ -5,7 +5,7 @@ spring:
   application:
     name: bank-transfer
   lifecycle:
-    timeout-per-shutdown-phase: 20s   # 종료 단계(웹 서버 · Kafka 리스너 …)마다 최대 20초. Compose stop_grace_period(30s)보다 짧게 — 바깥이 먼저 SIGKILL 하지 않게
+    timeout-per-shutdown-phase: 20s   # 종료 단계(웹 서버 · Kafka 리스너 …)마다 최대 20초 — 단계당 상한이라 단계가 여럿이면 합이 Compose stop_grace_period(30s)를 넘을 수 있다 (ADR-0016 결정 7 · OPERATION §14-3)
   task:
     scheduling:
       pool:

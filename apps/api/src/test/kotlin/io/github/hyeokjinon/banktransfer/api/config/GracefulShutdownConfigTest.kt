@@ -16,7 +16,7 @@ import kotlin.test.assertTrue
 
 /**
  * P8-2 (스펙 §3-10 · §7-1): 배포 · 롤링 재시작 때 처리 중인 요청 · 메시지를 끝내고 내려간다.
- * 단계당 20초 — Compose stop_grace_period(30초)보다 짧아야 바깥이 먼저 SIGKILL 하지 않는다.
+ * 단계당 최대 20초 (Compose stop_grace_period 30초보다 짧게). 단계당 상한이라 단계가 여럿이면 합이 30초를 넘을 수 있다 — ADR-0016 결정 7 · OPERATION §14-3.
  * graceful 은 Boot 4 의 기본값이기도 하다 — application.yml 에 명시해 기본이 바뀌어도 그대로인지 함께 고정한다.
  */
 class GracefulShutdownConfigTest : ApiIntegrationTest() {
