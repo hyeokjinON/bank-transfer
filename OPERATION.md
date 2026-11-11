@@ -617,9 +617,9 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app l
 docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app exec bank-gateway wget -qO- localhost:8082/actuator/health        # bankConnection 포함
 docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app exec api-1 wget -qO- localhost:8080/actuator/health/readiness
 curl -s localhost:8000/actuator/info                                   # 두 번 이상 — "instance" 가 api-1 · api-2 로 번갈아
-docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app exec nginx cat /var/log/nginx/access.log                          # nginx 접근 로그
+docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app logs nginx --since 10m                    # nginx 접근 · 오류 로그 (-f 로 따라 보기)
 ```
-- nginx 접근 로그 열 (`log_format upstream`): `$msec $status $request_method $uri $upstream_addr $upstream_status $request_time` = 받은 시각(초.밀리초) · 상태 · 메서드 · 경로 · 어느 api(IP:포트) · 그 api 의 상태 · 걸린 시간(초). 실패해 다른 서버로 넘어갔으면 `$upstream_addr` · `$upstream_status` 에 `, ` 로 두 값이 나온다. 오류는 `/var/log/nginx/error.log`(컨테이너 로그).
+- nginx 접근 로그 열 (`log_format upstream`): `$msec $status $request_method $uri $upstream_addr $upstream_status $request_time` = 받은 시각(초.밀리초) · 상태 · 메서드 · 경로 · 어느 api(IP:포트) · 그 api 의 상태 · 걸린 시간(초). 실패해 다른 서버로 넘어갔으면 `$upstream_addr` · `$upstream_status` 에 `, ` 로 두 값이 나온다. 접근 로그는 stdout, 오류 로그는 stderr 로 나가므로 같은 `logs nginx` 에 둘 다 섞여 나온다 (오류 줄은 `YYYY/MM/DD … [error]` 로 시작). `exec nginx cat /var/log/nginx/…` 는 파일이 아니라 장치로 연결돼 있어 아무것도 안 나온다.
 - 응답 헤더 `X-Upstream` 도 어느 api 가 받았는지 알려 준다 (IP:포트, 이름은 `/actuator/info` 의 `instance`).
 - `/nginx-health` 는 nginx 자신만 본다 — api 가 살았는지는 `ps` 의 healthy 나 `/actuator/info` 로 본다.
 

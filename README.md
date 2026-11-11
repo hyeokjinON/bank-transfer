@@ -100,7 +100,7 @@ sequenceDiagram
 2. 오른쪽 위 실행 목록에 `.run/` 의 구성이 자동으로 뜹니다.
    - `0. Mock Bank + API` : 모의 은행(9090) · 게이트웨이(8082) · API(8080)를 한 번에 실행 (P8-2 부터 기본 `bank.gateway.mode=http` 라 게이트웨이가 함께 뜬다)
    - `1. Mock Bank (9090)` / `2. API (8080)` : 하나씩 실행 (벌레 아이콘으로 디버그)
-   - `3. All Tests` : 테스트 524개
+   - `3. All Tests` : 테스트 622개 (건너뜀 2)
    - `4. API (재발행 손 확인)` : 재시도 간격 2초 · 4초 · 8초, 재발행 대기 30초로 줄인 API (P3-3b 손 확인용, [`http/transfer.http`](http/transfer.http) 8절)
    - `5. API (부하 측정)` : 발행기 · 정리 작업 · 컨슈머를 끄고 로그를 줄인 jar 실행 (P4-2 k6 측정용, [OPERATION §8](OPERATION.md#8-부하-측정-p4-2-k6))
    - `6. API (대사 손 확인)` : 정리 작업을 꺼서 결과를 모르는 출금이 `UNKNOWN` 으로 남게 하고, 오늘 날짜 수동 대사를 허용(`daily-recon.allow-today=true`)한 API (P5-1 대사 손 확인 전용, [`http/daily-recon.http`](http/daily-recon.http)). 다른 구성은 지난 날만 대사한다 (오늘 이후 400 `RECON_DATE_NOT_CLOSED`)

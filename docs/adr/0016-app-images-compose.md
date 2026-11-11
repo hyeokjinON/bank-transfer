@@ -35,7 +35,7 @@
    - **`.dockerignore`** — `infra/.env` 를 뺀다 (비밀은 실행 때 Compose 가 환경변수로 넣는다. 이미지에 굳지 않는다, CI `app-smoke` 가 확인). `infra/` · `.github/` · `**/*.md` · `gradlew.bat` 도 뺀다 — 앱 코드가 아닌 파일이 바뀌어도 `COPY . .` 층(→ Gradle 단계)이 무효화되지 않게 (E1 에서 찾아 고쳤다).
 2. **PC 에 여는 포트는 nginx `8000` 하나.** 게이트웨이 · 모의 은행 · api 는 내부망 전용이다 (ADR-0015 위험 "게이트웨이 포트가 열리면 누구나 전문을 보낸다" 의 첫 조치). IntelliJ(8080 · 8082 · 9090) · 측정 포트와 안 겹친다. 디버깅은 `docker compose exec` · `logs`.
 3. **nginx 는 라운드 로빈, 재시도는 연결 단계 실패만** (`proxy_next_upstream error timeout`, `non_idempotent` 없음). 이미 보낸 POST 를 다른 서버로 다시 보내지 않는다 — 출금은 멱등키로도 막히지만 **1원인증 요청에는 키가 없어** 다시 보내면 두 번 처리될 수 있다. P8-1 의 "연결 단계 실패만 안 보냄" 과 같은 규칙이다. `max_fails=3 fail_timeout=10s`, 연결 1초, 읽기 10초 (api → 게이트웨이 5초보다 길게 — 안쪽이 먼저 끝나게). `upstream api` 에 `zone api 64k;` 를 둔다 (없으면 워커 18개가 각자 라운드 로빈을 세어 처음 14건이 api-1 로 쏠렸다 — Task 5 에서 발견).
-4. **`bank.gateway.mode` 기본은 `http`** (api · api-reactive). ADR-0015 가 미뤄 둔 것을 했다. 운영 모양이 기본이 된다 — 기본이 `direct` 일 때 게이트웨이를 안 거치는 줄 모르고 확인한 일이 있었다 (#26). 테스트 공통 기반 · 측정 스크립트 · 측정용 실행 구성은 `direct` 를 명시한다. IntelliJ 는 모의 은행 → 게이트웨이 → api 순서가 평소가 된다.
+4. **`bank.gateway.mode` 기본은 `http`** (api · api-reactive). ADR-0015 가 미뤄 둔 것을 했다. 운영 모양이 기본이 된다 — 기본이 `direct` 일 때 게이트웨이를 안 거치는 줄 모르고 확인한 일이 있었다 (#25). 테스트 공통 기반 · 측정 스크립트 · 측정용 실행 구성은 `direct` 를 명시한다. IntelliJ 는 모의 은행 → 게이트웨이 → api 순서가 평소가 된다.
 5. **ShedLock — 하루 배치 2개에만** (`daily-recon` 50분 · `data-retention` 30분, `lockAtLeastFor` 1분).
    - JDBC 제공자 + **`usingDbTime()`**: 서버 시계 차이와 무관하게 DB 시각으로 잡는다. 락 행은 `shedlock` 표 (V6), `locked_by` 는 `info.instance` (api-1 · api-2, IntelliJ 는 `local`).
    - 스케줄러 방식은 `PROXY_METHOD`(기본)라 `@SchedulerLock` 메서드를 가진 빈을 CGLIB 프록시로 감싼다 → **스케줄러 클래스와 `run()` 을 `open` 으로** 바꿨다 (Kotlin 기본 final).
