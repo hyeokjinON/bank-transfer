@@ -30,6 +30,9 @@ dependencies {
     implementation("tools.jackson.module:jackson-module-kotlin")
     // Redis 분산락 (P4-2, redis 전략일 때만 클라이언트를 만든다). 스타터 없이 빈 하나만 필요하다. Netty 는 Boot BOM 버전(4.2.x)으로 맞춰진다
     implementation("org.redisson:redisson:4.8.0")
+    // 하루 배치(일마감 대사 · 보존)를 api 여러 대 중 한 대만 (P8-2, ADR-0016). Boot BOM 밖 — 이 저장소의 Spring 7.0.9 로 빌드된 7.10.1 로 고정
+    implementation("net.javacrumbs.shedlock:shedlock-spring:7.10.1")
+    implementation("net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.10.1")
     // 컨슈머 코루틴 (P6-1, ADR-0012). 버전은 Boot BOM (kotlinx-coroutines 1.10.2). WebFlux 는 넣지 않는다 —
     // core: CompletionStage.await() · Semaphore · withContext. reactor: Spring 이 suspend 리스너를 Mono 로 감싸 부를 때 쓴다 (CoroutinesUtils)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")

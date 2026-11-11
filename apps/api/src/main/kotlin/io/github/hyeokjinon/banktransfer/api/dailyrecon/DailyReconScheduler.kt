@@ -4,6 +4,7 @@ import io.github.hyeokjinon.banktransfer.api.alert.Alert
 import io.github.hyeokjinon.banktransfer.api.alert.AlertLevel
 import io.github.hyeokjinon.banktransfer.api.alert.AlertNotifier
 import io.github.hyeokjinon.banktransfer.api.alert.notifySafely
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock
 import org.slf4j.LoggerFactory
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.scheduling.support.CronExpression
@@ -16,8 +17,10 @@ import java.time.ZonedDateTime
  * 매일 01:00 ~ 06:00 매시 정각(KST)에 전날 대사를 돌린다 (P5-1, 설계 §5-2). 파일이 아직 없으면 다음 정각에 다시(멈춘 곳부터),
  * 이미 끝났으면 조용히 넘어간다. 마지막 회차 = 같은 cron 의 다음 실행이 다음 날인 회차 — cron 을 바꿔도 따로 고칠 값이 없다.
  * 대사는 이 스케줄 스레드에서 동기로 돈다 (스케줄 풀 4 — 발행기 · 정리 작업 · 보존 배치와 나눠 쓴다). 테스트는 이 빈을 끄고 실행기를 직접 부른다.
+ * api 가 여러 대면 회차마다 한 대만 돈다 (P8-2 ShedLock "daily-recon"). lockAtMostFor 50분 — 매시 회차라 다음 회차(60분)보다 짧게,
+ * lockAtLeastFor 1분 — 일찍 끝나도 시계가 조금 다른 서버가 같은 회차를 다시 돌리지 않게. open: ShedLock 이 CGLIB 프록시로 감싼다.
  */
-class DailyReconScheduler(
+open class DailyReconScheduler(
     /** 실행기 (테스트는 함수로 바꿔 끼운다). */
     private val launch: (LocalDate, ReconTrigger) -> ReconRun,
     private val clock: Clock,
@@ -30,7 +33,8 @@ class DailyReconScheduler(
     private val zone = ZoneId.of(zone)
 
     @Scheduled(cron = "\${daily-recon.schedule.cron:0 0 1-6 * * *}", zone = "\${daily-recon.schedule.zone:Asia/Seoul}")
-    fun run() {
+    @SchedulerLock(name = "daily-recon", lockAtMostFor = "PT50M", lockAtLeastFor = "PT1M")
+    open fun run() {
         val now = ZonedDateTime.ofInstant(clock.instant(), zone)
         val date = now.toLocalDate().minusDays(1)
         try {

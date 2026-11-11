@@ -32,6 +32,8 @@
 
 **예외**: Spring Batch 메타 표(`BATCH_*`)의 시각은 Spring Batch 가 `LocalDateTime.now()` 로 쓴다 = JVM 기본 시간대. `TimeZone.setDefault` 를 쓰지 않으므로 바꾸지 않는다 — 대사 결과의 기준은 업무 표(`recon_issue` 등, KST)다.
 
+**예외 (shedlock)**: shedlock 표(P8-2)의 lock_until · locked_at 은 ShedLock 이 DB 시각 UTC_TIMESTAMP(3) 로 쓴다 = **UTC 값** (타입은 DATETIME(3), §4-10).
+
 `forceConnectionTimeZoneToSession=true` + `Asia/Seoul` 은 MySQL 의 시간대 테이블이 있어야 동작한다. 공식 이미지와 RDS 에는 들어 있고, 직접 설치한 MySQL 은 `mysql_tzinfo_to_sql` 로 채워야 한다.
 
 **KST 로 정한 이유**
@@ -282,6 +284,19 @@ append-only — 사람이 `resolved_at` · `resolution_note` 만 채운다. DB �
 
 **법정 보존 기간 (확인되지 않은 가정)**: 전자금융거래법 시행령 제12조 기준 5년(1만 원 이하 거래 등은 1년)으로 2차 자료에서 확인했고, 조문 원문은 확인하지 않았다. 이 프로젝트의 가정이며 실제 적용은 원문 · 금융위 고시 확인이 필요하다.
 
+### 4-10. `shedlock` — 하루 배치 락 (P8-2)
+| 컬럼 | 타입 | 뜻 |
+|---|---|---|
+| `name` | `VARCHAR(64)` PK | 락 이름 = 배치 하나: `daily-recon` · `data-retention` |
+| `lock_until` | `DATETIME(3)` | 이 시각까지 다른 서버는 못 잡는다. 잡을 때 = 지금 + lockAtMostFor(대사 50분 · 보존 30분), 끝나면 = max(시작 + lockAtLeastFor 1분, 지금) |
+| `locked_at` | `DATETIME(3)` | 마지막으로 잡은 시각 |
+| `locked_by` | `VARCHAR(255)` | 잡은 서버 = `info.instance` (Compose `INFO_INSTANCE` = api-1 · api-2, IntelliJ 는 `local`) |
+
+- 값은 **UTC** 다 (ShedLock `usingDbTime` 이 `UTC_TIMESTAMP(3)` 로 쓰고 비교 — 서버 시계 차이와 무관). KST 로 읽으려면 +9시간.
+- 잡기: `INSERT IGNORE` (행이 없을 때) 또는 `UPDATE … WHERE name = ? AND lock_until <= UTC_TIMESTAMP(3)` — 영향 행이 1이면 잡은 것. 행은 지우지 않고 다시 쓴다.
+- 죽은 서버의 락은 `lock_until` 이 지나면 다른 서버가 가져간다. 그래서 lockAtMostFor 는 실제 실행 시간보다 넉넉히, 다음 회차 간격보다 짧게 (근거: `docs/perf/p8-2-compose.md` 의 배치 실행 시간).
+- 타입은 규칙대로 DATETIME(3) (ShedLock 기본 정의는 TIMESTAMP 지만 이 저장소는 TIMESTAMP 를 쓰지 않는다 — 시간대 변환 없이 UTC 값을 그대로 저장 · 비교). locked_at 에 DEFAULT 를 두지 않는다 (CURRENT_TIMESTAMP 는 KST 라 섞인다 — ShedLock 이 늘 명시해 쓴다).
+
 ## 5. 상태 값
 상태는 MySQL `ENUM` 이 아니라 `VARCHAR` + Kotlin `enum` 으로 둔다. 값을 추가할 때 `ALTER TABLE ... MODIFY ENUM` (테이블 재작성 위험) 없이 코드만 바꾸면 되고, 허용 전이는 도메인이 검증한다.
 
@@ -335,7 +350,7 @@ append-only — 사람이 `resolved_at` · `resolution_note` 만 채운다. DB �
 - 개인정보 원문(인증코드)은 저장하지 않는다. 계좌번호 마스킹: `Transfer.toString()` 은 뒤 4자리만 남겨 로그에 원문이 찍히지 않는다. API 응답 마스킹은 인증 도입 때 적용한다.
 
 ## 8. 마이그레이션 규칙 (Flyway)
-- 파일명: `V<번호>__<설명>.sql` (예 `V1__init.sql`, `V2__transfer_republish.sql`, `V3__wallet.sql`, `V4__daily_reconciliation.sql`, `V5__data_retention.sql`).
+- 파일명: `V<번호>__<설명>.sql` (예 `V1__init.sql`, `V2__transfer_republish.sql`, `V3__wallet.sql`, `V4__daily_reconciliation.sql`, `V5__data_retention.sql`, `V6__shedlock.sql`).
 - **이미 적용된 파일은 고치지 않는다.** 바꿀 게 있으면 새 버전을 추가한다 (체크섬 불일치로 기동 실패).
 - 앱 기동 시 자동 적용. 테스트(Testcontainers)도 같은 파일로 스키마를 만든다.
 - 큰 테이블 변경(인덱스 추가 등)은 운영 반영 방법(온라인 DDL)을 PR 에 적는다.
@@ -457,6 +472,12 @@ EXPLAIN DELETE FROM account_verification WHERE status IN ('SENT','EXPIRED','LOCK
 
 한 번의 결과이고 운영 크기 · 분포의 계획은 아니다.
 
+### 하루 배치 락 (P8-2)
+```sql
+-- 누가 언제 잡았나 (UTC). lock_until 이 지금(UTC_TIMESTAMP)보다 미래면 누군가 돌고 있거나 lockAtLeastFor 안이다
+SELECT name, locked_by, locked_at, lock_until, lock_until > UTC_TIMESTAMP(3) AS held FROM shedlock;
+```
+
 ## 10. 검토 중 · 다음 단계
 - **PK 타입**: 지금은 읽기 쉬운 `CHAR(36)` 무작위 UUID. InnoDB 는 PK 순서로 데이터를 저장하므로 무작위 값은 삽입 시 페이지 분할이 생기고 보조 인덱스도 커진다. 부하 측정 도구(`load/`, P4-2)로 `BINARY(16)` · 시간순 UUID(v7) · `BIGINT` 와 삽입 성능을 비교해 결정한다.
 - **데이터 보존**: 발행된 outbox_event · 만료된 account_verification 은 보존 배치가 지운다 (§4-9, P5-2). 한 번도 쓰지 않는 VERIFIED 는 남는다.
@@ -478,3 +499,4 @@ EXPLAIN DELETE FROM account_verification WHERE status IN ('SENT','EXPIRED','LOCK
 | 2026-10-27 | 스키마 변경 없음. 동시성 표에 차감 전략 4종 · 락 대기 5초, `wallet.version` 의 낙관적 락 사용 | P4-2 (ADR-0009) |
 | 2026-10-29 | V4: Spring Batch 6 메타 표 · bank_statement_line · recon_issue, E002, 대사 동시성 · 운영 쿼리 | P5-1 (ADR-0010) |
 | 2026-11-02 | V5: idx_verification_purge, 보존 정책표(§4-9), 보존 배치 동시성 · 운영 쿼리 | P5-2 (ADR-0011) |
+| 2026-11-11 | V6: shedlock (하루 배치 락, DATETIME(3) · 값은 UTC — KST 정책의 예외) | P8-2 (ADR-0016) |

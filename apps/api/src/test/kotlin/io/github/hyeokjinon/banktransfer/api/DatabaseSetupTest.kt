@@ -136,4 +136,14 @@ class DatabaseSetupTest : ApiIntegrationTest() {
         )
         assertEquals(listOf("status", "expires_at"), columns)
     }
+
+    @Test
+    fun `V6 가 shedlock 표를 만들었다 - 이름 PK, 시각은 DATETIME(3) (값은 UTC, database md 4-10)`() {
+        val columns = jdbc.queryForList(
+            "SELECT CONCAT(column_name, ' ', column_type) FROM information_schema.columns " +
+                "WHERE table_schema = DATABASE() AND table_name = 'shedlock' ORDER BY ordinal_position",
+            String::class.java,
+        )
+        assertEquals(listOf("name varchar(64)", "lock_until datetime(3)", "locked_at datetime(3)", "locked_by varchar(255)"), columns)
+    }
 }
