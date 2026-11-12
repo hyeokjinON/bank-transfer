@@ -66,8 +66,10 @@ pin_patch() {
   printf '%s' '{"spec":{"template":{"spec":{"nodeSelector":{"bank-transfer/role":"infra"},"tolerations":[{"key":"node-role.kubernetes.io/control-plane","operator":"Exists","effect":"NoSchedule"}]}}}}'
 }
 
-# 허용 목록에 없는 임시 Pod 에서 TCP 연결 시도 (N0). 붙으면 연결에 걸린 초(> 0), 막히면 0.000000
+# 허용 목록에 없는 임시 Pod 에서 TCP 연결 시도 (N0). "<time_connect 초> <curl 종료 코드>" 를 출력한다.
+#   막힘 = "0.000000 28" (연결 시간 초과 — 정책이 패킷을 버렸다). 붙음 = time_connect > 0 (telnet:// 은 붙은 뒤 -m 4 로 끊겨 종료 코드 28 이 같이 나온다 — 종료 코드만으로는 못 가른다).
+#   6(이름 풀이 실패) · 7(연결 거부) 등은 막힘이 아니다. 관측: 짧은 이름이 없으면 검색 도메인 때문에 풀이가 시간 초과(28)로 끝날 수 있다 → 대상은 FQDN(<svc>.<ns>.svc.cluster.local)으로 준다 (없는 FQDN 은 6).
 np_probe() {   # $1 = 호스트, $2 = 포트
   k run "np-probe-$RANDOM" --image="$CURL_IMAGE" --restart=Never --rm -i --quiet --command -- \
-    sh -c "curl -s -o /dev/null --connect-timeout 3 -m 4 -w '%{time_connect}' telnet://$1:$2 || true" </dev/null 2>/dev/null | tr -d '\r' | tail -1
+    sh -c "curl -s -o /dev/null --connect-timeout 3 -m 4 -w '%{time_connect}' telnet://$1:$2; echo \" \$?\"" </dev/null 2>/dev/null | tr -d '\r' | tail -1
 }

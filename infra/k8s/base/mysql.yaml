@@ -42,7 +42,7 @@ spec:
             - {name: mysql, containerPort: 3306}
           readinessProbe:   # 초기화 중 임시 서버는 TCP 를 열지 않는다 → 127.0.0.1 ping 은 초기화가 끝나야 성공
             exec:
-              command: ["sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\" --silent"]
+              command: ["sh", "-c", "MYSQL_PWD=\"$MYSQL_ROOT_PASSWORD\" mysqladmin ping -h 127.0.0.1 -uroot --silent"]
             periodSeconds: 5
             timeoutSeconds: 5
             failureThreshold: 3

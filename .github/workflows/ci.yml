@@ -164,13 +164,15 @@ jobs:
       - name: Smoke through Envoy Gateway
         run: bash infra/k8s/smoke.sh
       - name: 실패 시 상태 · 로그
-        if: failure()
+        if: failure() || cancelled()
         run: |
           kubectl --context kind-bank-transfer get nodes -o wide || true
           kubectl --context kind-bank-transfer get pods -A -o wide || true
           kubectl --context kind-bank-transfer -n bank-transfer describe pods || true
           for a in mysql kafka redis mock-bank bank-gateway api; do echo "=== $a"; kubectl --context kind-bank-transfer -n bank-transfer logs -l app=$a --tail=200 --prefix || true; done
           kubectl --context kind-bank-transfer -n envoy-gateway-system logs deploy/envoy-gateway --tail=200 || true
+          kubectl --context kind-bank-transfer -n envoy-gateway-system logs -l app.kubernetes.io/name=envoy --all-containers --tail=200 || true
+          kubectl --context kind-bank-transfer get events -A --sort-by=.lastTimestamp | tail -50 || true
           kubectl --context kind-bank-transfer -n bank-transfer get gateways.gateway.networking.k8s.io,httproutes -o yaml || true
       - name: Stop
         if: always()

@@ -109,7 +109,7 @@ NOT_CIP=$(k get svc -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.ty
 if [ "${CI:-false}" = true ]; then
   for p in 8080 8082 9090 3306 9092 6379; do port_open "$p" && fail "PC 포트 $p 가 열려 있다"; done
 fi
-ok "게이트웨이 readiness UP, Service 전부 ClusterIP (PC 포트는 입구 8000 하나)"
+ok "게이트웨이 readiness UP, Service 전부 ClusterIP (앱 입구는 127.0.0.1:8000 하나 — kind API 서버도 127.0.0.1 의 임의 포트에 열린다, kubectl 용)"
 
 echo "[7/8] 비root"
 for dpl in mock-bank bank-gateway api; do
@@ -121,16 +121,21 @@ ok "세 앱 모두 root 아님"
 echo "[8/8] NetworkPolicy"
 [ -n "$(k get networkpolicy default-deny-ingress -o name 2>/dev/null)" ] || fail "기본 거부 정책이 없다"
 # 양성 대조: API 서버(443)에는 정책이 걸리지 않는다. 여기 못 붙으면 probe 자체가 고장 — 아래 "0" 을 막힘으로 읽으면 안 된다
-tc=$(np_probe kubernetes.default.svc.cluster.local 443)
+# np_probe 출력 = "<time_connect> <curl 종료 코드>". 양성 대조는 time_connect > 0 (종료 코드는 telnet:// 이 -m 으로 끊겨 28 이라 보지 않는다)
+read -r tc ec <<<"$(np_probe kubernetes.default.svc.cluster.local 443)"
 if [[ $tc =~ ^[0-9]+(\.[0-9]+)?$ ]] && awk -v x="$tc" 'BEGIN { exit !(x > 0) }'; then :; else
-  fail "N0 확인용 Pod 가 동작하지 않는다 (양성 대조 kubernetes.default:443 연결 실패: '${tc}')"
+  fail "N0 확인용 Pod 가 동작하지 않는다 (양성 대조 kubernetes.default:443 연결 실패: time_connect '${tc}' curl 종료 코드 '${ec}')"
 fi
 echo "  양성 대조 kubernetes.default:443 연결 ${tc}초"
-for hp in "bank-gateway 8082" "mysql 3306"; do
+# 막힘 = time_connect 0 이면서 종료 코드 28(연결 시간 초과 — 정책이 버림). 6(이름 풀이 실패) · 7(연결 거부) 등은 막힘이 아니라 대상 오류다. FQDN 으로 준다 (짧은 이름은 풀이 시간 초과로 28 이 나올 수 있다)
+for hp in "bank-gateway.bank-transfer.svc.cluster.local 8082" "mysql.bank-transfer.svc.cluster.local 3306"; do
   read -r h p <<<"$hp"
-  tc=$(np_probe "$h" "$p")
-  [[ $tc =~ ^[0-9]+(\.[0-9]+)?$ ]] || fail "N0 확인 실패 ($h:$p): '$tc'"
-  awk -v x="$tc" 'BEGIN { exit !(x > 0) }' && fail "허용 안 된 Pod 가 $h:$p 에 붙었다 (연결 ${tc}초) — CNI 가 정책을 집행하지 않는다 (kindnet → Calico, 스펙 §8)"
+  read -r tc ec <<<"$(np_probe "$h" "$p")"
+  [[ $tc =~ ^[0-9]+(\.[0-9]+)?$ ]] || fail "N0 확인 실패 ($h:$p): time_connect '$tc' curl 종료 코드 '$ec'"
+  if awk -v x="$tc" 'BEGIN { exit !(x > 0) }'; then
+    fail "허용 안 된 Pod 가 $h:$p 에 붙었다 (연결 ${tc}초) — CNI 가 정책을 집행하지 않는다 (kindnet → Calico, 스펙 §8)"
+  fi
+  [ "$ec" = 28 ] || fail "N0 확인 실패 ($h:$p): curl 종료 코드 ${ec} (28 = 연결 시간 초과여야 정책이 버린 것. 6 = 이름 풀이 실패, 7 = 연결 거부 — 막힘이 아니다)"
 done
 ok "양성 대조(API 서버 443 연결) 뒤, 허용 안 된 Pod 는 bank-gateway:8082 · mysql:3306 에 못 붙는다"
 
