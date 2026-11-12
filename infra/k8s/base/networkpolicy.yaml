@@ -1,0 +1,107 @@
+# 들어오는 쪽 기본 거부 + 허용 목록 (스펙 §8). 같은 namespace 안이라도 허용한 경로만. egress 는 범위 밖 (스펙 §14)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# api ← Envoy 프록시 (envoy-gateway-system) 만
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-from-envoy
+spec:
+  podSelector:
+    matchLabels: {app: api}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: envoy-gateway-system}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: envoy}
+      ports:
+        - {protocol: TCP, port: 8080}
+---
+# 게이트웨이 ← api 만 (인증 없는 내부 API — ADR-0015 위험의 두 번째 조치)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bank-gateway-from-api
+spec:
+  podSelector:
+    matchLabels: {app: bank-gateway}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: api}
+      ports:
+        - {protocol: TCP, port: 8082}
+---
+# 모의 은행 ← 게이트웨이 만 (은행 연결 주인 하나)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mock-bank-from-gateway
+spec:
+  podSelector:
+    matchLabels: {app: mock-bank}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: bank-gateway}
+      ports:
+        - {protocol: TCP, port: 9090}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mysql-from-api
+spec:
+  podSelector:
+    matchLabels: {app: mysql}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: api}
+      ports:
+        - {protocol: TCP, port: 3306}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-from-api
+spec:
+  podSelector:
+    matchLabels: {app: redis}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: api}
+      ports:
+        - {protocol: TCP, port: 6379}
+---
+# Kafka ← api, Kafka 자신 (컨트롤러 9093)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-from-api
+spec:
+  podSelector:
+    matchLabels: {app: kafka}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: api}
+        - podSelector:
+            matchLabels: {app: kafka}
+      ports:
+        - {protocol: TCP, port: 9092}
+        - {protocol: TCP, port: 9093}

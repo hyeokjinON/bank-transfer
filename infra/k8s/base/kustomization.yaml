@@ -11,3 +11,4 @@ resources:
   - bank-gateway.yaml
   - api.yaml
   - gateway.yaml
+  - networkpolicy.yaml
