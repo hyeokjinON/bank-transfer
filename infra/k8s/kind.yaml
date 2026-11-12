@@ -1,0 +1,21 @@
+# P8-3a kind 클러스터 (스펙 §4-1). up.sh 가 --image 로 노드 이미지를 고정해 만든다 (versions.env).
+# 제어 노드 = 인프라 · 모의 은행 · 클러스터 공용 부품, 워커 2 = api · 게이트웨이. 노드 이름: bank-transfer-control-plane · -worker · -worker2
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: bank-transfer
+nodes:
+  - role: control-plane
+    labels:
+      bank-transfer/role: infra
+    extraPortMappings:
+      # Envoy 의 NodePort 30080 → PC 127.0.0.1:8000 (P8-2 nginx 와 같은 주소 — Postman · 스크립트 그대로). LAN 에 열지 않는다
+      - containerPort: 30080
+        hostPort: 8000
+        listenAddress: "127.0.0.1"
+        protocol: TCP
+  - role: worker
+    labels:
+      bank-transfer/role: app
+  - role: worker
+    labels:
+      bank-transfer/role: app
