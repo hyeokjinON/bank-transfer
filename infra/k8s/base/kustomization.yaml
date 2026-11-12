@@ -7,3 +7,7 @@ resources:
   - mysql.yaml
   - kafka.yaml
   - redis.yaml
+  - mock-bank.yaml
+  - bank-gateway.yaml
+  - api.yaml
+  - gateway.yaml

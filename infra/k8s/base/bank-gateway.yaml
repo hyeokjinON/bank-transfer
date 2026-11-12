@@ -1,0 +1,49 @@
+# 은행 게이트웨이 1대 (이중화는 P8-3b). Recreate — 롤링이면 새 Pod 와 옛 Pod 가 잠깐 둘 다 은행에 붙는다 (연결 주인 하나, 스펙 §16)
+apiVersion: v1
+kind: Service
+metadata:
+  name: bank-gateway
+  labels: {app: bank-gateway}
+spec:
+  selector: {app: bank-gateway}
+  ports:
+    - {name: http, port: 8082}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bank-gateway
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: bank-gateway}
+  template:
+    metadata:
+      labels: {app: bank-gateway}
+    spec:
+      enableServiceLinks: false   # bank-gateway Service 가 BANK_GATEWAY_PORT=tcp://… 를 넣으면 bank.gateway.port 바인딩이 깨진다
+      nodeSelector: {bank-transfer/role: app}
+      containers:
+        - name: bank-gateway
+          image: bank-transfer/bank-gateway:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: BANK_GATEWAY_HOST, value: mock-bank}
+            - {name: BANK_GATEWAY_PORT, value: "9090"}
+            - name: BANK_MAINTENANCE_ENABLED
+              valueFrom: {configMapKeyRef: {name: app-config, key: BANK_MAINTENANCE_ENABLED}}
+            - name: BANK_MAINTENANCE_START
+              valueFrom: {configMapKeyRef: {name: app-config, key: BANK_MAINTENANCE_START}}
+            - name: BANK_MAINTENANCE_END
+              valueFrom: {configMapKeyRef: {name: app-config, key: BANK_MAINTENANCE_END}}
+          ports:
+            - {name: http, containerPort: 8082}
+          readinessProbe:
+            httpGet: {path: /actuator/health/readiness, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          resources:
+            requests: {memory: 512Mi, cpu: 100m}
+            limits: {memory: 512Mi}
