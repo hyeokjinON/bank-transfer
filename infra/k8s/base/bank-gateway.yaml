@@ -23,6 +23,7 @@ spec:
       labels: {app: bank-gateway}
     spec:
       enableServiceLinks: false   # bank-gateway Service 가 BANK_GATEWAY_PORT=tcp://… 를 넣으면 bank.gateway.port 바인딩이 깨진다
+      terminationGracePeriodSeconds: 45   # preStop 10 + graceful 단계 20 + 여유 (스펙 §6-2). 넘으면 SIGKILL
       nodeSelector: {bank-transfer/role: app}
       containers:
         - name: bank-gateway
@@ -39,11 +40,26 @@ spec:
               valueFrom: {configMapKeyRef: {name: app-config, key: BANK_MAINTENANCE_END}}
           ports:
             - {name: http, containerPort: 8082}
+          lifecycle:
+            preStop:
+              # 삭제가 시작되면 EndpointSlice 에서 빠지는 일과 SIGTERM 이 동시에 일어난다. Envoy 가 이 Pod 를 목록에서 지우기 전에
+              # 앱이 먼저 닫으면 그 사이 요청이 실패한다 → 10초 동안 받아 준 뒤 SIGTERM. 이미지의 셸에 기대지 않는 내장 sleep (1.34 GA)
+              sleep: {seconds: 10}
+          startupProbe:   # 기동(최대 120초) 동안은 liveness 가 죽이지 못하게
+            httpGet: {path: /actuator/health/liveness, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 24
           readinessProbe:
             httpGet: {path: /actuator/health/readiness, port: http}
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 2
+          livenessProbe:   # 실패하면 재시작 — 프로세스가 멈췄을 때만. 외부 의존성은 넣지 않는다
+            httpGet: {path: /actuator/health/liveness, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           resources:
             requests: {memory: 512Mi, cpu: 100m}
             limits: {memory: 512Mi}
