@@ -689,7 +689,7 @@ bash infra/k8s/down.sh                     # 클러스터 삭제 (데이터까�
 ```
 - 클러스터 DB · Kafka 는 **개발 DB 와 별개**다 (클러스터 안 PV). IntelliJ 의 API 와 부딪치지 않지만, Postman 의 base URL 은 `http://127.0.0.1:8000` 이다.
 - **Compose `app` 프로필과 동시에 띄우지 않는다** (같은 8000). 내리기: `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app down`.
-- PC 에 열리는 포트는 8000 하나다. 8080 · 8082 · 9090 은 연결 거부여야 한다 (Service 는 전부 ClusterIP).
+- 앱 입구는 `127.0.0.1:8000` 하나다 (kind API 서버도 `127.0.0.1` 의 임의 포트에 열린다 — kubectl 용). 8080 · 8082 · 9090 은 연결 거부여야 한다 (Service 는 전부 ClusterIP).
 - 다시 부르면(`up.sh`) 클러스터는 그대로 두고 이미지 · 매니페스트만 갱신한다. 비밀번호를 `infra/.env` 에서 바꿔도 MySQL PV 가 이미 초기화됐으면 DB 에 반영되지 않는다 — `down.sh` 부터.
 
 ### 15-2. 로그 · 안에서 보기
@@ -720,11 +720,11 @@ kubectl -n bank-transfer get deploy api -o jsonpath='{.spec.template.spec.contai
 ### 15-4. Pod · 노드가 죽었을 때
 - **Pod 삭제 · 크래시**: Deployment 가 replicas 를 맞추려 새 Pod 를 만든다 (자동 재생성 — Compose 의 `docker kill` 은 다시 안 띄웠다, §14-4). api 강제 삭제 3회: 첫 시도 5xx 0, 대체 Pod Ready 까지 **10.8 ~ 11.2초**, Kafka 파티션 넘김 1.5 ~ 3.6초 (kubelet 이 SIGTERM 을 먼저 보내 정상 탈퇴 — SIGKILL 이면 세션 시간 초과 45초가 겹친다, §14-4).
 - **노드가 사라지면** (`kubectl get nodes` 에 `NotReady`):
-  - 컨트롤 플레인이 알아채기까지 **약 50초** — 그동안 api Pod 는 Ready 로 남아 입구가 요청의 절반을 사라진 주소로 보내 연결 시간 초과(10초) 뒤 503 (D2: 첫 시도 5xx 512 · 같은 키 재시도 뒤에도 포기 144). 연결 단계 실패라 api 에 닿지 않았고 출금 행도 없다 — **돈은 정확**하다, 사용자는 실패를 받고 다시 시도하면 된다.
-  - 그 뒤 기본 **300초(`tolerationSeconds`)** 가 지나야 Pod 를 다른 노드에 다시 만든다 — 대체 api Ready 는 **+363초**, 그동안 api 는 1대. 퇴거 대기를 30초로 줄이면(`overlays/experiment-fast-evict`) **+88초** (5xx 439 · 포기 113 — 감지 전 구간은 그대로). 대가: 짧은 네트워크 끊김에도 Pod 를 옮긴다.
+  - 컨트롤 플레인이 알아채기까지 **약 50초** — 그동안 api Pod 는 Ready 로 남아 입구가 요청의 절반을 사라진 주소로 보내 Envoy 연결 시간 초과 약 10초(측정: k6 최대 10.0초 · Envoy 로그 duration 10000ms) 뒤 503 (D2: 첫 시도 5xx 512 · 같은 키 재시도 뒤에도 포기 144). 연결 단계 실패라 api 에 닿지 않았고 출금 행도 없다 — **돈은 정확**하다, 사용자는 실패를 받고 다시 시도하면 된다.
+  - 그 뒤 기본 **300초(`tolerationSeconds`)** 가 지나야 Pod 를 다른 노드에 다시 만든다 — 대체 api Ready 는 **+363.1초**, 그동안 api 는 1대. 퇴거 대기를 30초로 줄이면(`overlays/experiment-fast-evict`) **+88.2초** (5xx 439 · 포기 113 — 감지 전 구간은 그대로). 대가: 짧은 네트워크 끊김에도 Pod 를 옮긴다.
   - 노드가 돌아오지 않으면 클러스터를 다시 만든다 (`down.sh` → `up.sh`).
 - **제어 노드가 죽으면** MySQL · Kafka · Redis · 모의 은행 · DNS · 입구가 다 같이 선다 (PV 가 제어 노드에 묶여 다른 노드로 못 간다 — 추정, 이번 단계는 제어 노드를 실험하지 않았다).
-- **drain** (`kubectl drain <워커> --ignore-daemonsets --delete-emptydir-data`, 끝나면 `uncordon`): PDB(api `minAvailable 1`) 덕에 api ready 는 항상 2 (D1 3회 5xx 0). **주의 — 게이트웨이는 `Recreate` 인데도 퇴거 때는 새 Pod 가 먼저 떠서 4 ~ 7초간 두 대가 모두 Ready · 은행 연결**이다 (이중 송신 0 이었지만 은행이 기관당 세션 하나만 허용하면 문제 — P8-3b). 게이트웨이가 있는 워커를 비우는 일은 점검 시간 밖에서.
+- **drain** (`kubectl drain <워커> --ignore-daemonsets --delete-emptydir-data`, 끝나면 `uncordon`): D1 3회 5xx 0. api 는 요청을 받는 대상 기준 최소 1대(새 Pod Ready 까지 약 11초), Pod Ready 기준 2대(종료 중 Pod 포함)였다. PDB(api `minAvailable 1`)는 이번 배치(워커당 api 1대)에서 개입하지 않았다 — 두 api 가 한 워커에 있을 때 drain 을 막는 효과는 미검증. **주의 — 게이트웨이는 `Recreate` 인데도 퇴거 때는 새 Pod 가 먼저 떠서 4 ~ 7초간 두 대가 모두 Ready · 은행 연결**이다 (이중 송신 0 이었지만 은행이 기관당 세션 하나만 허용하면 문제 — P8-3b). 게이트웨이가 있는 워커를 비우는 일은 점검 시간 밖에서.
 - **`SENDING` 으로 남은 건**은 정리 작업이 30초 뒤 결과조회로 확정한다 (재전송 없음 — ADR-0006).
 
 ### 15-5. 은행 장애 때 보이는 것
@@ -741,10 +741,10 @@ kubectl -n bank-transfer logs -l app=api --prefix --tail=50 | grep -i "not sent"
 정책 7개 (`infra/k8s/base/networkpolicy.yaml`): namespace 전체 ingress 기본 거부 + api ← Envoy, 게이트웨이 ← api, 모의 은행 ← 게이트웨이, MySQL · Redis ← api, Kafka ← api · Kafka. egress 는 막지 않는다.
 ```bash
 kubectl -n bank-transfer get networkpolicy
-bash -c '. infra/k8s/lib.sh; np_probe bank-gateway 8082; np_probe mysql 3306'      # 허용 목록 밖 임시 Pod 에서 연결 시도 — 0.000000 이면 막힘, 0 보다 크면 연결됨
-bash -c '. infra/k8s/lib.sh; np_probe kubernetes.default.svc.cluster.local 443'    # 양성 대조 — 0 보다 커야 probe 가 정상
+bash -c '. infra/k8s/lib.sh; np_probe bank-gateway.bank-transfer.svc.cluster.local 8082; np_probe mysql.bank-transfer.svc.cluster.local 3306'      # 허용 목록 밖 임시 Pod 에서 연결 시도 — "<time_connect> <curl 종료 코드>". 막힘 = 0.000000 28, 0 보다 크면 연결됨
+bash -c '. infra/k8s/lib.sh; np_probe kubernetes.default.svc.cluster.local 443'    # 양성 대조 — time_connect 가 0 보다 커야 probe 가 정상 (종료 코드는 28 이어도 된다)
 ```
-- `np_probe` 는 같은 namespace 에 `curlimages/curl:8.23.0` 임시 Pod 를 띄워 `time_connect`(초)를 출력한다. **빈 값 · `0.000000` 을 곧바로 "막힘" 으로 읽지 않는다** — 양성 대조(API 서버 443 은 정책 밖이라 붙어야 한다)가 먼저다. `smoke.sh` [8] 이 이 순서로 자동 확인한다.
+- `np_probe` 는 같은 namespace 에 `curlimages/curl:8.23.0` 임시 Pod 를 띄워 `<time_connect 초> <curl 종료 코드>` 를 출력한다. **막힘 = `0.000000` 이면서 종료 코드 28(연결 시간 초과 — 정책이 버림)일 때만이다.** 6(이름 풀이 실패) · 7(연결 거부)은 막힘이 아니라 대상 오류이고, 짧은 이름이 없으면 풀이 시간 초과로 28 이 나올 수 있어(관측) 대상은 FQDN 으로 준다. **빈 값 · `0.000000` 을 곧바로 "막힘" 으로 읽지 않는다** — 양성 대조(API 서버 443 은 정책 밖이라 붙어야 한다)가 먼저다. `smoke.sh` [8] 이 이 순서로 자동 확인한다.
 - 정책 전 연결됨(0.0011 · 0.0010초) → 정책 후 막힘 (`0.000000`), Pod 7개 Ready 유지 — 프로브(kubelet → Pod)는 막히지 않는다. kind 기본 CNI(kindnet)가 집행한다.
 - 새 Pod 가 붙지 못하면: 허용 목록에 그 경로가 있는지 본다 (예: api 는 Envoy 프록시에서 오는 것만 받는다).
 
@@ -762,7 +762,7 @@ bash load/k8s/run.sh node 1                # 워커 노드 컨테이너 docker s
 bash load/k8s/run.sh cleanup               # 끝나면 반드시 — load-p82-u001 ~ u020 의 행만 지운다
 ```
 - 대조 실험은 overlay 로 바꾼 뒤 돌리고 끝나면 `local` 로 되돌린다: `bash -c '. infra/k8s/lib.sh; apply_overlay experiment-prestop0 "$(deployed_tag)"'` (R1 대조) · `experiment-liveness-bank` (B2) · `experiment-fast-evict` (D2'). 되돌리기는 `apply_overlay local "$(deployed_tag)"`.
-- 환경변수: `RATE`(초당 출금, 20) · `DURATION`(60s) · `ACTION_AT`(동작 시각 초, 20) · `SETTLE`(완료 대기 최대 초, 300) · `BANK_DOWN_S`(60) · `NODE_DOWN_S`(420) · `NODE`(drain · node 대상 워커) · `OVERLAY`(tagtrap, `local`).
+- 환경변수: `RATE`(초당 출금, 20) · `DURATION`(60s, rolling 은 150s) · `ACTION_AT`(동작 시각 초, 20) · `SETTLE`(완료 대기 최대 초, 300) · `BANK_DOWN_S`(60) · `NODE_DOWN_S`(420) · `NODE`(drain · node 대상 워커) · `OVERLAY`(tagtrap, `local`).
 - 정확성 확인(접수된 키 = 출금 행, 전부 `COMPLETED`, 은행 거래 기록 = 출금 행(같은 거래번호 두 번 0), 잔고 = 원장 합)을 통과하지 못하면 요약이 `.json.invalid` 로 남는다. 시간 지표는 kubectl 표본(1 ~ 2초 간격)이라 ±1.5초.
 - 결과: `docs/perf/raw/p8-3a/<동작>-<회차>.json` (요약) · `.k6.json` · `.timeline.txt` · `.rebalance.txt`, 작업 파일은 `build/load-p83a/<동작>-<회차>/`. 실험 전에 api 두 Pod 가 서로 다른 워커에 Ready 여야 한다 (도구가 사전 확인하고 종료 중 Pod 는 세지 않는다).
 - 클러스터 DB 에 쓰는 행은 `load-p82-u001 ~ u020` · `load-p83a-smoke-<시각>` 뿐이다 (스모크는 끝에서 지운다).

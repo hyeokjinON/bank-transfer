@@ -74,7 +74,7 @@ flowchart LR
 - 컨테이너 api 는 IntelliJ 의 API 와 같은 DB · 같은 Kafka 그룹을 쓰므로 동시에 띄우지 않는다.
 
 ### Kubernetes 실행 (P8-3a, kind)
-`bash infra/k8s/up.sh` 로 띄우는 실행 모양이다 ([ADR-0017](docs/adr/0017-kubernetes-kind.md)). PC 에 열리는 포트는 `127.0.0.1:8000` 하나이고 Compose `app` 프로필과 동시에 띄우지 않는다. 제어 노드에는 인프라 · 모의 은행 · 입구가, 워커 2 에는 앱이 있다.
+`bash infra/k8s/up.sh` 로 띄우는 실행 모양이다 ([ADR-0017](docs/adr/0017-kubernetes-kind.md)). 앱 입구는 `127.0.0.1:8000` 하나이고(kind API 서버도 `127.0.0.1` 의 임의 포트에 열린다 — kubectl 용) Compose `app` 프로필과 동시에 띄우지 않는다. 제어 노드에는 인프라 · 모의 은행 · 입구가, 워커 2 에는 앱이 있다.
 
 ```mermaid
 flowchart LR
@@ -98,6 +98,7 @@ flowchart LR
     G -- "허용: 게이트웨이 → 모의 은행<br/>TCP 전문 1개" --> M
     A1 & A2 -- "허용: api → MySQL · Redis · Kafka" --> DB & R & K
 ```
+게이트웨이는 워커(role=app) 중 한 대에 뜬다 — 그림의 위치는 예시.
 - 노드 배치: 인프라 · 모의 은행 · CoreDNS · Envoy Gateway 컨트롤러 · Envoy 프록시 = 제어 노드(워커 장애 실험에서 같이 죽지 않게), api · 게이트웨이 = 워커. api 는 `topologySpreadConstraints` 로 워커에 하나씩. PV 는 제어 노드에 묶인다.
 - NetworkPolicy 는 namespace 전체 ingress 기본 거부 + 위 화살표(허용 목록)만. 허용 목록 밖 Pod 는 게이트웨이 · MySQL 에 못 붙는다 (N0). 프로브 3종은 Pod 별로 다르다: api readiness = Spring 기본, **게이트웨이 readiness 에만 `bankConnection`** (은행 장애 = Service 에서 빠짐, 재시작 아님).
 - 게이트웨이 1대 = 단일 장애점은 그대로다. `Recreate` 는 배포 때만 연결 주인을 하나로 지키고 퇴거(drain)에는 못 지킨다 → P8-3b.

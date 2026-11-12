@@ -118,7 +118,7 @@ Kubernetes 로 한 번에 띄운다 (kind 클러스터 — 제어 1 + 워커 2, 
    kind version                 # ~/bin 이 PATH 에 있어야 한다 (Git Bash 는 보통 ~/bin 을 PATH 에 넣는다)
    ```
 2. **kubectl** 은 Docker Desktop 에 들어 있다 (`kubectl version --client`). 클러스터 노드가 v1.36 이므로 kubectl 은 **±1 minor 안**(1.35 ~ 1.37)이어야 한다 (로컬 1.36.1, CI 1.36.4). 아니면 Docker Desktop 을 올리거나 `https://dl.k8s.io/release/v1.36.4/bin/windows/amd64/kubectl.exe` 를 받아 체크섬(`…kubectl.exe.sha256`)을 확인한다.
-3. **Docker 메모리**: 클러스터 + 인프라 + 앱 + Envoy 가 5 ~ 7GB 쯤 든다 (추정). Docker Desktop(WSL2)의 기본 한도는 PC 메모리의 50% 라 **8GB 이상** 이어야 한다 (이 PC 는 31GB → 약 15.5GB, 측정 때 15.2GB). 모자라면 Pod 가 `Pending` 이거나 노드가 `NotReady` 가 된다 — `%UserProfile%\.wslconfig` 의 `[wsl2]` 아래 `memory=10GB` 처럼 올리고 `wsl --shutdown` 뒤 Docker Desktop 을 다시 켠다.
+3. **Docker 메모리**: 클러스터 + 인프라 + 앱 + Envoy 가 약 4.5GiB 든다 (제어 노드 3.09 · worker 0.58 · worker2 0.80GiB, 부하 없는 상태 `docker stats --no-stream` 실측 — 부하 중은 재지 않았다). Docker Desktop(WSL2)의 기본 한도는 PC 메모리의 50% 라 **8GB 이상** 이어야 한다 (이 PC 는 31GB → 약 15.5GB, 측정 때 15.2GB). 모자라면 Pod 가 `Pending` 이거나 노드가 `NotReady` 가 된다 — `%UserProfile%\.wslconfig` 의 `[wsl2]` 아래 `memory=10GB` 처럼 올리고 `wsl --shutdown` 뒤 Docker Desktop 을 다시 켠다.
 4. 확인 · 실행 (저장소 루트, Git Bash):
    ```bash
    bash infra/k8s/up.sh        # 처음엔 노드 이미지 · 인프라 이미지 · Envoy Gateway 를 받고 앱 이미지를 빌드해 몇 분

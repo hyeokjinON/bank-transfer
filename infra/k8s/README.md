@@ -5,13 +5,13 @@ kind 클러스터(제어 1 + 워커 2)에 인프라 · 모의 은행 · 게이�
 ## 올리기 · 확인 · 내리기
 ```bash
 # 먼저: Docker Desktop 켜기, IntelliJ 의 API · 게이트웨이 · 모의 은행 끄기, Compose app 프로필 내리기 (둘 다 127.0.0.1:8000)
-bash infra/k8s/up.sh            # 클러스터 + Envoy Gateway + 이미지 빌드 · kind load + Secret + 매니페스트 + 준비 대기 (처음 약 2분 + 내려받기)
+bash infra/k8s/up.sh            # 클러스터 + Envoy Gateway + 이미지 빌드 · kind load + Secret + 매니페스트 + 준비 대기 (클러스터가 있을 때 재실행 약 2분 7초 — 이미지 빌드 · `kind load` 포함. 처음 생성 시간은 재지 않았다)
 bash infra/k8s/smoke.sh         # [0] ~ [8] 입구로 1원인증 · 출금 · 멱등 · 분배 · 분산 배치 · 게이트웨이 · 비root · NetworkPolicy
 kubectl --context kind-bank-transfer -n bank-transfer get pods -o wide
 bash infra/k8s/down.sh          # 클러스터 삭제 (PV · 데이터까지)
 ```
 - `up.sh [local|ci]` — 다시 불러도 된다 (클러스터가 있으면 그대로 쓰고 apply 만). `SKIP_BUILD=1` 이미지 빌드 생략(CI), `IMAGE_TAG=…` 태그 지정, `UP_ONLY=cluster` 클러스터 · Envoy Gateway 까지만.
-- 입구는 `http://127.0.0.1:8000` (제어 노드 NodePort 30080 → PC). PC 에 열리는 포트는 이것 하나다.
+- 입구는 `http://127.0.0.1:8000` (제어 노드 NodePort 30080 → PC). 앱 입구는 이것 하나다 (kind API 서버도 `127.0.0.1` 의 임의 포트에 열린다 — kubectl 용).
 - 내려받는 것: kind 바이너리(SETUP §2-9), 노드 이미지 · 인프라 이미지, Envoy Gateway `install.yaml`. 처음 한 번만 받는다.
 
 ## 파일
@@ -67,6 +67,7 @@ PV(`data-mysql-0` · `data-kafka-0` · `mock-bank-files`)는 제어 노드에 �
 | 앱이 `REDIS_PORT` · `BANK_GATEWAY_PORT` · Kafka 설정을 이상하게 읽음 | K8s 가 Service 마다 `REDIS_PORT=tcp://10.x.x.x:6379` 같은 환경변수를 넣는다. 모든 Pod 에 `enableServiceLinks: false` 를 둔 이유 — 새 Pod 를 추가할 때도 잊지 않는다 |
 | 입구가 연결 거부 · `Connection refused` | Envoy Service 의 NodePort 가 30080 인지: `kubectl --context kind-bank-transfer -n envoy-gateway-system get svc`. `EnvoyProxy.envoyService` 에는 `nodePort` 필드가 없어 `base/gateway.yaml` 이 `patch`(StrategicMerge)로 덧씌운다 — 패치가 안 먹으면 Envoy Gateway 버전 · `EnvoyProxy` 를 본다 |
 | 스모크 [4] · [5] 가 실패 | 롤아웃 직후 옛 api Pod 가 Terminating 으로 남았거나 두 Pod 가 한 워커에 몰렸다. [0] 이 종료 중 Pod 를 90초까지 기다린다. 몰렸으면 `kubectl --context kind-bank-transfer -n bank-transfer rollout restart deploy/api` |
+| 스모크 [8] FAIL `N0 확인 실패 … curl 종료 코드 N` | `np_probe` 는 `<time_connect> <curl 종료 코드>` 를 낸다. 막힘 = `0.000000 28` 뿐이다. 6(이름 풀이 실패)·7(연결 거부)은 대상 오류 — FQDN 을 확인한다 (짧은 이름이 없으면 풀이 시간 초과로 28 이 나올 수 있다) |
 | 스모크 [8] FAIL `N0 확인용 Pod 가 동작하지 않는다` | `curlimages/curl` 임시 Pod 가 못 떴다 (이미지 받기 · 클러스터 상태). 양성 대조(API 서버 443)가 실패하면 정책 판정을 하지 않고 닫는다 |
 | 이미지를 고쳤는데 그대로 | 같은 태그로 apply — 롤링이 안 일어난다. 이미지 경로를 수정하면 `image_tag` 가 시각을 붙인다. 커밋 없이 같은 태그를 쓰는 `IMAGE_TAG=` 직접 지정은 피한다 |
-| 메모리 부족 (Pod `Pending` · 노드 `NotReady`) | Docker(WSL2) 메모리 한도 — SETUP §2-9. 클러스터는 5 ~ 7GB 예상 (추정) |
+| 메모리 부족 (Pod `Pending` · 노드 `NotReady`) | Docker(WSL2) 메모리 한도 — SETUP §2-9. 클러스터 전체 약 4.5GiB (제어 노드 3.09 · worker 0.58 · worker2 0.80, 부하 없음 `docker stats --no-stream` 실측 — 부하 중은 재지 않음) |

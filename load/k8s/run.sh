@@ -8,7 +8,7 @@
 # 확인 (P8-2 load/compose/run.sh 와 같은 기준): 접수된 키 = 출금 행, 전부 COMPLETED, 은행 거래 기록 = 출금 행(같은 거래번호 두 번 0), 잔고 = 원장 합.
 #   통과 못 하면 요약을 .json.invalid 로. 시간 지표는 timeline.sh(1 ~ 2초 간격) → timeline.awk.
 # 사용 (Git Bash · Linux): bash load/k8s/run.sh <동작> <회차>      먼저: bash infra/k8s/up.sh
-# 환경변수: RATE(20) DURATION(60s) ACTION_AT(20) SETTLE(300) BANK_DOWN_S(60) NODE_DOWN_S(420) NODE(drain · node 대상) OVERLAY(tagtrap, local)
+# 환경변수: RATE(20) DURATION(60s, rolling 은 150s) ACTION_AT(20) SETTLE(300) BANK_DOWN_S(60) NODE_DOWN_S(420) NODE(drain · node 대상) OVERLAY(tagtrap, local)
 # 결과: docs/perf/raw/p8-3a/<동작>-<회차>.json · .k6.json · .timeline.txt · .rebalance.txt, 작업 파일 build/load-p83a/<동작>-<회차>/
 set -euo pipefail
 . "$(dirname "$0")/../../infra/k8s/lib.sh"
