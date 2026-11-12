@@ -9,7 +9,7 @@ TAB=$'\t'
 while :; do
   t=$(date +%s%3N)
   k get pods -o jsonpath='{range .items[*]}{.metadata.labels.app}{"\t"}{.metadata.name}{"\t"}{.spec.nodeName}{"\t"}{.status.conditions[?(@.type=="Ready")].status}{"\t"}{.status.containerStatuses[0].restartCount}{"\n"}{end}' 2>/dev/null \
-    | awk -F"$TAB" -v t="$t" 'NF >= 2 { printf "P %s %s %s %s %s %s\n", t, $1, $2, ($3 == "" ? "-" : $3), ($4 == "" ? "-" : $4), ($5 == "" ? 0 : $5) }' >> "$OUT"
+    | awk -F"$TAB" -v t="$t" 'NF >= 2 { printf "P %s %s %s %s %s %s\n", t, ($1 == "" ? "-" : $1), $2, ($3 == "" ? "-" : $3), ($4 == "" ? "-" : $4), ($5 == "" ? 0 : $5) }' >> "$OUT"
   ka get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null \
     | awk -F"$TAB" -v t="$t" 'NF >= 2 { printf "N %s %s %s\n", t, $1, $2 }' >> "$OUT"
   sleep 1

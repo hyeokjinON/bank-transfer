@@ -15,8 +15,14 @@ $1 == "P" {
   }
 }
 $1 == "N" && $3 == node && $4 != "True" && ($2 + 0) >= ta && nodeDown == "" { nodeDown = $2 + 0 }
-function sec(x) { return sprintf("%.1f", (x - ta) / 1000) }
+function sec(x) { return sprintf("%.1f", (x - ref) / 1000) }
+function allnull() {
+  print "api_ready_min=null"; print "api_recovered_s=null"; print "gw_not_ready_s=null"; print "gw_restarts=null"
+  print "node_notready_s=null"; print "pod_notready_s=null"; print "replacement_ready_s=null"
+}
 END {
+  if (n == 0) { allnull(); exit }
+  ref = (ta + 0 == 0 ? ts[1] : ta + 0)   # steady(ta=0) 는 첫 표본 시각을 기준으로
   min = ""; lastBad = ""; gwNot = 0; podNot = ""; repl = ""
   for (i = 1; i <= n; i++) {
     t = ts[i]; if (t < ta) continue
@@ -36,6 +42,6 @@ END {
   print "gw_not_ready_s=" sprintf("%.1f", gwNot / 1000)
   print "gw_restarts=" restarts
   print "node_notready_s=" (nodeDown == "" ? "null" : sec(nodeDown))
-  print "pod_notready_s=" (podNot == "" ? "null" : sec(podNot))
+  print "pod_notready_s=" (node == "-" || podNot == "" ? "null" : sec(podNot))
   print "replacement_ready_s=" (repl == "" ? "null" : repl)
 }

@@ -28,7 +28,7 @@ case "$ACTION" in steady|rolling|podkill|tagtrap|bank|drain|node) ;; *) die "모
 [[ "$ROUND" =~ ^[0-9]{1,2}$ ]] || die "회차는 숫자 1 ~ 2자리: $ROUND"
 RUN="$ACTION-$ROUND"
 OUT_DIR=docs/perf/raw/p8-3a; OUT="$OUT_DIR/$RUN.json"; WORK="build/load-p83a/$RUN"
-rm -rf "$WORK"; mkdir -p "$OUT_DIR" "$WORK"; rm -f "$OUT" "$OUT.invalid" "$OUT_DIR/$RUN.k6.json"
+rm -rf "$WORK"; mkdir -p "$OUT_DIR" "$WORK"; rm -f "$OUT" "$OUT.invalid" "$OUT.tmp" "$OUT_DIR/$RUN.k6.json"
 
 # --- R3: 같은 태그로 다시 apply (부하 없음) ---
 if [ "$ACTION" = tagtrap ]; then
@@ -45,7 +45,8 @@ if [ "$ACTION" = tagtrap ]; then
   echo "[$RUN] 통과 — 같은 태그는 롤링을 일으키지 않는다"; cat "$OUT"; exit 0
 fi
 
-RATE=${RATE:-20}; DURATION=${DURATION:-60s}; ACTION_AT=${ACTION_AT:-20}; SETTLE=${SETTLE:-300}
+DEF_DURATION=60s; [ "$ACTION" = rolling ] && DEF_DURATION=150s   # 롤링은 서로 이어진 두 번의 교체(새 Pod 준비 → 옛 Pod preStop · 종료)라 부하가 더 길어야 R1 비교가 의미 있다
+RATE=${RATE:-20}; DURATION=${DURATION:-$DEF_DURATION}; ACTION_AT=${ACTION_AT:-20}; SETTLE=${SETTLE:-300}
 BANK_DOWN_S=${BANK_DOWN_S:-60}; NODE_DOWN_S=${NODE_DOWN_S:-420}
 for v in RATE ACTION_AT SETTLE BANK_DOWN_S NODE_DOWN_S; do [[ "${!v}" =~ ^[1-9][0-9]*$ ]] || die "$v 는 양의 정수: ${!v}"; done
 [[ "$DURATION" =~ ^([1-9][0-9]*)s$ ]] || die "DURATION 은 <숫자>s: $DURATION"
@@ -59,13 +60,14 @@ for dpl in mock-bank bank-gateway api; do
 done
 [ -z "$(ka get nodes --no-headers | awk '$2 != "Ready"')" ] || die "Ready 가 아닌 노드가 있다"
 k get pods -o wide > "$WORK/pods-before.txt"
+[ "$(k get pods -l app=api -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | sort -u | grep -c .)" = 2 ]   || die "api 두 대가 같은 워커에 있다 — kubectl -n bank-transfer rollout restart deploy/api 후 다시"
 GW_NODE=$(k get pods -l app=bank-gateway -o jsonpath='{.items[0].spec.nodeName}')
 case "$ACTION" in
   drain) NODE=${NODE:-$GW_NODE} ;;   # 기본: 게이트웨이가 있는 워커 — 1대짜리가 옮겨 가는 동안까지 본다
-  node)  NODE=${NODE:-$(k get pods -l app=api -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | grep -vx "$GW_NODE" | head -1)} ;;   # 기본: 게이트웨이가 없는 api 워커 — api 복구만 본다
+  node)  NODE=${NODE:-$(k get pods -l app=api -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | { grep -vx "$GW_NODE" || true; } | head -1)} ;;   # 기본: 게이트웨이가 없는 api 워커 — api 복구만 본다
   *)     NODE=- ;;
 esac
-[ -n "$NODE" ] || die "대상 워커를 못 정했다 — NODE=… 로 지정"
+[ -n "$NODE" ] || die "대상 워커를 못 정했다 (게이트웨이 없는 api 워커가 없다) — NODE=… 로 지정"
 if [ "$NODE" != - ]; then [[ "$NODE" == "$CLUSTER_NAME-worker"* ]] || die "대상은 워커여야 한다: $NODE"; fi
 PRESTOP=$(k get deploy api -o jsonpath='{.spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds}'); PRESTOP=${PRESTOP:-0}
 LIVE_BANK=$(k get deploy bank-gateway -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="MANAGEMENT_ENDPOINT_HEALTH_GROUP_LIVENESS_INCLUDE")].value}')
@@ -86,9 +88,29 @@ T0=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 # --- 3. 표본 · 부하 · 동작 ---
 bash load/k8s/timeline.sh "$WORK/timeline.txt" &
 SAMPLER=$!
+# 삭제 · 축출된 Pod 의 로그는 나중에 못 읽는다 — 시작 때 있던 api Pod 의 로그를 따라간다 (끝난 뒤 --since-time 조회와 합친다)
+MSYS_NO_PATHCONV=1 kubectl --context "$CTX" -n "$NAMESPACE" logs -f -l app=api --prefix --timestamps --tail=0 --max-log-requests=10 > "$WORK/api-follow.log" 2>&1 &
+FOLLOW=$!
 K6_NAME="p83a-k6-$RUN"
-stop_bg() { kill "$SAMPLER" 2>/dev/null || true; d rm -f "$K6_NAME" >/dev/null 2>&1 || true; }
+RESTORE=   # 동작이 시작돼 되돌려야 할 것 (drain | node | bank) — 정상 흐름에서 되돌리면 비운다
+stop_bg() {
+  kill "$SAMPLER" "$FOLLOW" 2>/dev/null || true; d rm -f "$K6_NAME" >/dev/null 2>&1 || true
+  case "$RESTORE" in
+    drain) ka uncordon "$NODE" >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — 노드 $NODE uncordon" >&2 ;;
+    node)  d start "$NODE" >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — 노드 $NODE docker start (Ready 는 직접 확인)" >&2 ;;
+    bank)  k scale deploy/mock-bank --replicas=1 >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — mock-bank replicas 1 로 복구" >&2 ;;
+  esac
+}
 trap stop_bg EXIT
+# 다음 회차를 위해: api 두 대가 한 워커에 몰렸으면 다시 나눈다 (ScheduleAnyway · drain 뒤). 판정과 무관한 최선 노력
+restore_spread() {
+  k rollout status deploy/api --timeout=300s >/dev/null 2>&1 || true
+  local n; n=$(k get pods -l app=api -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' 2>/dev/null | sort -u | grep -c . || true)
+  if [ "$n" != 2 ]; then
+    echo "[$RUN] api 두 대가 한 워커에 — rollout restart 로 다시 나눈다" >&2
+    k rollout restart deploy/api >/dev/null 2>&1 || true; k rollout status deploy/api --timeout=420s >/dev/null 2>&1 || true
+  fi
+}
 d rm -f "$K6_NAME" >/dev/null 2>&1 || true
 echo "[$RUN] k6 ${RATE}건/s × $DURATION → $CLUSTER_NAME-control-plane:30080, 동작 $ACTION @ ${ACTION_AT}s (대상 $NODE)"
 d run --rm --name "$K6_NAME" --network kind \
@@ -96,7 +118,8 @@ d run --rm --name "$K6_NAME" --network kind \
   -e BASE_URL="http://$CLUSTER_NAME-control-plane:30080" -e RUN="$RUN" -e RATE="$RATE" -e DURATION="$DURATION" -e OUT_SUBDIR=p8-3a \
   "$K6_IMAGE" run --quiet /scripts/compose/withdraw.js > "$WORK/k6.out" 2>&1 &
 K6_PID=$!
-T_ACTION=null; T_ACTION_END=null; TA_MS=0; VICTIM=; VERIFY_DURING=null
+TA_MS0=$(date +%s%3N)   # k6 시작 — 부하 끝 = TA_MS0 + DURATION_S 초
+T_ACTION=null; T_ACTION_END=null; TA_MS=0; TE_MS=0; VICTIM=; VERIFY_DURING=; WITHIN=null
 if [ "$ACTION" != steady ]; then
   sleep "$ACTION_AT"
   TA_MS=$(date +%s%3N); T_ACTION="\"$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)\""
@@ -105,25 +128,29 @@ if [ "$ACTION" != steady ]; then
              k rollout status deploy/api --timeout=300s > "$WORK/rollout.txt" 2>&1 || echo "[$RUN] 주의: 롤링이 300초 안에 안 끝났다" >&2 ;;
     podkill) VICTIM=$(k get pods -l app=api -o jsonpath='{.items[0].metadata.name}')
              k delete pod "$VICTIM" --grace-period=0 --force > "$WORK/delete.txt" 2>&1 ;;
-    bank)    k scale deploy/mock-bank --replicas=0 >/dev/null
+    bank)    RESTORE=bank; k scale deploy/mock-bank --replicas=0 >/dev/null
              sleep 15   # 장애 중 1원인증은 어떤 코드로 끝나나 (동기 경로 — 503 · 504 등을 그대로 기록)
              VERIFY_DURING=$(printf '%s' '{"bankCode":"090","accountNo":"1002123456789","holderName":"LOAD"}' \
                | curl -s -o /dev/null -w '%{http_code}' -m 20 -X POST http://127.0.0.1:8000/api/v1/account-verifications \
-                   -H 'Content-Type: application/json' -H 'X-User-Id: load-p82-u001' --data-binary @- || echo 0)
+                   -H 'Content-Type: application/json' -H 'X-User-Id: load-p82-u001' --data-binary @- || true)
+             VERIFY_DURING=${VERIFY_DURING:-000}   # 연결 실패면 curl 이 000 (문자열로 기록)
              rest=$(( BANK_DOWN_S - ($(date +%s%3N) - TA_MS) / 1000 )); [ "$rest" -gt 0 ] && sleep "$rest"
-             k scale deploy/mock-bank --replicas=1 >/dev/null ;;
-    drain)   ka drain "$NODE" --ignore-daemonsets --delete-emptydir-data --timeout=240s > "$WORK/drain.txt" 2>&1 \
+             k scale deploy/mock-bank --replicas=1 >/dev/null; RESTORE= ;;
+    drain)   RESTORE=drain; ka drain "$NODE" --ignore-daemonsets --delete-emptydir-data --timeout=240s > "$WORK/drain.txt" 2>&1 \
                || echo "[$RUN] 주의: drain 이 240초 안에 안 끝났다 — $WORK/drain.txt" >&2 ;;
-    node)    d stop "$NODE" >/dev/null ;;
+    node)    RESTORE=node; d stop "$NODE" >/dev/null ;;
   esac
-  T_ACTION_END="\"$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)\""
+  TE_MS=$(date +%s%3N); T_ACTION_END="\"$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)\""
+  if [ "$TE_MS" -le $(( TA_MS0 + DURATION_S * 1000 )) ]; then WITHIN=true; else
+    WITHIN=false; echo "[$RUN] 주의: 동작이 부하(${DURATION_S}초)보다 늦게 끝났다 — DURATION 을 늘려 다시" >&2
+  fi
 fi
 wait "$K6_PID" || die "k6 가 실패했다 — $WORK/k6.out"
 [ -f "$OUT_DIR/$RUN.k6.json" ] || die "k6 요약이 없다 — $WORK/k6.out"
 case "$ACTION" in
-  drain) ka uncordon "$NODE" >/dev/null ;;
+  drain) ka uncordon "$NODE" >/dev/null; RESTORE= ;;
   node)  rest=$(( NODE_DOWN_S - ($(date +%s%3N) - TA_MS) / 1000 )); [ "$rest" -gt 0 ] && { echo "[$RUN] 노드 $NODE 정지 유지 ${rest}초"; sleep "$rest"; }
-         d start "$NODE" >/dev/null
+         d start "$NODE" >/dev/null; RESTORE=
          ka wait "node/$NODE" --for=condition=Ready --timeout=300s >/dev/null || die "노드 $NODE 가 돌아오지 않는다 — down.sh → up.sh (스펙 §13)" ;;
 esac
 
@@ -134,7 +161,7 @@ for SETTLE_S in $(seq "$SETTLE"); do
   [ "$P" = 0 ] && break
   sleep 1
 done
-kill "$SAMPLER" 2>/dev/null || true
+kill "$SAMPLER" "$FOLLOW" 2>/dev/null || true
 
 # --- 5. 정확성 ---
 declare -A C
@@ -151,16 +178,17 @@ JOURNAL_DUP=$({ grep -xF -f "$WORK/refs.txt" "$WORK/journal-refs.txt" || true; }
 k logs -l app=api --prefix --timestamps --tail=-1 --since-time="$T0" > "$WORK/api.log" 2>&1 || true
 k logs -l app=bank-gateway --prefix --timestamps --tail=-1 --since-time="$T0" > "$WORK/gateway.log" 2>&1 || true
 ka -n envoy-gateway-system logs -l gateway.envoyproxy.io/owning-gateway-name=bank-transfer --all-containers --tail=-1 --since-time="$T0" > "$WORK/envoy.log" 2>&1 || true
-grep -E "partitions (assigned|revoked)|Adding newly assigned partitions|Revoke previously assigned partitions" "$WORK/api.log" > "$WORK/rebalance.txt" || true
+cat "$WORK/api.log" "$WORK/api-follow.log" | { grep -aE "partitions (assigned|revoked)|Adding newly assigned partitions|Revoke previously assigned partitions" || true; } | sort -u | sort -k2,2 -s > "$WORK/rebalance.txt" || true
+if [ "$ACTION" != steady ] && [ ! -s "$WORK/rebalance.txt" ]; then echo "[$RUN] 주의: 리밸런스 줄이 0 — 동작이 일어났는지 api 로그로 확인" >&2; fi
 declare -A M
 while IFS='=' read -r key val; do M[$key]=$val; done < <(awk -v ta="$TA_MS" -v node="$NODE" -f load/k8s/timeline.awk "$WORK/timeline.txt")
 
 num() { if [[ "${1:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then echo "$1"; else echo null; fi; }
 str() { if [ -n "${1:-}" ]; then echo "\"$1\""; else echo null; fi; }
-cat > "$OUT" <<JSON
+cat > "$OUT.tmp" <<JSON
 {"run":"$RUN","action":"$ACTION","rate":$RATE,"duration":"$DURATION","action_at_s":$ACTION_AT,"t0":"$T0","t_action":$T_ACTION,"t_action_end":$T_ACTION_END,
  "prestop_s":$PRESTOP,"gateway_liveness_bank":$(str "$LIVE_BANK"),"api_unreachable_toleration_s":$TOL,"node":$(str "${NODE#-}"),"victim":$(str "$VICTIM"),"new_tag":$(str "$NEW"),
- "verify_during_outage":$(num "$VERIFY_DURING"),"settle_s":$SETTLE_S,
+ "verify_during_outage":$(str "$VERIFY_DURING"),"action_within_load":$WITHIN,"settle_s":$SETTLE_S,
  "first_202":$(num "$(k6v first_202)"),"first_5xx":$(num "$(k6v first_5xx)"),"first_502":$(num "$(k6v first_502)"),"first_neterr":$(num "$(k6v first_neterr)"),
  "retried_requests":$(num "$(k6v retried_requests)"),"accepted_keys":$(num "$ACCEPTED"),"gave_up_keys":$(num "$(k6v gave_up_keys)"),"p95_ms":$(num "$(k6v p95_ms)"),
  "transfers":$(num "${C[transfers]:-}"),"not_completed":$(num "${C[not_completed]:-}"),"refunds":$(num "${C[refunds]:-}"),
@@ -170,16 +198,6 @@ cat > "$OUT" <<JSON
  "api_ready_min":${M[api_ready_min]:-null},"api_recovered_s":${M[api_recovered_s]:-null},"gw_not_ready_s":${M[gw_not_ready_s]:-null},"gw_restarts":${M[gw_restarts]:-null},
  "node_notready_s":${M[node_notready_s]:-null},"pod_notready_s":${M[pod_notready_s]:-null},"replacement_ready_s":${M[replacement_ready_s]:-null}}
 JSON
-cp "$WORK/timeline.txt" "$OUT_DIR/$RUN.timeline.txt"
-cp "$WORK/rebalance.txt" "$OUT_DIR/$RUN.rebalance.txt"
-
-# --- 7. 다음 회차를 위해: api 두 대가 한 워커에 몰렸으면 다시 나눈다 (ScheduleAnyway · drain 뒤) ---
-k rollout status deploy/api --timeout=300s >/dev/null || true
-if [ "$(k get pods -l app=api -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | sort -u | wc -l | tr -d ' ')" != 2 ]; then
-  echo "[$RUN] api 두 대가 한 워커에 — rollout restart 로 다시 나눈다" >&2
-  k rollout restart deploy/api >/dev/null; k rollout status deploy/api --timeout=420s >/dev/null || true
-fi
-
 FAILS=()
 [[ "$ACCEPTED" =~ ^[1-9][0-9]*$ ]] || FAILS+=("접수된 키가 양의 정수가 아님: ${ACCEPTED:-없음}")
 ITER=$(k6v iterations); GAVE=$(k6v gave_up_keys)
@@ -193,8 +211,13 @@ done
 [ "${C[transfers]:-x}" = "$ACCEPTED" ] || FAILS+=("출금 행 ${C[transfers]:-?} ≠ 접수된 키 $ACCEPTED")
 [ "$JOURNAL_MISSING" = 0 ] || FAILS+=("은행 기록에 없는 출금 $JOURNAL_MISSING")
 [ "$JOURNAL_DUP" = 0 ] || FAILS+=("은행에 두 번 간 거래번호 $JOURNAL_DUP")
+# 판정이 먼저 — 결과 파일 이름이 정해진 뒤에 되돌리기 · 복사 (최선 노력, 판정을 바꾸지 않는다)
+if [ ${#FAILS[@]} -gt 0 ]; then FINAL="$OUT.invalid"; else FINAL="$OUT"; fi
+mv -f "$OUT.tmp" "$FINAL"
+cp "$WORK/timeline.txt" "$OUT_DIR/$RUN.timeline.txt" || true
+cp "$WORK/rebalance.txt" "$OUT_DIR/$RUN.rebalance.txt" || true
+restore_spread || true
 if [ ${#FAILS[@]} -gt 0 ]; then
-  mv -f "$OUT" "$OUT.invalid"
   die "정확성 확인 실패 — ${FAILS[*]} ($OUT.invalid, 작업 파일 $WORK)"
 fi
 # 5xx · 재시작은 판정이 아니라 결과다 (문서에 원인과 함께 적는다)
