@@ -36,12 +36,17 @@ post() {   # $1 = 경로, $2 = JSON 본문(표준입력으로 — 한글이 셸 
 
 echo "[0/8] 준비"
 # 롤아웃 직후 옛 api Pod 가 Terminating 으로 남아 있으면 [4] 의 Pod 목록이 어긋난다 — 사라질 때까지 기다린다 (최대 90초)
-terminating_api() { k get pods -l app=api -o jsonpath='{range .items[*]}{.metadata.deletionTimestamp}{"\n"}{end}' | grep -c . || true; }
+terminating_api() {   # 종료 중인 api Pod 수를 출력. kubectl 이 실패하면 실패로 돌려준다 (0 으로 위장하지 않는다)
+  local out
+  out=$(k get pods -l app=api -o jsonpath='{range .items[*]}{.metadata.deletionTimestamp}{"\n"}{end}') || return 1
+  grep -c . <<<"$out" || true
+}
 for _ in $(seq 45); do
-  [ "$(terminating_api)" = 0 ] && break
+  n=$(terminating_api) || fail "kubectl 실패 (Terminating api Pod 확인)"
+  [ "$n" = 0 ] && break
   sleep 2
 done
-[ "$(terminating_api)" = 0 ] || fail "90초가 지나도 종료 중인 api Pod 가 남아 있다 (kubectl -n bank-transfer get pods -l app=api)"
+[ "${n:-}" = 0 ] || fail "90초가 지나도 종료 중인 api Pod 가 남아 있다 (kubectl -n bank-transfer get pods -l app=api)"
 for dpl in redis mock-bank bank-gateway api; do
   r=$(k get deploy "$dpl" -o jsonpath='{.status.readyReplicas}'); w=$(k get deploy "$dpl" -o jsonpath='{.spec.replicas}')
   [ "${r:-0}" = "$w" ] || fail "$dpl 준비 ${r:-0}/$w — bash infra/k8s/up.sh"
@@ -115,11 +120,18 @@ ok "세 앱 모두 root 아님"
 
 echo "[8/8] NetworkPolicy"
 [ -n "$(k get networkpolicy default-deny-ingress -o name 2>/dev/null)" ] || fail "기본 거부 정책이 없다"
+# 양성 대조: API 서버(443)에는 정책이 걸리지 않는다. 여기 못 붙으면 probe 자체가 고장 — 아래 "0" 을 막힘으로 읽으면 안 된다
+tc=$(np_probe kubernetes.default.svc.cluster.local 443)
+if [[ $tc =~ ^[0-9]+(\.[0-9]+)?$ ]] && awk -v x="$tc" 'BEGIN { exit !(x > 0) }'; then :; else
+  fail "N0 확인용 Pod 가 동작하지 않는다 (양성 대조 kubernetes.default:443 연결 실패: '${tc}')"
+fi
+echo "  양성 대조 kubernetes.default:443 연결 ${tc}초"
 for hp in "bank-gateway 8082" "mysql 3306"; do
-  set -- $hp
-  tc=$(np_probe "$1" "$2")
-  awk -v x="${tc:-0}" 'BEGIN { exit !(x > 0) }' && fail "허용 안 된 Pod 가 $1:$2 에 붙었다 (연결 ${tc}초) — CNI 가 정책을 집행하지 않는다 (kindnet → Calico, 스펙 §8)"
+  read -r h p <<<"$hp"
+  tc=$(np_probe "$h" "$p")
+  [[ $tc =~ ^[0-9]+(\.[0-9]+)?$ ]] || fail "N0 확인 실패 ($h:$p): '$tc'"
+  awk -v x="$tc" 'BEGIN { exit !(x > 0) }' && fail "허용 안 된 Pod 가 $h:$p 에 붙었다 (연결 ${tc}초) — CNI 가 정책을 집행하지 않는다 (kindnet → Calico, 스펙 §8)"
 done
-ok "허용 안 된 Pod 는 bank-gateway:8082 · mysql:3306 에 못 붙는다"
+ok "양성 대조(API 서버 443 연결) 뒤, 허용 안 된 Pod 는 bank-gateway:8082 · mysql:3306 에 못 붙는다"
 
 echo "k8s smoke 통과"
