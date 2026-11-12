@@ -10,6 +10,7 @@
 | Git for Windows | 최신 | 소스 + **Git Bash** (셸 스크립트 실행) | `git --version` |
 | IntelliJ IDEA | 2025.x 이상 | 개발, `.run/` 실행 구성, HTTP Client | |
 | Docker Desktop | 4.x (WSL2 엔진) | MySQL · Kafka · Redis (P3 부터) | `docker version` (Client·Server 둘 다) |
+| kind · kubectl (선택, P8-3a) | kind **v0.33.0** · kubectl 1.36 (±1 minor, Docker Desktop 동봉) | Kubernetes(kind)로 전체 실행 — 2-9 | `kind version` · `kubectl version --client` |
 
 Gradle 은 설치하지 않는다. 저장소의 래퍼(`./gradlew`)가 맞는 버전(9.x)을 내려받는다.
 
@@ -23,7 +24,7 @@ cd bank-transfer
 
 ### 2-2. 빌드 · 테스트
 ```bash
-./gradlew build      # 첫 실행은 의존성 다운로드로 몇 분 걸린다. 테스트 622개 (건너뜀 2) 통과해야 정상
+./gradlew build      # 첫 실행은 의존성 다운로드로 몇 분 걸린다. 테스트 623개 (건너뜀 2) 통과해야 정상
 ```
 테스트는 Testcontainers 로 MySQL · Kafka · Redis 를 띄우므로 Docker Desktop 이 켜져 있어야 한다 (설치는 2-4).
 
@@ -91,7 +92,7 @@ cd bank-transfer
 | 8082 | `apps/bank-gateway` (개발용, 실행 구성 11, P8-1) |
 | 9090 | 모의 은행 (개발용) |
 | 18080 · 18081 · 9190 · 18082 · 28082 · 8474 | 측정 전용 `apps/api` · `apps/api-reactive` · 모의 은행 · 게이트웨이(18082) · Toxiproxy 프록시(28082) · Toxiproxy 제어(8474) (`load/verification/run.sh` · `load/lib/gateway.sh` 가 띄우고 내린다, 평소엔 비어 있어야 한다. [OPERATION §12](OPERATION.md#12-웹-1원인증-판--webflux-측정-p6-2)) |
-| 8000 | nginx (Compose `app` 프로필, P8-2 — 컨테이너 api 2대 앞. `127.0.0.1` 에만 열린다) |
+| 8000 | nginx (Compose `app` 프로필, P8-2 — 컨테이너 api 2대 앞. `127.0.0.1` 에만 열린다) 또는 kind 의 Envoy (P8-3a, 2-9 — 둘 중 하나만) |
 | 3306 · 6379 · Kafka | MySQL · Redis · Kafka (`infra/`) |
 
 ### 2-8. 컨테이너로 전체 실행 (P8-2)
@@ -105,6 +106,26 @@ cd bank-transfer
 3. base URL 은 **`http://localhost:8000`** (nginx). Postman · `http/*.http` 의 주소만 바꾼다. 어느 api 가 받았는지는 `curl -s localhost:8000/actuator/info` 의 `instance` (`api-1` · `api-2`).
 4. 1원인증 적요 코드는 모의 은행 로그에서: `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app logs mock-bank`.
 5. 내리기 (데이터 유지): 앱만 멈추려면 `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app stop nginx api-1 api-2 bank-gateway mock-bank` (인프라는 그대로). 서비스 이름 없이 `--profile app stop` 하면 인프라까지 모두 멈춘다.
+
+### 2-9. kind (P8-3a)
+Kubernetes 로 한 번에 띄운다 (kind 클러스터 — 제어 1 + 워커 2, [ADR-0017](docs/adr/0017-kubernetes-kind.md)). 이 절은 **도구 설치**이고, 띄우는 법은 [OPERATION §15](OPERATION.md#15-kubernetes-실행-p8-3a) · [infra/k8s/README.md](infra/k8s/README.md).
+1. **kind v0.33.0** (Windows, Git Bash). 바이너리 · 노드 이미지 · Envoy Gateway 를 내려받으므로 처음 한 번은 네트워크가 필요하다. 버전은 `infra/k8s/versions.env` 한 곳에 고정돼 있다.
+   ```bash
+   mkdir -p ~/bin
+   curl -fsSLo ~/bin/kind.exe https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-windows-amd64
+   curl -fsSL https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-windows-amd64.sha256sum
+   sha256sum ~/bin/kind.exe     # 위 줄의 해시와 같아야 한다
+   kind version                 # ~/bin 이 PATH 에 있어야 한다 (Git Bash 는 보통 ~/bin 을 PATH 에 넣는다)
+   ```
+2. **kubectl** 은 Docker Desktop 에 들어 있다 (`kubectl version --client`). 클러스터 노드가 v1.36 이므로 kubectl 은 **±1 minor 안**(1.35 ~ 1.37)이어야 한다 (로컬 1.36.1, CI 1.36.4). 아니면 Docker Desktop 을 올리거나 `https://dl.k8s.io/release/v1.36.4/bin/windows/amd64/kubectl.exe` 를 받아 체크섬(`…kubectl.exe.sha256`)을 확인한다.
+3. **Docker 메모리**: 클러스터 + 인프라 + 앱 + Envoy 가 5 ~ 7GB 쯤 든다 (추정). Docker Desktop(WSL2)의 기본 한도는 PC 메모리의 50% 라 **8GB 이상** 이어야 한다 (이 PC 는 31GB → 약 15.5GB, 측정 때 15.2GB). 모자라면 Pod 가 `Pending` 이거나 노드가 `NotReady` 가 된다 — `%UserProfile%\.wslconfig` 의 `[wsl2]` 아래 `memory=10GB` 처럼 올리고 `wsl --shutdown` 뒤 Docker Desktop 을 다시 켠다.
+4. 확인 · 실행 (저장소 루트, Git Bash):
+   ```bash
+   bash infra/k8s/up.sh        # 처음엔 노드 이미지 · 인프라 이미지 · Envoy Gateway 를 받고 앱 이미지를 빌드해 몇 분
+   bash infra/k8s/smoke.sh     # [0] ~ [8] 통과
+   bash infra/k8s/down.sh      # 클러스터 삭제
+   ```
+5. **Compose `app` 프로필과 동시에 띄우지 않는다** — 둘 다 `127.0.0.1:8000` 을 쓴다. IntelliJ 의 API · 게이트웨이 · 모의 은행도 끈다 (클러스터는 자기 DB 를 쓰므로 부딪치지는 않지만 한 PC 의 CPU · 메모리를 나눈다). base URL 은 `http://127.0.0.1:8000`.
 
 ## 3. Windows 에서 알아둘 것
 | 상황 | 해결 |

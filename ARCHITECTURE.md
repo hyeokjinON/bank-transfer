@@ -1,6 +1,6 @@
 # ARCHITECTURE — 구조와 흐름
 
-> 기준: P8-2 앱 이미지 · Compose 전체 실행 · api 2대 (2026-11-11, [#27](https://github.com/hyeokjinON/bank-transfer/pull/27) 머지 — [ADR-0016](docs/adr/0016-app-images-compose.md) — 기본 `bank.gateway.mode` 가 `http` 로 바뀌었고, 컨테이너 실행은 아래 §1 의 "컨테이너 실행" 그림). 그 앞: P8-1 은행 게이트웨이 서비스 분리 (2026-11-10, [#25](https://github.com/hyeokjinON/bank-transfer/pull/25) 머지 — [ADR-0015](docs/adr/0015-bank-gateway-service.md), P8-2 전에는 기본이 `direct` 라 아래 그림의 직결 경로가 평소 모양이었다). P5-1 일마감 대사 · 점검 시간 · 알림 완료 (2026-10-30, PR #15 머지). P4-2 잔고 차감 락 전략 완료 (2026-10-28, PR #13 머지). P4-1 원화 잔고 완료 (2026-10-26, PR #11 머지). P3 완료(P3-3b PR #9 머지). P3 ~ P5 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p5)에 적는다.
+> 기준: P8-3a Kubernetes(kind) 로 옮기기 (진행 중 — PR 전, [ADR-0017](docs/adr/0017-kubernetes-kind.md) 제안, 실행 그림은 아래 §1 의 "Kubernetes 실행"). 그 앞: P8-2 앱 이미지 · Compose 전체 실행 · api 2대 (2026-11-11, [#27](https://github.com/hyeokjinON/bank-transfer/pull/27) 머지 — [ADR-0016](docs/adr/0016-app-images-compose.md) — 기본 `bank.gateway.mode` 가 `http` 로 바뀌었고, 컨테이너 실행은 아래 §1 의 "컨테이너 실행" 그림). 그 앞: P8-1 은행 게이트웨이 서비스 분리 (2026-11-10, [#25](https://github.com/hyeokjinON/bank-transfer/pull/25) 머지 — [ADR-0015](docs/adr/0015-bank-gateway-service.md), P8-2 전에는 기본이 `direct` 라 아래 그림의 직결 경로가 평소 모양이었다). P5-1 일마감 대사 · 점검 시간 · 알림 완료 (2026-10-30, PR #15 머지). P4-2 잔고 차감 락 전략 완료 (2026-10-28, PR #13 머지). P4-1 원화 잔고 완료 (2026-10-26, PR #11 머지). P3 완료(P3-3b PR #9 머지). P3 ~ P5 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p5)에 적는다.
 
 ## 1. 한눈에 보기
 
@@ -72,6 +72,35 @@ flowchart LR
 ```
 - 은행 연결은 게이트웨이 한 곳이라 api 를 늘려도 응답 매칭이 깨지지 않는다 (P8-1). 아웃박스 발행 · 정리 작업은 두 대가 모두 돌고 DB(`SKIP LOCKED` · 조건부 UPDATE)가 중복을 막는다. 하루 배치 둘만 `shedlock` 으로 한 대가 돈다.
 - 컨테이너 api 는 IntelliJ 의 API 와 같은 DB · 같은 Kafka 그룹을 쓰므로 동시에 띄우지 않는다.
+
+### Kubernetes 실행 (P8-3a, kind)
+`bash infra/k8s/up.sh` 로 띄우는 실행 모양이다 ([ADR-0017](docs/adr/0017-kubernetes-kind.md)). PC 에 열리는 포트는 `127.0.0.1:8000` 하나이고 Compose `app` 프로필과 동시에 띄우지 않는다. 제어 노드에는 인프라 · 모의 은행 · 입구가, 워커 2 에는 앱이 있다.
+
+```mermaid
+flowchart LR
+    PC["PC 127.0.0.1:8000"] --> NP["제어 노드<br/>NodePort 30080"]
+    subgraph CP["제어 노드 (role=infra)"]
+        NP --> E["Envoy (Gateway API)<br/>재시도 없음"]
+        M[mock-bank :9090<br/>PVC 거래 기록]
+        DB[(MySQL)]
+        K{{"Kafka"}}
+        R[(Redis)]
+    end
+    subgraph W1["워커 1 (role=app)"]
+        A1[api Pod]
+    end
+    subgraph W2["워커 2 (role=app)"]
+        A2[api Pod]
+        G[bank-gateway :8082<br/>Recreate · 1대]
+    end
+    E -- "Service api<br/>(NetworkPolicy 허용: Envoy → api)" --> A1 & A2
+    A1 & A2 -- "허용: api → 게이트웨이" --> G
+    G -- "허용: 게이트웨이 → 모의 은행<br/>TCP 전문 1개" --> M
+    A1 & A2 -- "허용: api → MySQL · Redis · Kafka" --> DB & R & K
+```
+- 노드 배치: 인프라 · 모의 은행 · CoreDNS · Envoy Gateway 컨트롤러 · Envoy 프록시 = 제어 노드(워커 장애 실험에서 같이 죽지 않게), api · 게이트웨이 = 워커. api 는 `topologySpreadConstraints` 로 워커에 하나씩. PV 는 제어 노드에 묶인다.
+- NetworkPolicy 는 namespace 전체 ingress 기본 거부 + 위 화살표(허용 목록)만. 허용 목록 밖 Pod 는 게이트웨이 · MySQL 에 못 붙는다 (N0). 프로브 3종은 Pod 별로 다르다: api readiness = Spring 기본, **게이트웨이 readiness 에만 `bankConnection`** (은행 장애 = Service 에서 빠짐, 재시작 아님).
+- 게이트웨이 1대 = 단일 장애점은 그대로다. `Recreate` 는 배포 때만 연결 주인을 하나로 지키고 퇴거(drain)에는 못 지킨다 → P8-3b.
 
 ## 2. 모듈
 
@@ -434,3 +463,4 @@ flowchart TB
 | [0014](docs/adr/0014-virtual-threads.md) | 가상 스레드는 Boot 설정 하나로 켜고, 성능은 코루틴만큼이지만 Java 21 냉시동 교착 때문에 기본은 끈다 |
 | [0015](docs/adr/0015-bank-gateway-service.md) | 은행 게이트웨이를 별도 서비스(동기 HTTP)로 분리, 실패 분류 · 재시도 끔 · 송신 취소 안 함은 그대로, 기본은 `direct` 유지 (P8-2 에서 `http` 로 변경 — ADR-0016) |
 | [0016](docs/adr/0016-app-images-compose.md) | 루트 Dockerfile 하나 · 타깃 3 · nginx 앞 api 2대(보낸 POST 는 다시 보내지 않음), 하루 배치만 ShedLock, `mode` 기본 `http`, 파티션 3 유지 |
+| [0017](docs/adr/0017-kubernetes-kind.md) | (제안) 같은 구성을 kind(Kubernetes)로 — Envoy Gateway 입구(재시도 없음), preStop 10s · 프로브 3종, 게이트웨이 readiness 에만 은행 연결, NetworkPolicy 기본 거부, 인프라 · 모의 은행은 제어 노드, 연결 주인 하나는 P8-3b |

@@ -9,6 +9,29 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
+## [P8-3a] Kubernetes(kind) 로 옮기기 — 2026-11-12 (진행 중, PR 전)
+### Added
+- `infra/k8s/`: kind 클러스터(제어 1 + 워커 2, `kind.yaml` · PC `127.0.0.1:8000` 만 열림) · `versions.env`(kind v0.33.0 · 노드 `kindest/node:v1.36.4`(digest) · Envoy Gateway v1.9.3 · kubectl v1.36.4 · curl 8.23.0 · k6 2.3.0 한 곳) · 스크립트 `up.sh` · `down.sh` · `smoke.sh`([0] ~ [8]) · `lib.sh` · Kustomize `base`(MySQL · Kafka · Redis · 모의 은행(PVC) · 게이트웨이 · api 2대 · `EnvoyProxy` + `Gateway` + `HTTPRoute`(재시도 없음) · NetworkPolicy 7개 · api PDB) + `overlays/{local,ci,experiment-prestop0,experiment-liveness-bank,experiment-fast-evict}`, `cluster/`(namespace · GatewayClass), `README.md`.
+- CI 잡 `k8s-smoke` (20분 제한: kind · kubectl 체크섬 설치 → 모든 overlay `kubectl kustomize` → 이미지 3개 빌드(gha 캐시) → `up.sh ci` → `smoke.sh` → 실패 시 상태 · 로그).
+- 실험 도구 `load/k8s/` (`run.sh <steady|rolling|podkill|tagtrap|bank|drain|node> <회차>` · `cleanup`, `timeline.sh` · `timeline.awk`)와 실험 R1 ~ R3 · B1 · B2 · N0 · N1 · D1 · D2 · D2' ([결과](docs/perf/p8-3a-k8s.md), 원자료 `docs/perf/raw/p8-3a/`).
+- 테스트 1개: `ProbeGroupsTest` (게이트웨이 readiness 그룹에 `bankConnection` 포함, liveness 에는 없음). 전체 623개 (P8-2 622 + 1, 건너뜀 2).
+- ADR-0017 (제안), OPERATION §15 "Kubernetes 실행", SETUP §2-9 · §1 표 kind 줄, ARCHITECTURE "Kubernetes 실행" 그림, `infra/k8s/README.md`.
+### Changed
+- 게이트웨이 `application.yml`: readiness 그룹 = `readinessState,bankConnection`, 프로브 명시 (liveness 는 기본 — 은행 장애는 재시작 사유가 아니다).
+- `load/compose/withdraw.js`: 결과 폴더를 `OUT_SUBDIR`(기본 `p8-2`)로 — K8s 실험은 `p8-3a` 로 같은 부하 스크립트를 쓴다 (한 줄).
+- `.gitattributes`: `*.yaml` · `*.env` · `*.awk` 를 LF 로 (Windows 체크아웃에서 `source` 하는 `versions.env` 가 CRLF 로 깨지지 않게).
+- 문서: README 로드맵 · 실행 안내 · 테스트 수(623), `infra/README.md` 에 k8s 안내 한 줄, HANDOVER P8-3a 줄.
+### Fixed (구현 중)
+- 롤링 뒤 api 두 Pod 가 한 워커로 몰리던 것: `topologySpreadConstraints` 가 롤링 중 옛 ReplicaSet Pod 까지 세었다 → `matchLabelKeys: [pod-template-hash]` (8aadd27). 몰린 상태에서 노드를 정지하면 api 0대 구간이 생긴다 (node-1: 5xx 883 · 포기 883).
+- 실험 도구: 결과 파일을 판정 전에 쓰던 것 · api 분산 사전 확인 없음 · 롤링 기본 부하가 롤링보다 짧을 수 있음 · 장애 중 1원인증 응답 코드 `0000` 이 JSON 을 깨던 것 (b9a8f2e), 종료 중(Terminating) Pod 를 세던 사전 확인 · 복구 (8aadd27, node-2 는 무효 회차).
+- 스모크 N0 가 오류에 통과할 수 있던 것: 양성 대조(`kubernetes.default:443`) · 숫자 확인으로 실패 쪽으로 닫음, 스모크 [0] 은 종료 중인 api Pod 가 없어질 때까지 기다림 (0633e3c).
+### 측정 요약 ([결과](docs/perf/p8-3a-k8s.md), 이 PC 기준 — 운영 수치가 아니다, 돈은 전 회차 정확)
+- **이식**: `up.sh` 약 2분(이미지 빌드 포함) 뒤 스모크 통과, api 두 Pod 동시 기동에도 Flyway 는 버전마다 1번.
+- **R1 롤링**: 롤링 중 첫 시도 5xx preStop 10s **0 · 0**, 0s **4 · 9** (전부 Envoy `503 UF`). **R2 Pod 강제 삭제** 3회 5xx 0, 대체 Pod Ready 10.8 ~ 11.2s. **R3** 같은 태그는 롤링이 일어나지 않는다.
+- **B1 · B2 은행 장애**: readiness 에만(B1) 60 · 180s 장애에도 게이트웨이 재시작 **0**, 출금 전부 `COMPLETED` · 이중 0. liveness 에도 넣으면(B2) 재시작 1 · 2. 복구 편차(B1 6.7 ~ 34.0s)는 게이트웨이 재접속 백오프(상한 30s) 때문.
+- **N0 · N1 NetworkPolicy**: 정책 전 연결됨(0.0011 · 0.0010s) → 후 막힘, kindnet 이 집행, Pod 전부 Ready 유지.
+- **D1 · D2 · D2' 노드**: drain 5xx 0 · api ready 항상 2, 단 `Recreate` 인데도 퇴거 때 게이트웨이 두 대가 4 ~ 7초 겹침 (→ P8-3b). 노드 정지: 대체 api 363s, 퇴거 30s 로 88s, 감지 전 약 50초에 5xx 512 · 439.
+
 ## [P8-2] 앱 이미지 · Docker Compose 전체 실행 · api 2대 — 2026-11-11 ([#27](https://github.com/hyeokjinON/bank-transfer/pull/27), 머지 후 정리 #28)
 ### Added
 - 루트 `Dockerfile` (타깃 `api` · `bank-gateway` · `mock-bank`, 멀티 스테이지 · Boot jar 레이어 추출 · JRE Alpine · root 아닌 사용자) · `.dockerignore` (`infra/.env` 제외), `.gitattributes` 에 `Dockerfile` · `.dockerignore` · `*.conf` LF.

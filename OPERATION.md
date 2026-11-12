@@ -1,6 +1,6 @@
 # OPERATION — 실행 · 상태 확인 · 장애 대응
 
-> 로컬 개발과 CI 기준 운영 안내다. 실제 배포(K8s)는 P8 에서 이 문서에 추가한다.
+> 로컬 개발과 CI 기준 운영 안내다. 컨테이너 실행은 §14 (Compose), Kubernetes(kind) 실행은 §15.
 
 ## 1. 구성 요소와 포트
 | 구성 요소 | 실행 | 포트 | 상태 확인 |
@@ -13,6 +13,7 @@
 | Redis 7.4 | 〃 | 6379 | 〃 |
 | kafka-ui (선택) | `--profile tools up -d` | 8089 | http://localhost:8089 |
 | 컨테이너 실행 (`app` 프로필, P8-2) | `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app up -d --build --wait` (§14) | 8000 (nginx — 뒤에 api-1 · api-2 · 게이트웨이 · 모의 은행) | `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app ps` → 5개 healthy, `curl localhost:8000/actuator/info` |
+| Kubernetes 실행 (kind, P8-3a) | `bash infra/k8s/up.sh` (§15, [infra/k8s/README.md](infra/k8s/README.md)) | 8000 (Envoy → api Pod ×2 → 게이트웨이 → 모의 은행, Compose `app` 프로필과 동시에 못 띄움) | `bash infra/k8s/smoke.sh` · `kubectl -n bank-transfer get pods -o wide` |
 
 모의 은행 · API 는 `./bank-files` 를 같이 본다 (Gradle `run` · `bootRun` 이 저장소 루트에서 돈다). `git status` 에 보이지 않는다(`.gitignore`).
 
@@ -673,3 +674,95 @@ bash load/compose/run.sh cleanup       # 끝나면 반드시 — load-p82-u001 ~
 - 환경변수: `RATE`(초당 출금, 20) · `DURATION`(부하 시간, `60s`) · `ACTION_AT`(동작 시각 초, 20 — `DURATION` 보다 작아야 한다) · `SETTLE`(완료 대기 최대 초, 240).
 - 정확성 확인(접수 키 > 0, 접수 + 포기 = 반복 수, 출금 행 = 거래번호 수, 은행 누락 · 중복 0, 잔고 = 원장 …)을 통과하지 못하면 요약이 `.json.invalid` 로 남는다.
 - 결과: `docs/perf/raw/p8-2/<동작>-<회차>.json` (요약) · `.k6.json` · `.nginx-errors.txt` · `.rebalance.txt`, 작업 파일은 `build/load-p82/<동작>-<회차>/`. 먼저 앱을 띄우고 IntelliJ 의 API 는 끈다 (14-1).
+
+## 15. Kubernetes 실행 (P8-3a)
+kind 클러스터(제어 1 + 워커 2): PC `127.0.0.1:8000` → 제어 노드 NodePort 30080 → Envoy → Service `api` → api Pod ×2(워커) → bank-gateway(워커) → mock-bank(제어 노드), 인프라(MySQL · Kafka · Redis)는 제어 노드. 이유 · 숫자는 [ADR-0017](docs/adr/0017-kubernetes-kind.md) · [측정 결과](docs/perf/p8-3a-k8s.md), 파일 · 막히는 곳은 [infra/k8s/README.md](infra/k8s/README.md). 모든 명령은 저장소 루트의 Git Bash 에서. 아래 `kubectl` 은 `--context kind-bank-transfer` 를 줄여 적었다 (여러 클러스터를 쓰면 붙인다).
+
+### 15-1. 띄우기 · 확인 · 내리기
+```bash
+# 먼저 IntelliJ 의 API · 게이트웨이 · 모의 은행을 끄고, Compose app 프로필도 내린다 (둘 다 127.0.0.1:8000 — §14)
+bash infra/k8s/up.sh                       # 클러스터 · Envoy Gateway · 이미지 빌드 · kind load · Secret · 매니페스트 · 준비 대기
+bash infra/k8s/smoke.sh                    # [0] ~ [8]: 입구로 1원인증 · 출금 · 멱등 · 분배 · 분산 배치 · 게이트웨이 · 비root · NetworkPolicy
+kubectl -n bank-transfer get pods -o wide  # 7개 Pod Running — api 두 개가 서로 다른 워커
+curl -s localhost:8000/actuator/info       # 두 번 이상 — "instance" 가 api Pod 이름 두 개로 번갈아
+bash infra/k8s/down.sh                     # 클러스터 삭제 (데이터까지)
+```
+- 클러스터 DB · Kafka 는 **개발 DB 와 별개**다 (클러스터 안 PV). IntelliJ 의 API 와 부딪치지 않지만, Postman 의 base URL 은 `http://127.0.0.1:8000` 이다.
+- **Compose `app` 프로필과 동시에 띄우지 않는다** (같은 8000). 내리기: `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app down`.
+- PC 에 열리는 포트는 8000 하나다. 8080 · 8082 · 9090 은 연결 거부여야 한다 (Service 는 전부 ClusterIP).
+- 다시 부르면(`up.sh`) 클러스터는 그대로 두고 이미지 · 매니페스트만 갱신한다. 비밀번호를 `infra/.env` 에서 바꿔도 MySQL PV 가 이미 초기화됐으면 DB 에 반영되지 않는다 — `down.sh` 부터.
+
+### 15-2. 로그 · 안에서 보기
+```bash
+kubectl -n bank-transfer logs -l app=api --prefix --tail=100            # 두 api Pod 의 로그 (--prefix 로 Pod 이름 구분, -f 로 따라 보기)
+kubectl -n bank-transfer logs deploy/mock-bank | grep BT                # 1원인증 적요 코드 (BT + 4자리)
+kubectl -n bank-transfer exec deploy/bank-gateway -- wget -qO- http://127.0.0.1:8082/actuator/health/readiness   # readinessState + bankConnection
+kubectl -n bank-transfer exec deploy/api -- wget -qO- http://127.0.0.1:8080/actuator/health/readiness
+kubectl -n bank-transfer describe pod -l app=bank-gateway               # 프로브 실패 · 재시작 이유 (Events)
+kubectl -n bank-transfer get events --sort-by=.lastTimestamp | tail -20
+kubectl -n envoy-gateway-system logs deploy/envoy-gateway --tail=100    # 입구 컨트롤러
+```
+- 게이트웨이 readiness 응답이 `DOWN` 이면 은행 연결이 없는 것이다 (15-5). `/actuator/health/liveness` 는 은행과 무관하게 `UP`.
+- 어느 api 가 받았는지는 `/actuator/info` 의 `instance` (= Pod 이름). Envoy 프록시 로그는 `kubectl -n envoy-gateway-system logs -l app.kubernetes.io/name=envoy --tail=50`.
+
+### 15-3. 배포 (롤링 · 태그)
+```bash
+bash infra/k8s/up.sh                       # 코드를 고친 뒤 — 이미지를 다시 만들고 새 태그로 apply (api 롤링, 게이트웨이 · 모의 은행 Recreate)
+kubectl -n bank-transfer rollout status deploy/api
+kubectl -n bank-transfer get deploy api -o jsonpath='{.spec.template.spec.containers[0].image}'   # 지금 태그
+```
+- **태그가 바뀌어야 롤링이 일어난다.** 태그는 `dev-<짧은 커밋>` (이미지에 들어가는 경로가 수정 중이면 `dev-<커밋>-<시각>`). 같은 태그로 다시 apply 하면 `unchanged` 이고 옛 이미지가 그대로 돈다 (R3).
+- **api 롤링**: `maxUnavailable 0 · maxSurge 1` — 새 Pod 가 Ready 가 된 뒤 옛 Pod 를 내린다. 내려가는 Pod 는 `preStop` 10초 동안 새 요청도 받아 준 뒤 SIGTERM → graceful(단계당 20초), 45초를 넘으면 SIGKILL. R1: 롤링 중 첫 시도 5xx **preStop 10초 0 · 0 / preStop 0초 4 · 9** (`503 UF` — 입구가 이미 포트를 닫은 옛 Pod 로 연결).
+- **게이트웨이 · 모의 은행은 `Recreate`**: 옛 Pod 가 내려간 뒤 새 Pod 가 뜬다 — 그동안 게이트웨이가 없어 출금은 "안 보냄 → 재시도" 로 흐르고(15-5) 1원인증은 503 이다. 배포는 점검 시간(23:50 ~ 00:10)을 피한다.
+- 롤링이 끝나면 `smoke.sh` — 두 Pod 가 서로 다른 워커에 있어야 한다 ([5]). 한 워커로 몰리면 `kubectl -n bank-transfer rollout restart deploy/api` (api 는 `matchLabelKeys: [pod-template-hash]` 로 같은 리비전끼리 세어 평소엔 나뉜다).
+- 클라이언트는 5xx(연결 단계 실패)를 받으면 **같은 `Idempotency-Key`** 로 다시 보낸다 — 입구는 다시 보내지 않는다 (재시도 설정 없음). 1원인증에는 키가 없어 사용자가 다시 요청해야 한다.
+
+### 15-4. Pod · 노드가 죽었을 때
+- **Pod 삭제 · 크래시**: Deployment 가 replicas 를 맞추려 새 Pod 를 만든다 (자동 재생성 — Compose 의 `docker kill` 은 다시 안 띄웠다, §14-4). api 강제 삭제 3회: 첫 시도 5xx 0, 대체 Pod Ready 까지 **10.8 ~ 11.2초**, Kafka 파티션 넘김 1.5 ~ 3.6초 (kubelet 이 SIGTERM 을 먼저 보내 정상 탈퇴 — SIGKILL 이면 세션 시간 초과 45초가 겹친다, §14-4).
+- **노드가 사라지면** (`kubectl get nodes` 에 `NotReady`):
+  - 컨트롤 플레인이 알아채기까지 **약 50초** — 그동안 api Pod 는 Ready 로 남아 입구가 요청의 절반을 사라진 주소로 보내 연결 시간 초과(10초) 뒤 503 (D2: 첫 시도 5xx 512 · 같은 키 재시도 뒤에도 포기 144). 연결 단계 실패라 api 에 닿지 않았고 출금 행도 없다 — **돈은 정확**하다, 사용자는 실패를 받고 다시 시도하면 된다.
+  - 그 뒤 기본 **300초(`tolerationSeconds`)** 가 지나야 Pod 를 다른 노드에 다시 만든다 — 대체 api Ready 는 **+363초**, 그동안 api 는 1대. 퇴거 대기를 30초로 줄이면(`overlays/experiment-fast-evict`) **+88초** (5xx 439 · 포기 113 — 감지 전 구간은 그대로). 대가: 짧은 네트워크 끊김에도 Pod 를 옮긴다.
+  - 노드가 돌아오지 않으면 클러스터를 다시 만든다 (`down.sh` → `up.sh`).
+- **제어 노드가 죽으면** MySQL · Kafka · Redis · 모의 은행 · DNS · 입구가 다 같이 선다 (PV 가 제어 노드에 묶여 다른 노드로 못 간다 — 추정, 이번 단계는 제어 노드를 실험하지 않았다).
+- **drain** (`kubectl drain <워커> --ignore-daemonsets --delete-emptydir-data`, 끝나면 `uncordon`): PDB(api `minAvailable 1`) 덕에 api ready 는 항상 2 (D1 3회 5xx 0). **주의 — 게이트웨이는 `Recreate` 인데도 퇴거 때는 새 Pod 가 먼저 떠서 4 ~ 7초간 두 대가 모두 Ready · 은행 연결**이다 (이중 송신 0 이었지만 은행이 기관당 세션 하나만 허용하면 문제 — P8-3b). 게이트웨이가 있는 워커를 비우는 일은 점검 시간 밖에서.
+- **`SENDING` 으로 남은 건**은 정리 작업이 30초 뒤 결과조회로 확정한다 (재전송 없음 — ADR-0006).
+
+### 15-5. 은행 장애 때 보이는 것
+- 모의 은행(또는 은행 연결)이 끊기면 게이트웨이 **readiness 만 DOWN** (약 8 ~ 10초 안 — 5초 × 2회) → Service `bank-gateway` 의 대상이 0 이 되어 api 의 연결 시도는 **즉시 `Connection refused`**. 게이트웨이 `RESTARTS` 는 **0 그대로** (liveness 는 `bankConnection` 을 보지 않는다 — 은행 장애는 재시작 사유가 아니다).
+```bash
+kubectl -n bank-transfer get pods -l app=bank-gateway     # READY 0/1, RESTARTS 0
+kubectl -n bank-transfer logs -l app=api --prefix --tail=50 | grep -i "not sent"   # "bank transfer not sent" — P8-1 분류: 연결 단계 실패 = 안 보냄
+```
+- **출금은 접수 그대로, 처리가 재시도 경로로**: 접수는 DB 만 쓰므로 영향이 없고 처리 컨슈머가 "안 보냄" → 재시도 토픽 (5 · 30 · 60초, 약 95초) → DLT → 정리 작업의 제한 재발행(ADR-0007). 은행이 돌아오면 게이트웨이가 다시 붙고 `COMPLETED` 로 끝난다 (B1 60 · 180초 모두 접수 = 완료 · 이중 0). **1원인증은 동기 경로라 은행이 없으면 503**.
+- **복구가 늦을 수 있다**: 은행이 돌아온 뒤 게이트웨이가 다시 Ready 가 되기까지 6.7 ~ 34.0초 (B1) — 게이트웨이의 재접속 백오프(1초에서 2배씩, 상한 30초) + readiness 주기. 기다린다. 재시작해도 백오프가 초기화될 뿐이고 재시작은 처리 중 요청을 끊는다.
+- liveness 에 `bankConnection` 을 넣는 것은 안티패턴이다 (B2: 60초 장애에 재시작 1, 180초에 2 — 은행 점검이 길면 재시작 루프).
+
+### 15-6. NetworkPolicy 확인
+정책 7개 (`infra/k8s/base/networkpolicy.yaml`): namespace 전체 ingress 기본 거부 + api ← Envoy, 게이트웨이 ← api, 모의 은행 ← 게이트웨이, MySQL · Redis ← api, Kafka ← api · Kafka. egress 는 막지 않는다.
+```bash
+kubectl -n bank-transfer get networkpolicy
+bash -c '. infra/k8s/lib.sh; np_probe bank-gateway 8082; np_probe mysql 3306'      # 허용 목록 밖 임시 Pod 에서 연결 시도 — 0.000000 이면 막힘, 0 보다 크면 연결됨
+bash -c '. infra/k8s/lib.sh; np_probe kubernetes.default.svc.cluster.local 443'    # 양성 대조 — 0 보다 커야 probe 가 정상
+```
+- `np_probe` 는 같은 namespace 에 `curlimages/curl:8.23.0` 임시 Pod 를 띄워 `time_connect`(초)를 출력한다. **빈 값 · `0.000000` 을 곧바로 "막힘" 으로 읽지 않는다** — 양성 대조(API 서버 443 은 정책 밖이라 붙어야 한다)가 먼저다. `smoke.sh` [8] 이 이 순서로 자동 확인한다.
+- 정책 전 연결됨(0.0011 · 0.0010초) → 정책 후 막힘 (`0.000000`), Pod 7개 Ready 유지 — 프로브(kubelet → Pod)는 막히지 않는다. kind 기본 CNI(kindnet)가 집행한다.
+- 새 Pod 가 붙지 못하면: 허용 목록에 그 경로가 있는지 본다 (예: api 는 Envoy 프록시에서 오는 것만 받는다).
+
+### 15-7. 실험 도구 (`load/k8s/`)
+입구(Envoy)로 출금을 일정 속도로 넣으면서 동작 하나를 한다 (k6 는 도커 네트워크 `kind` 에서 제어 노드 NodePort 30080 으로).
+```bash
+bash infra/k8s/up.sh                       # 먼저
+bash load/k8s/run.sh steady 1              # 기준 (아무것도 안 함)
+bash load/k8s/run.sh rolling 1             # api 이미지 태그를 바꿔 롤링 (R1)  — preStop 은 지금 배포된 값
+bash load/k8s/run.sh podkill 1             # api Pod 하나 강제 삭제 (R2)
+bash load/k8s/run.sh tagtrap 1             # 같은 태그로 다시 apply → 롤링 안 일어남 (R3, 부하 없음)
+bash load/k8s/run.sh bank 1                # 모의 은행 replicas 0 → BANK_DOWN_S 뒤 1 (B1 · B2 — 게이트웨이 liveness 설정은 지금 배포된 값)
+bash load/k8s/run.sh drain 1               # 워커 drain → 부하 끝나면 uncordon (D1)
+bash load/k8s/run.sh node 1                # 워커 노드 컨테이너 docker stop → NODE_DOWN_S 뒤 start (D2 · D2')
+bash load/k8s/run.sh cleanup               # 끝나면 반드시 — load-p82-u001 ~ u020 의 행만 지운다
+```
+- 대조 실험은 overlay 로 바꾼 뒤 돌리고 끝나면 `local` 로 되돌린다: `bash -c '. infra/k8s/lib.sh; apply_overlay experiment-prestop0 "$(deployed_tag)"'` (R1 대조) · `experiment-liveness-bank` (B2) · `experiment-fast-evict` (D2'). 되돌리기는 `apply_overlay local "$(deployed_tag)"`.
+- 환경변수: `RATE`(초당 출금, 20) · `DURATION`(60s) · `ACTION_AT`(동작 시각 초, 20) · `SETTLE`(완료 대기 최대 초, 300) · `BANK_DOWN_S`(60) · `NODE_DOWN_S`(420) · `NODE`(drain · node 대상 워커) · `OVERLAY`(tagtrap, `local`).
+- 정확성 확인(접수된 키 = 출금 행, 전부 `COMPLETED`, 은행 거래 기록 = 출금 행(같은 거래번호 두 번 0), 잔고 = 원장 합)을 통과하지 못하면 요약이 `.json.invalid` 로 남는다. 시간 지표는 kubectl 표본(1 ~ 2초 간격)이라 ±1.5초.
+- 결과: `docs/perf/raw/p8-3a/<동작>-<회차>.json` (요약) · `.k6.json` · `.timeline.txt` · `.rebalance.txt`, 작업 파일은 `build/load-p83a/<동작>-<회차>/`. 실험 전에 api 두 Pod 가 서로 다른 워커에 Ready 여야 한다 (도구가 사전 확인하고 종료 중 Pod 는 세지 않는다).
+- 클러스터 DB 에 쓰는 행은 `load-p82-u001 ~ u020` · `load-p83a-smoke-<시각>` 뿐이다 (스모크는 끝에서 지운다).
