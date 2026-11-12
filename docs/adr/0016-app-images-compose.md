@@ -1,6 +1,6 @@
 # ADR-0016: 앱 이미지 · Compose 로 전체 실행 · api 2대 — Dockerfile 하나, nginx 앞단, 하루 배치만 ShedLock, `mode` 기본 `http`
 
-- 상태: 제안 (2026-11-11) — 머지 뒤 정리 PR 에서 `채택`
+- 상태: 채택 (2026-11-11, [#27](https://github.com/hyeokjinON/bank-transfer/pull/27))
 - 관련: [설계](../superpowers/specs/2026-11-11-p8-2-compose-design.md) · [계획](../superpowers/plans/2026-11-11-p8-2-compose.md) · [ADR-0015](0015-bank-gateway-service.md) (게이트웨이 분리 — 기본 `http` 는 여기서) · [ADR-0004](0004-idempotency-key-and-transactional-outbox.md) (멱등키) · [ADR-0005](0005-kafka-delivery-and-consumer-idempotency.md) (아웃박스 · 컨슈머 멱등) · [ADR-0010](0010-daily-reconciliation.md) (일마감 대사) · [ADR-0011](0011-data-retention.md) (보존 배치) · [측정 결과](../perf/p8-2-compose.md)
 
 ## 맥락
