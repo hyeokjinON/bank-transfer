@@ -32,6 +32,13 @@ management:
   endpoint:
     health:
       show-details: always             # bankConnection 상태를 본다 (내부망 전용)
+      probes:
+        enabled: true                  # /actuator/health/liveness · readiness (K8s 프로브, P8-3a). Boot 4 기본값이지만 명시
+      group:
+        readiness:
+          # 은행 회선이 끊긴 게이트웨이는 트래픽에서 뺀다 (재시작은 하지 않는다). liveness 는 기본(livenessState) 그대로 —
+          # 넣으면 은행 장애 동안 게이트웨이가 재시작 루프에 빠지고 복구도 늦다 (P8-3a 실험 B2)
+          include: readinessState,bankConnection
   info:
     env:
       enabled: true
