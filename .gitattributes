@@ -7,3 +7,7 @@
 Dockerfile text eol=lf
 .dockerignore text eol=lf
 *.conf text eol=lf
+# K8s 매니페스트 · source 하는 설정 · awk (P8-3a) — Windows(autocrlf) 체크아웃에서도 LF
+*.yaml text eol=lf
+*.env text eol=lf
+*.awk text eol=lf
