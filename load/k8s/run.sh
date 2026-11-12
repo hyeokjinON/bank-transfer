@@ -16,6 +16,29 @@ RUN=setup
 die() { echo "[$RUN] $*" >&2; exit 1; }
 USERS="user_id LIKE 'load-p82-%' AND user_id REGEXP '^load-p82-u0(0[1-9]|1[0-9]|20)\$'"
 
+# 종료 중(deletionTimestamp 있음)인 Pod 는 세지 않는다 — rollout restart 직후 옛 Pod 가 preStop · graceful 동안 남아 있다
+# live_pods <app>: 살아 있는 Pod 의 "이름 노드" 줄 (kubectl 실패는 그대로 실패)
+live_pods() {
+  local out; out=$(k get pods -l "app=$1" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.nodeName}{" "}{.metadata.deletionTimestamp}{"\n"}{end}') || return 1
+  printf '%s\n' "$out" | tr -d '\r' | awk 'NF == 2'
+}
+# 종료 중인 api · bank-gateway Pod 이름 (없으면 빈 출력)
+terminating_pods() {
+  local out; out=$(k get pods -l 'app in (api,bank-gateway)' -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.metadata.deletionTimestamp}{"\n"}{end}') || return 1
+  printf '%s\n' "$out" | tr -d '\r' | awk 'NF >= 2 {print $1}'
+}
+# 종료 중인 Pod 가 없어질 때까지 (최대 120초, 2초 간격). 0 = 없음, 1 = 남음, 2 = kubectl 실패
+wait_no_terminating() {
+  local i t
+  for i in $(seq 60); do
+    t=$(terminating_pods) || return 2
+    [ -z "$t" ] && return 0
+    sleep 2
+  done
+  echo "[$RUN] 종료 중인 Pod 가 120초 뒤에도 남아 있다: $(echo $t)" >&2
+  return 1
+}
+
 if [ "${1:-}" = cleanup ]; then
   sql < load/compose/cleanup.sql
   echo "cleanup 완료 (클러스터 DB 의 load-p82-u001 ~ u020)"
@@ -59,12 +82,16 @@ for dpl in mock-bank bank-gateway api; do
   [ "${r:-0}" = "$w" ] || die "$dpl 준비 ${r:-0}/$w"
 done
 [ -z "$(ka get nodes --no-headers | awk '$2 != "Ready"')" ] || die "Ready 가 아닌 노드가 있다"
+wait_no_terminating || die "종료 중인 api · bank-gateway Pod 가 사라지지 않는다 (또는 kubectl 실패) — 잠시 뒤 다시"
 k get pods -o wide > "$WORK/pods-before.txt"
-[ "$(k get pods -l app=api -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | sort -u | grep -c .)" = 2 ]   || die "api 두 대가 같은 워커에 있다 — kubectl -n bank-transfer rollout restart deploy/api 후 다시"
-GW_NODE=$(k get pods -l app=bank-gateway -o jsonpath='{.items[0].spec.nodeName}')
+LIVE_API=$(live_pods api) || die "api Pod 목록을 못 읽었다"
+LIVE_GW=$(live_pods bank-gateway) || die "bank-gateway Pod 목록을 못 읽었다"
+[ "$(printf '%s\n' "$LIVE_API" | awk 'NF {print $2}' | sort -u | grep -c . || true)" = 2 ]   || die "살아 있는 api Pod 두 대가 서로 다른 워커에 있지 않다 — kubectl -n bank-transfer rollout restart deploy/api 후 다시"
+GW_NODE=$(printf '%s\n' "$LIVE_GW" | awk 'NF {print $2; exit}')
+[ -n "$GW_NODE" ] || die "살아 있는 bank-gateway Pod 가 없다"
 case "$ACTION" in
   drain) NODE=${NODE:-$GW_NODE} ;;   # 기본: 게이트웨이가 있는 워커 — 1대짜리가 옮겨 가는 동안까지 본다
-  node)  NODE=${NODE:-$(k get pods -l app=api -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | { grep -vx "$GW_NODE" || true; } | head -1)} ;;   # 기본: 게이트웨이가 없는 api 워커 — api 복구만 본다
+  node)  NODE=${NODE:-$(printf '%s\n' "$LIVE_API" | awk 'NF {print $2}' | { grep -vx "$GW_NODE" || true; } | head -1)} ;;   # 기본: 게이트웨이가 없는 api 워커 — api 복구만 본다
   *)     NODE=- ;;
 esac
 [ -n "$NODE" ] || die "대상 워커를 못 정했다 (게이트웨이 없는 api 워커가 없다) — NODE=… 로 지정"
@@ -103,12 +130,29 @@ stop_bg() {
 }
 trap stop_bg EXIT
 # 다음 회차를 위해: api 두 대가 한 워커에 몰렸으면 다시 나눈다 (ScheduleAnyway · drain 뒤). 판정과 무관한 최선 노력
+spread_nodes() { live_pods api 2>/dev/null | awk 'NF {print $2}' | sort -u | grep -c . || true; }
 restore_spread() {
   k rollout status deploy/api --timeout=300s >/dev/null 2>&1 || true
-  local n; n=$(k get pods -l app=api -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' 2>/dev/null | sort -u | grep -c . || true)
+  wait_no_terminating || true
+  local n; n=$(spread_nodes)
   if [ "$n" != 2 ]; then
     echo "[$RUN] api 두 대가 한 워커에 — rollout restart 로 다시 나눈다" >&2
     k rollout restart deploy/api >/dev/null 2>&1 || true; k rollout status deploy/api --timeout=420s >/dev/null 2>&1 || true
+    wait_no_terminating || true
+    n=$(spread_nodes)
+    # 그래도 한 워커면: 그 워커의 살아 있는 api Pod 하나만 지워 다시 뜨게 한다 (최대 3번)
+    local try victim
+    for try in 1 2 3; do
+      [ "$n" = 2 ] && break
+      victim=$(live_pods api 2>/dev/null | awk 'NF {print $1; exit}')
+      [ -n "$victim" ] || break
+      echo "[$RUN] 아직 한 워커 — api Pod $victim 삭제 ($try/3)" >&2
+      k delete pod "$victim" >/dev/null 2>&1 || true
+      k rollout status deploy/api --timeout=300s >/dev/null 2>&1 || true
+      wait_no_terminating || true
+      n=$(spread_nodes)
+    done
+    echo "[$RUN] api 분산 복구 결과: 워커 ${n}곳" >&2
   fi
 }
 d rm -f "$K6_NAME" >/dev/null 2>&1 || true

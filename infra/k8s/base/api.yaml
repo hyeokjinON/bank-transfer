@@ -34,6 +34,8 @@ spec:
           whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels: {app: api}
+          # 롤링 중 옛 ReplicaSet Pod 까지 세면 새 Pod 가 한 워커로 몰린다 — 같은 리비전끼리만 센다
+          matchLabelKeys: [pod-template-hash]
       containers:
         - name: api
           image: bank-transfer/api:dev
