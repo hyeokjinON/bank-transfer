@@ -2,6 +2,7 @@
 // 사용자 load-p82-u001 ~ u020 (load/compose/seed.sql). 실패(5xx · 연결 실패)는 같은 멱등키로 1초 뒤 최대 3번 다시 보낸다 —
 // 클라이언트가 결과를 모를 때 할 일이고, 서버는 같은 키를 한 번만 접수한다 (ADR-0004). 그래서 "최종 접수된 키 수 = 출금 행 수" 여야 한다.
 // 환경변수는 load/compose/run.sh 가 넘긴다: BASE_URL(http://nginx:80) RUN RATE(초당, 20) DURATION(60s)
+// P8-3a 도 같은 파일을 쓴다 (load/k8s/run.sh — BASE_URL 은 kind 제어 노드의 NodePort).
 import http from 'k6/http';
 import { sleep } from 'k6';
 import { Counter } from 'k6/metrics';
@@ -11,6 +12,7 @@ const BASE_URL = __ENV.BASE_URL || 'http://nginx:80';
 const RUN = __ENV.RUN || 'local';
 const RATE = Number(__ENV.RATE || 20);
 const DURATION = __ENV.DURATION || '60s';
+const OUT_SUBDIR = __ENV.OUT_SUBDIR || 'p8-2';   // 결과 폴더 — P8-3a(load/k8s/run.sh)는 p8-3a
 const BODY = JSON.stringify({ bankCode: '090', accountNo: '1002123456789', amount: 1, memo: 'p82' });
 
 const first202 = new Counter('first_202');        // 첫 시도에 접수
@@ -58,5 +60,5 @@ export function handleSummary(data) {
     first_neterr: count('first_neterr'), retried_requests: count('retried_requests'), accepted_keys: count('accepted_keys'), gave_up_keys: count('gave_up_keys'),
     p95_ms: data.metrics.http_req_duration.values['p(95)'], max_ms: data.metrics.http_req_duration.values.max,
   };
-  return { stdout: `${JSON.stringify(out)}\n`, [`/out/p8-2/${RUN}.k6.json`]: JSON.stringify(out, null, 2) };
+  return { stdout: `${JSON.stringify(out)}\n`, [`/out/${OUT_SUBDIR}/${RUN}.k6.json`]: JSON.stringify(out, null, 2) };
 }

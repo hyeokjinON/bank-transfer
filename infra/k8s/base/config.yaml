@@ -1,0 +1,19 @@
+# api 의 설정 (스펙 §5). 이름은 Spring 느슨한 바인딩 표준형 — Compose x-api-env 와 같은 값. 비밀번호는 Secret db-credentials (up.sh)
+# 점검 시간 3개는 게이트웨이도 이 ConfigMap 에서 읽는다 (api 접수 503 과 게이트웨이 송신 보류가 같은 창 — 한 곳, ADR-0015 위험)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  BANK_MAINTENANCE_ENABLED: "true"
+  BANK_MAINTENANCE_START: "23:50"
+  BANK_MAINTENANCE_END: "00:10"
+  MYSQL_HOST: mysql
+  MYSQL_PORT: "3306"
+  KAFKA_BOOTSTRAP_SERVERS: kafka-0.kafka.bank-transfer.svc.cluster.local:9092
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  BANK_GATEWAY_MODE: http
+  BANK_GATEWAY_HTTP_BASEURL: http://bank-gateway:8082
+  # 대사 파일 공유는 범위 밖 (스펙 결정 8) — 빈 디렉터리라 일마감 대사는 FILE_NOT_READY 로 끝난다 (돈 영향 없음)
+  DAILYRECON_FILEDIR: /data/bank-files

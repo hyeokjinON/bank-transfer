@@ -2,6 +2,8 @@
 
 설계 이유는 [ADR-0003](../docs/adr/0003-local-infra-docker-compose.md).
 
+Kubernetes(kind)로 띄우는 법은 [infra/k8s/README.md](k8s/README.md) (P8-3a, [ADR-0017](../docs/adr/0017-kubernetes-kind.md)).
+
 | 서비스 | 이미지 | 내 PC 에서 접속 | 컨테이너끼리 |
 |---|---|---|---|
 | MySQL | `mysql:8.4` | `localhost:3306` (db `bank_transfer`, user `bank`) | `mysql:3306` |

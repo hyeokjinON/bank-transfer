@@ -1,0 +1,18 @@
+# D2' (스펙 §9): 노드가 응답하지 않으면 300초(기본) 대신 30초 뒤 api Pod 를 다른 노드로. 대가: 짧은 네트워크 끊김에도 옮긴다
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../local
+patches:
+  - target: {kind: Deployment, name: api}
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: api
+      spec:
+        template:
+          spec:
+            tolerations:
+              - {key: node.kubernetes.io/unreachable, operator: Exists, effect: NoExecute, tolerationSeconds: 30}
+              - {key: node.kubernetes.io/not-ready, operator: Exists, effect: NoExecute, tolerationSeconds: 30}

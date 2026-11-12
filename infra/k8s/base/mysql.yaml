@@ -1,0 +1,60 @@
+# MySQL 8.4 (Compose 와 같은 이미지 · 인자). 제어 노드, local-path PV (한 노드에 묶인다 — 스펙 §4-3)
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  labels: {app: mysql}
+spec:
+  clusterIP: None
+  selector: {app: mysql}
+  ports:
+    - {name: mysql, port: 3306}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector:
+    matchLabels: {app: mysql}
+  template:
+    metadata:
+      labels: {app: mysql}
+    spec:
+      enableServiceLinks: false   # Service 환경변수(MYSQL_PORT=tcp://… 등)를 넣지 않는다 (스펙 §5)
+      nodeSelector: {bank-transfer/role: infra}
+      tolerations:
+        - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+      containers:
+        - name: mysql
+          image: mysql:8.4
+          args:
+            - --character-set-server=utf8mb4
+            - --collation-server=utf8mb4_0900_ai_ci
+            - --default-time-zone=+09:00
+          env:
+            - {name: TZ, value: Asia/Seoul}
+          envFrom:
+            - secretRef: {name: db-credentials}   # MYSQL_DATABASE · MYSQL_USER · MYSQL_PASSWORD · MYSQL_ROOT_PASSWORD
+          ports:
+            - {name: mysql, containerPort: 3306}
+          readinessProbe:   # 초기화 중 임시 서버는 TCP 를 열지 않는다 → 127.0.0.1 ping 은 초기화가 끝나야 성공
+            exec:
+              command: ["sh", "-c", "MYSQL_PWD=\"$MYSQL_ROOT_PASSWORD\" mysqladmin ping -h 127.0.0.1 -uroot --silent"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests: {memory: 512Mi, cpu: 100m}
+            limits: {memory: 1Gi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/mysql}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: {storage: 2Gi}

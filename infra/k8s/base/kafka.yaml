@@ -1,0 +1,72 @@
+# Kafka 4.1 KRaft 1대 (Compose 와 같은 이미지 · 설정). 토픽은 앱이 만든다 (자동 생성 끔)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  labels: {app: kafka}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true   # 컨트롤러 투표자 주소(자기 이름 kafka-0.kafka…)를 준비 전에도 풀어야 기동한다
+  selector: {app: kafka}
+  ports:
+    - {name: broker, port: 9092}
+    - {name: controller, port: 9093}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+spec:
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels: {app: kafka}
+  template:
+    metadata:
+      labels: {app: kafka}
+    spec:
+      enableServiceLinks: false   # 특히 Kafka: 이미지가 KAFKA_* 환경변수를 브로커 설정으로 바꾼다 — Service 가 넣는 KAFKA_PORT 등이 섞이면 기동이 깨진다
+      nodeSelector: {bank-transfer/role: infra}
+      tolerations:
+        - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+      containers:
+        - name: kafka
+          image: apache/kafka:4.1.0
+          env:
+            - {name: KAFKA_NODE_ID, value: "1"}
+            - {name: KAFKA_PROCESS_ROLES, value: "broker,controller"}
+            - {name: CLUSTER_ID, value: MkU3OEVBNTcwNTJENDM2Qk}
+            - {name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: "1@kafka-0.kafka.bank-transfer.svc.cluster.local:9093"}
+            - {name: KAFKA_CONTROLLER_LISTENER_NAMES, value: CONTROLLER}
+            - {name: KAFKA_LISTENERS, value: "PLAINTEXT://:9092,CONTROLLER://:9093"}
+            - {name: KAFKA_ADVERTISED_LISTENERS, value: "PLAINTEXT://kafka-0.kafka.bank-transfer.svc.cluster.local:9092"}
+            - {name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"}
+            - {name: KAFKA_INTER_BROKER_LISTENER_NAME, value: PLAINTEXT}
+            - {name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR, value: "1"}
+            - {name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS, value: "0"}
+            - {name: KAFKA_AUTO_CREATE_TOPICS_ENABLE, value: "false"}
+            - {name: KAFKA_LOG_DIRS, value: /var/lib/kafka/data}
+            - {name: KAFKA_HEAP_OPTS, value: "-Xms256m -Xmx512m"}   # 이미지가 설정으로 바꾸지 않는 예외 이름 — JVM 힙
+          ports:
+            - {name: broker, containerPort: 9092}
+            - {name: controller, containerPort: 9093}
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests: {memory: 768Mi, cpu: 100m}
+            limits: {memory: 1Gi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/kafka/data}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: {storage: 2Gi}

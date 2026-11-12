@@ -1,0 +1,1957 @@
+P 1794468749978 api api-69f4547686-ktz66 bank-transfer-worker2 True 1
+P 1794468749978 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468749978 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468749978 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468749978 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468749978 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468749978 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468749978 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468749978 bank-transfer-control-plane True
+N 1794468749978 bank-transfer-worker True
+N 1794468749978 bank-transfer-worker2 True
+P 1794468751323 api api-69f4547686-ktz66 bank-transfer-worker2 True 1
+P 1794468751323 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468751323 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468751323 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468751323 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468751323 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468751323 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468751323 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468751323 bank-transfer-control-plane True
+N 1794468751323 bank-transfer-worker True
+N 1794468751323 bank-transfer-worker2 True
+P 1794468752796 api api-69f4547686-ktz66 bank-transfer-worker2 True 1
+P 1794468752796 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468752796 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468752796 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468752796 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468752796 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468752796 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468752796 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468752796 bank-transfer-control-plane True
+N 1794468752796 bank-transfer-worker True
+N 1794468752796 bank-transfer-worker2 True
+P 1794468754146 api api-69f4547686-ktz66 bank-transfer-worker2 True 1
+P 1794468754146 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468754146 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468754146 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468754146 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468754146 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468754146 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468754146 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468754146 bank-transfer-control-plane True
+N 1794468754146 bank-transfer-worker True
+N 1794468754146 bank-transfer-worker2 True
+P 1794468755578 api api-69f4547686-ktz66 bank-transfer-worker2 True 1
+P 1794468755578 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468755578 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468755578 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468755578 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468755578 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468755578 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468755578 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468755578 bank-transfer-control-plane True
+N 1794468755578 bank-transfer-worker True
+N 1794468755578 bank-transfer-worker2 True
+P 1794468756926 api api-69f4547686-ktz66 bank-transfer-worker2 True 1
+P 1794468756926 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468756926 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468756926 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468756926 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468756926 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468756926 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468756926 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468756926 bank-transfer-control-plane True
+N 1794468756926 bank-transfer-worker True
+N 1794468756926 bank-transfer-worker2 True
+P 1794468758275 api api-69f4547686-ktz66 bank-transfer-worker2 False 1
+P 1794468758275 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468758275 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468758275 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468758275 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468758275 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468758275 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468758275 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468758275 bank-transfer-control-plane True
+N 1794468758275 bank-transfer-worker True
+N 1794468758275 bank-transfer-worker2 True
+P 1794468759653 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468759653 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468759653 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468759653 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468759653 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468759653 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468759653 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468759653 bank-transfer-control-plane True
+N 1794468759653 bank-transfer-worker True
+N 1794468759653 bank-transfer-worker2 True
+P 1794468761003 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468761003 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468761003 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468761003 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468761003 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468761003 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468761003 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468761003 bank-transfer-control-plane True
+N 1794468761003 bank-transfer-worker True
+N 1794468761003 bank-transfer-worker2 True
+P 1794468762367 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468762367 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468762367 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468762367 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468762367 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468762367 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468762367 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468762367 bank-transfer-control-plane True
+N 1794468762367 bank-transfer-worker True
+N 1794468762367 bank-transfer-worker2 True
+P 1794468763727 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468763727 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468763727 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468763727 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468763727 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468763727 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468763727 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468763727 bank-transfer-control-plane True
+N 1794468763727 bank-transfer-worker True
+N 1794468763727 bank-transfer-worker2 True
+P 1794468765068 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468765068 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468765068 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468765068 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468765068 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468765068 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468765068 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468765068 bank-transfer-control-plane True
+N 1794468765068 bank-transfer-worker True
+N 1794468765068 bank-transfer-worker2 True
+P 1794468766428 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468766428 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468766428 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468766428 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468766428 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468766428 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468766428 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468766428 bank-transfer-control-plane True
+N 1794468766428 bank-transfer-worker True
+N 1794468766428 bank-transfer-worker2 True
+P 1794468767780 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468767780 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468767780 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468767780 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468767780 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468767780 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468767780 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468767780 bank-transfer-control-plane True
+N 1794468767780 bank-transfer-worker True
+N 1794468767780 bank-transfer-worker2 True
+P 1794468769139 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468769139 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468769139 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468769139 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468769139 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468769139 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468769139 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468769139 bank-transfer-control-plane True
+N 1794468769139 bank-transfer-worker True
+N 1794468769139 bank-transfer-worker2 True
+P 1794468770510 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468770510 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468770510 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468770510 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468770510 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468770510 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468770510 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468770510 bank-transfer-control-plane True
+N 1794468770510 bank-transfer-worker True
+N 1794468770510 bank-transfer-worker2 True
+P 1794468771890 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468771890 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468771890 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468771890 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468771890 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468771890 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468771890 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468771890 bank-transfer-control-plane True
+N 1794468771890 bank-transfer-worker True
+N 1794468771890 bank-transfer-worker2 True
+P 1794468773249 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468773249 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468773249 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468773249 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468773249 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468773249 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468773249 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468773249 bank-transfer-control-plane True
+N 1794468773249 bank-transfer-worker True
+N 1794468773249 bank-transfer-worker2 True
+P 1794468774619 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468774619 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468774619 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468774619 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468774619 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468774619 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468774619 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468774619 bank-transfer-control-plane True
+N 1794468774619 bank-transfer-worker True
+N 1794468774619 bank-transfer-worker2 True
+P 1794468775994 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468775994 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468775994 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468775994 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468775994 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468775994 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468775994 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468775994 bank-transfer-control-plane True
+N 1794468775994 bank-transfer-worker True
+N 1794468775994 bank-transfer-worker2 True
+P 1794468777351 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468777351 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468777351 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468777351 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468777351 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468777351 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468777351 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468777351 bank-transfer-control-plane True
+N 1794468777351 bank-transfer-worker True
+N 1794468777351 bank-transfer-worker2 True
+P 1794468778708 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468778708 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468778708 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468778708 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468778708 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468778708 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468778708 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468778708 bank-transfer-control-plane True
+N 1794468778708 bank-transfer-worker True
+N 1794468778708 bank-transfer-worker2 True
+P 1794468780092 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468780092 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468780092 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468780092 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468780092 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468780092 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468780092 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468780092 bank-transfer-control-plane True
+N 1794468780092 bank-transfer-worker True
+N 1794468780092 bank-transfer-worker2 True
+P 1794468781489 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468781489 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468781489 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468781489 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468781489 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468781489 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468781489 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468781489 bank-transfer-control-plane True
+N 1794468781489 bank-transfer-worker True
+N 1794468781489 bank-transfer-worker2 True
+P 1794468782818 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468782818 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468782818 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468782818 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468782818 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468782818 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468782818 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468782818 bank-transfer-control-plane True
+N 1794468782818 bank-transfer-worker True
+N 1794468782818 bank-transfer-worker2 True
+P 1794468784170 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468784170 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468784170 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468784170 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468784170 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468784170 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468784170 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468784170 bank-transfer-control-plane True
+N 1794468784170 bank-transfer-worker True
+N 1794468784170 bank-transfer-worker2 True
+P 1794468785545 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468785545 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468785545 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468785545 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468785545 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468785545 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468785545 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468785545 bank-transfer-control-plane True
+N 1794468785545 bank-transfer-worker True
+N 1794468785545 bank-transfer-worker2 True
+P 1794468786894 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468786894 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468786894 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468786894 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468786894 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468786894 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468786894 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468786894 bank-transfer-control-plane True
+N 1794468786894 bank-transfer-worker True
+N 1794468786894 bank-transfer-worker2 True
+P 1794468788279 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468788279 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468788279 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468788279 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468788279 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468788279 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468788279 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468788279 bank-transfer-control-plane True
+N 1794468788279 bank-transfer-worker True
+N 1794468788279 bank-transfer-worker2 True
+P 1794468789656 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468789656 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468789656 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468789656 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468789656 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468789656 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468789656 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468789656 bank-transfer-control-plane True
+N 1794468789656 bank-transfer-worker True
+N 1794468789656 bank-transfer-worker2 True
+P 1794468791015 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468791015 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468791015 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468791015 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468791015 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468791015 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468791015 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468791015 bank-transfer-control-plane True
+N 1794468791015 bank-transfer-worker True
+N 1794468791015 bank-transfer-worker2 True
+P 1794468792375 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468792375 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468792375 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468792375 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468792375 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468792375 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468792375 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468792375 bank-transfer-control-plane True
+N 1794468792375 bank-transfer-worker True
+N 1794468792375 bank-transfer-worker2 True
+P 1794468793723 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468793723 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468793723 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468793723 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468793723 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468793723 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468793723 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468793723 bank-transfer-control-plane True
+N 1794468793723 bank-transfer-worker True
+N 1794468793723 bank-transfer-worker2 True
+P 1794468795089 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468795089 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468795089 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468795089 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468795089 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468795089 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468795089 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468795089 bank-transfer-control-plane True
+N 1794468795089 bank-transfer-worker True
+N 1794468795089 bank-transfer-worker2 True
+P 1794468796474 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468796474 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468796474 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468796474 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468796474 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468796474 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468796474 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468796474 bank-transfer-control-plane True
+N 1794468796474 bank-transfer-worker True
+N 1794468796474 bank-transfer-worker2 True
+P 1794468797819 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468797819 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468797819 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468797819 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468797819 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468797819 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468797819 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468797819 bank-transfer-control-plane True
+N 1794468797819 bank-transfer-worker True
+N 1794468797819 bank-transfer-worker2 True
+P 1794468799202 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468799202 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468799202 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468799202 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468799202 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468799202 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468799202 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468799202 bank-transfer-control-plane True
+N 1794468799202 bank-transfer-worker True
+N 1794468799202 bank-transfer-worker2 True
+P 1794468800583 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468800583 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468800583 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468800583 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468800583 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468800583 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468800583 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468800583 bank-transfer-control-plane True
+N 1794468800583 bank-transfer-worker True
+N 1794468800583 bank-transfer-worker2 True
+P 1794468801940 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468801940 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468801940 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468801940 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468801940 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468801940 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468801940 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468801940 bank-transfer-control-plane True
+N 1794468801940 bank-transfer-worker True
+N 1794468801940 bank-transfer-worker2 True
+P 1794468803307 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468803307 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468803307 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468803307 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468803307 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468803307 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468803307 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468803307 bank-transfer-control-plane True
+N 1794468803307 bank-transfer-worker True
+N 1794468803307 bank-transfer-worker2 True
+P 1794468804681 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468804681 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468804681 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468804681 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468804681 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468804681 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468804681 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468804681 bank-transfer-control-plane True
+N 1794468804681 bank-transfer-worker True
+N 1794468804681 bank-transfer-worker2 True
+P 1794468806069 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468806069 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468806069 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468806069 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468806069 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468806069 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468806069 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468806069 bank-transfer-control-plane True
+N 1794468806069 bank-transfer-worker True
+N 1794468806069 bank-transfer-worker2 True
+P 1794468807442 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468807442 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468807442 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468807442 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468807442 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468807442 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468807442 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468807442 bank-transfer-control-plane True
+N 1794468807442 bank-transfer-worker True
+N 1794468807442 bank-transfer-worker2 True
+P 1794468808777 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468808777 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468808777 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468808777 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468808777 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468808777 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468808777 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468808777 bank-transfer-control-plane True
+N 1794468808777 bank-transfer-worker True
+N 1794468808777 bank-transfer-worker2 True
+P 1794468810189 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468810189 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468810189 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468810189 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468810189 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468810189 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468810189 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468810189 bank-transfer-control-plane True
+N 1794468810189 bank-transfer-worker True
+N 1794468810189 bank-transfer-worker2 True
+P 1794468811560 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468811560 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468811560 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468811560 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468811560 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468811560 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468811560 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468811560 bank-transfer-control-plane True
+N 1794468811560 bank-transfer-worker True
+N 1794468811560 bank-transfer-worker2 Unknown
+P 1794468812890 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468812890 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468812890 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468812890 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468812890 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468812890 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468812890 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468812890 bank-transfer-control-plane True
+N 1794468812890 bank-transfer-worker True
+N 1794468812890 bank-transfer-worker2 Unknown
+P 1794468814241 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468814241 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468814241 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468814241 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468814241 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468814241 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468814241 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468814241 bank-transfer-control-plane True
+N 1794468814241 bank-transfer-worker True
+N 1794468814241 bank-transfer-worker2 Unknown
+P 1794468815611 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468815611 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468815611 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468815611 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468815611 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468815611 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468815611 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468815611 bank-transfer-control-plane True
+N 1794468815611 bank-transfer-worker True
+N 1794468815611 bank-transfer-worker2 Unknown
+P 1794468816970 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468816970 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468816970 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468816970 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468816970 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468816970 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468816970 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468816970 bank-transfer-control-plane True
+N 1794468816970 bank-transfer-worker True
+N 1794468816970 bank-transfer-worker2 Unknown
+P 1794468818351 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468818351 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468818351 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468818351 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468818351 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468818351 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468818351 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468818351 bank-transfer-control-plane True
+N 1794468818351 bank-transfer-worker True
+N 1794468818351 bank-transfer-worker2 Unknown
+P 1794468819709 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468819709 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468819709 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468819709 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468819709 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468819709 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468819709 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468819709 bank-transfer-control-plane True
+N 1794468819709 bank-transfer-worker True
+N 1794468819709 bank-transfer-worker2 Unknown
+P 1794468821093 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468821093 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468821093 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468821093 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468821093 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468821093 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468821093 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468821093 bank-transfer-control-plane True
+N 1794468821093 bank-transfer-worker True
+N 1794468821093 bank-transfer-worker2 Unknown
+P 1794468822454 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468822454 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468822454 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468822454 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468822454 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468822454 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468822454 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468822454 bank-transfer-control-plane True
+N 1794468822454 bank-transfer-worker True
+N 1794468822454 bank-transfer-worker2 Unknown
+P 1794468823802 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468823802 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468823802 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468823802 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468823802 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468823802 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468823802 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468823802 bank-transfer-control-plane True
+N 1794468823802 bank-transfer-worker True
+N 1794468823802 bank-transfer-worker2 Unknown
+P 1794468825132 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468825132 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468825132 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468825132 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468825132 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468825132 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468825132 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468825132 bank-transfer-control-plane True
+N 1794468825132 bank-transfer-worker True
+N 1794468825132 bank-transfer-worker2 Unknown
+P 1794468826504 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468826504 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468826504 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468826504 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468826504 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468826504 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468826504 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468826504 bank-transfer-control-plane True
+N 1794468826504 bank-transfer-worker True
+N 1794468826504 bank-transfer-worker2 Unknown
+P 1794468827851 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468827851 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468827851 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468827851 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468827851 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468827851 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468827851 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468827851 bank-transfer-control-plane True
+N 1794468827851 bank-transfer-worker True
+N 1794468827851 bank-transfer-worker2 Unknown
+P 1794468829222 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468829222 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468829222 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468829222 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468829222 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468829222 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468829222 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468829222 bank-transfer-control-plane True
+N 1794468829222 bank-transfer-worker True
+N 1794468829222 bank-transfer-worker2 Unknown
+P 1794468830576 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468830576 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468830576 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468830576 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468830576 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468830576 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468830576 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468830576 bank-transfer-control-plane True
+N 1794468830576 bank-transfer-worker True
+N 1794468830576 bank-transfer-worker2 Unknown
+P 1794468831911 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468831911 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468831911 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468831911 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468831911 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468831911 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468831911 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468831911 bank-transfer-control-plane True
+N 1794468831911 bank-transfer-worker True
+N 1794468831911 bank-transfer-worker2 Unknown
+P 1794468833277 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468833277 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468833277 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468833277 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468833277 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468833277 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468833277 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468833277 bank-transfer-control-plane True
+N 1794468833277 bank-transfer-worker True
+N 1794468833277 bank-transfer-worker2 Unknown
+P 1794468834790 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468834790 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468834790 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468834790 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468834790 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468834790 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468834790 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468834790 bank-transfer-control-plane True
+N 1794468834790 bank-transfer-worker True
+N 1794468834790 bank-transfer-worker2 Unknown
+P 1794468836220 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468836220 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468836220 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468836220 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468836220 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468836220 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468836220 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468836220 bank-transfer-control-plane True
+N 1794468836220 bank-transfer-worker True
+N 1794468836220 bank-transfer-worker2 Unknown
+P 1794468837629 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468837629 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468837629 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468837629 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468837629 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468837629 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468837629 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468837629 bank-transfer-control-plane True
+N 1794468837629 bank-transfer-worker True
+N 1794468837629 bank-transfer-worker2 Unknown
+P 1794468838990 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468838990 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468838990 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468838990 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468838990 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468838990 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468838990 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468838990 bank-transfer-control-plane True
+N 1794468838990 bank-transfer-worker True
+N 1794468838990 bank-transfer-worker2 Unknown
+P 1794468840350 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468840350 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468840350 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468840350 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468840350 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468840350 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468840350 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468840350 bank-transfer-control-plane True
+N 1794468840350 bank-transfer-worker True
+N 1794468840350 bank-transfer-worker2 Unknown
+P 1794468841726 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468841726 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468841726 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468841726 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468841726 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468841726 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468841726 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468841726 bank-transfer-control-plane True
+N 1794468841726 bank-transfer-worker True
+N 1794468841726 bank-transfer-worker2 Unknown
+P 1794468843073 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468843073 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468843073 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468843073 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468843073 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468843073 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468843073 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468843073 bank-transfer-control-plane True
+N 1794468843073 bank-transfer-worker True
+N 1794468843073 bank-transfer-worker2 Unknown
+P 1794468844426 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468844426 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468844426 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468844426 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468844426 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468844426 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468844426 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468844426 bank-transfer-control-plane True
+N 1794468844426 bank-transfer-worker True
+N 1794468844426 bank-transfer-worker2 Unknown
+P 1794468845795 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468845795 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468845795 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468845795 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468845795 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468845795 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468845795 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468845795 bank-transfer-control-plane True
+N 1794468845795 bank-transfer-worker True
+N 1794468845795 bank-transfer-worker2 Unknown
+P 1794468847124 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468847124 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468847124 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468847124 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468847124 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468847124 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468847124 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468847124 bank-transfer-control-plane True
+N 1794468847124 bank-transfer-worker True
+N 1794468847124 bank-transfer-worker2 Unknown
+P 1794468848467 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468848467 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468848467 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468848467 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468848467 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468848467 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468848467 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468848467 bank-transfer-control-plane True
+N 1794468848467 bank-transfer-worker True
+N 1794468848467 bank-transfer-worker2 Unknown
+P 1794468849792 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468849792 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468849792 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468849792 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468849792 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468849792 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468849792 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468849792 bank-transfer-control-plane True
+N 1794468849792 bank-transfer-worker True
+N 1794468849792 bank-transfer-worker2 Unknown
+P 1794468851141 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468851141 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468851141 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468851141 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468851141 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468851141 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468851141 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468851141 bank-transfer-control-plane True
+N 1794468851141 bank-transfer-worker True
+N 1794468851141 bank-transfer-worker2 Unknown
+P 1794468852475 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468852475 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468852475 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468852475 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468852475 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468852475 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468852475 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468852475 bank-transfer-control-plane True
+N 1794468852475 bank-transfer-worker True
+N 1794468852475 bank-transfer-worker2 Unknown
+P 1794468853810 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468853810 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468853810 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468853810 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468853810 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468853810 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468853810 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468853810 bank-transfer-control-plane True
+N 1794468853810 bank-transfer-worker True
+N 1794468853810 bank-transfer-worker2 Unknown
+P 1794468855138 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468855138 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468855138 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468855138 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468855138 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468855138 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468855138 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468855138 bank-transfer-control-plane True
+N 1794468855138 bank-transfer-worker True
+N 1794468855138 bank-transfer-worker2 Unknown
+P 1794468856470 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468856470 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468856470 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468856470 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468856470 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468856470 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468856470 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468856470 bank-transfer-control-plane True
+N 1794468856470 bank-transfer-worker True
+N 1794468856470 bank-transfer-worker2 Unknown
+P 1794468857794 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468857794 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468857794 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468857794 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468857794 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468857794 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468857794 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468857794 bank-transfer-control-plane True
+N 1794468857794 bank-transfer-worker True
+N 1794468857794 bank-transfer-worker2 Unknown
+P 1794468859141 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468859141 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468859141 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468859141 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468859141 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468859141 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468859141 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468859141 bank-transfer-control-plane True
+N 1794468859141 bank-transfer-worker True
+N 1794468859141 bank-transfer-worker2 Unknown
+P 1794468860490 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468860490 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468860490 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468860490 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468860490 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468860490 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468860490 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468860490 bank-transfer-control-plane True
+N 1794468860490 bank-transfer-worker True
+N 1794468860490 bank-transfer-worker2 Unknown
+P 1794468861839 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468861839 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468861839 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468861839 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468861839 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468861839 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468861839 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468861839 bank-transfer-control-plane True
+N 1794468861839 bank-transfer-worker True
+N 1794468861839 bank-transfer-worker2 Unknown
+P 1794468863199 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468863199 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468863199 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468863199 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468863199 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468863199 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468863199 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468863199 bank-transfer-control-plane True
+N 1794468863199 bank-transfer-worker True
+N 1794468863199 bank-transfer-worker2 Unknown
+P 1794468864576 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468864576 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468864576 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468864576 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468864576 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468864576 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468864576 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468864576 bank-transfer-control-plane True
+N 1794468864576 bank-transfer-worker True
+N 1794468864576 bank-transfer-worker2 Unknown
+P 1794468865944 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468865944 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468865944 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468865944 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468865944 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468865944 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468865944 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468865944 bank-transfer-control-plane True
+N 1794468865944 bank-transfer-worker True
+N 1794468865944 bank-transfer-worker2 Unknown
+P 1794468867282 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468867282 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468867282 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468867282 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468867282 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468867282 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468867282 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468867282 bank-transfer-control-plane True
+N 1794468867282 bank-transfer-worker True
+N 1794468867282 bank-transfer-worker2 Unknown
+P 1794468868626 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468868626 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468868626 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468868626 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468868626 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468868626 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468868626 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468868626 bank-transfer-control-plane True
+N 1794468868626 bank-transfer-worker True
+N 1794468868626 bank-transfer-worker2 Unknown
+P 1794468869979 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468869979 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468869979 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468869979 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468869979 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468869979 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468869979 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468869979 bank-transfer-control-plane True
+N 1794468869979 bank-transfer-worker True
+N 1794468869979 bank-transfer-worker2 Unknown
+P 1794468871324 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468871324 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468871324 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468871324 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468871324 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468871324 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468871324 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468871324 bank-transfer-control-plane True
+N 1794468871324 bank-transfer-worker True
+N 1794468871324 bank-transfer-worker2 Unknown
+P 1794468872686 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468872686 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468872686 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468872686 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468872686 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468872686 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468872686 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468872686 bank-transfer-control-plane True
+N 1794468872686 bank-transfer-worker True
+N 1794468872686 bank-transfer-worker2 Unknown
+P 1794468874042 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468874042 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468874042 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468874042 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468874042 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468874042 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468874042 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468874042 bank-transfer-control-plane True
+N 1794468874042 bank-transfer-worker True
+N 1794468874042 bank-transfer-worker2 Unknown
+P 1794468875424 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468875424 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468875424 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468875424 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468875424 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468875424 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468875424 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468875424 bank-transfer-control-plane True
+N 1794468875424 bank-transfer-worker True
+N 1794468875424 bank-transfer-worker2 Unknown
+P 1794468876771 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468876771 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468876771 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468876771 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468876771 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468876771 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468876771 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468876771 bank-transfer-control-plane True
+N 1794468876771 bank-transfer-worker True
+N 1794468876771 bank-transfer-worker2 Unknown
+P 1794468878122 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468878122 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468878122 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468878122 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468878122 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468878122 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468878122 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468878122 bank-transfer-control-plane True
+N 1794468878122 bank-transfer-worker True
+N 1794468878122 bank-transfer-worker2 Unknown
+P 1794468879475 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468879475 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468879475 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468879475 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468879475 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468879475 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468879475 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468879475 bank-transfer-control-plane True
+N 1794468879475 bank-transfer-worker True
+N 1794468879475 bank-transfer-worker2 Unknown
+P 1794468880844 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468880844 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468880844 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468880844 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468880844 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468880844 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468880844 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468880844 bank-transfer-control-plane True
+N 1794468880844 bank-transfer-worker True
+N 1794468880844 bank-transfer-worker2 Unknown
+P 1794468882179 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468882179 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468882179 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468882179 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468882179 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468882179 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468882179 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468882179 bank-transfer-control-plane True
+N 1794468882179 bank-transfer-worker True
+N 1794468882179 bank-transfer-worker2 Unknown
+P 1794468883519 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468883519 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468883519 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468883519 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468883519 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468883519 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468883519 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468883519 bank-transfer-control-plane True
+N 1794468883519 bank-transfer-worker True
+N 1794468883519 bank-transfer-worker2 Unknown
+P 1794468884881 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468884881 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468884881 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468884881 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468884881 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468884881 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468884881 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468884881 bank-transfer-control-plane True
+N 1794468884881 bank-transfer-worker True
+N 1794468884881 bank-transfer-worker2 Unknown
+P 1794468886247 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468886247 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468886247 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468886247 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468886247 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468886247 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468886247 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468886247 bank-transfer-control-plane True
+N 1794468886247 bank-transfer-worker True
+N 1794468886247 bank-transfer-worker2 Unknown
+P 1794468887578 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468887578 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468887578 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468887578 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468887578 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468887578 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468887578 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468887578 bank-transfer-control-plane True
+N 1794468887578 bank-transfer-worker True
+N 1794468887578 bank-transfer-worker2 Unknown
+P 1794468888910 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468888910 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468888910 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468888910 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468888910 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468888910 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468888910 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468888910 bank-transfer-control-plane True
+N 1794468888910 bank-transfer-worker True
+N 1794468888910 bank-transfer-worker2 Unknown
+P 1794468890244 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468890244 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468890244 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468890244 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468890244 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468890244 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468890244 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468890244 bank-transfer-control-plane True
+N 1794468890244 bank-transfer-worker True
+N 1794468890244 bank-transfer-worker2 Unknown
+P 1794468891580 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468891580 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468891580 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468891580 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468891580 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468891580 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468891580 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468891580 bank-transfer-control-plane True
+N 1794468891580 bank-transfer-worker True
+N 1794468891580 bank-transfer-worker2 Unknown
+P 1794468892925 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468892925 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468892925 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468892925 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468892925 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468892925 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468892925 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468892925 bank-transfer-control-plane True
+N 1794468892925 bank-transfer-worker True
+N 1794468892925 bank-transfer-worker2 Unknown
+P 1794468894277 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468894277 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468894277 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468894277 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468894277 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468894277 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468894277 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468894277 bank-transfer-control-plane True
+N 1794468894277 bank-transfer-worker True
+N 1794468894277 bank-transfer-worker2 Unknown
+P 1794468895647 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468895647 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468895647 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468895647 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468895647 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468895647 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468895647 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468895647 bank-transfer-control-plane True
+N 1794468895647 bank-transfer-worker True
+N 1794468895647 bank-transfer-worker2 Unknown
+P 1794468897021 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468897021 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468897021 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468897021 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468897021 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468897021 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468897021 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468897021 bank-transfer-control-plane True
+N 1794468897021 bank-transfer-worker True
+N 1794468897021 bank-transfer-worker2 Unknown
+P 1794468898360 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468898360 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468898360 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468898360 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468898360 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468898360 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468898360 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468898360 bank-transfer-control-plane True
+N 1794468898360 bank-transfer-worker True
+N 1794468898360 bank-transfer-worker2 Unknown
+P 1794468899682 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468899682 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468899682 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468899682 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468899682 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468899682 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468899682 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468899682 bank-transfer-control-plane True
+N 1794468899682 bank-transfer-worker True
+N 1794468899682 bank-transfer-worker2 Unknown
+P 1794468901025 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468901025 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468901025 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468901025 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468901025 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468901025 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468901025 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468901025 bank-transfer-control-plane True
+N 1794468901025 bank-transfer-worker True
+N 1794468901025 bank-transfer-worker2 Unknown
+P 1794468902372 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468902372 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468902372 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468902372 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468902372 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468902372 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468902372 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468902372 bank-transfer-control-plane True
+N 1794468902372 bank-transfer-worker True
+N 1794468902372 bank-transfer-worker2 Unknown
+P 1794468903693 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468903693 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468903693 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468903693 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468903693 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468903693 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468903693 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468903693 bank-transfer-control-plane True
+N 1794468903693 bank-transfer-worker True
+N 1794468903693 bank-transfer-worker2 Unknown
+P 1794468905025 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468905025 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468905025 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468905025 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468905025 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468905025 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468905025 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468905025 bank-transfer-control-plane True
+N 1794468905025 bank-transfer-worker True
+N 1794468905025 bank-transfer-worker2 Unknown
+P 1794468906362 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468906362 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468906362 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468906362 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468906362 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468906362 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468906362 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468906362 bank-transfer-control-plane True
+N 1794468906362 bank-transfer-worker True
+N 1794468906362 bank-transfer-worker2 Unknown
+P 1794468907733 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468907733 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468907733 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468907733 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468907733 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468907733 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468907733 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468907733 bank-transfer-control-plane True
+N 1794468907733 bank-transfer-worker True
+N 1794468907733 bank-transfer-worker2 Unknown
+P 1794468909067 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468909067 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468909067 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468909067 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468909067 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468909067 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468909067 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468909067 bank-transfer-control-plane True
+N 1794468909067 bank-transfer-worker True
+N 1794468909067 bank-transfer-worker2 Unknown
+P 1794468910385 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468910385 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468910385 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468910385 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468910385 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468910385 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468910385 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468910385 bank-transfer-control-plane True
+N 1794468910385 bank-transfer-worker True
+N 1794468910385 bank-transfer-worker2 Unknown
+P 1794468911691 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468911691 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468911691 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468911691 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468911691 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468911691 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468911691 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468911691 bank-transfer-control-plane True
+N 1794468911691 bank-transfer-worker True
+N 1794468911691 bank-transfer-worker2 Unknown
+P 1794468913011 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468913011 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468913011 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468913011 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468913011 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468913011 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468913011 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468913011 bank-transfer-control-plane True
+N 1794468913011 bank-transfer-worker True
+N 1794468913011 bank-transfer-worker2 Unknown
+P 1794468914342 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468914342 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468914342 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468914342 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468914342 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468914342 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468914342 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468914342 bank-transfer-control-plane True
+N 1794468914342 bank-transfer-worker True
+N 1794468914342 bank-transfer-worker2 Unknown
+P 1794468915715 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468915715 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468915715 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468915715 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468915715 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468915715 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468915715 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468915715 bank-transfer-control-plane True
+N 1794468915715 bank-transfer-worker True
+N 1794468915715 bank-transfer-worker2 Unknown
+P 1794468917074 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468917074 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468917074 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468917074 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468917074 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468917074 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468917074 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468917074 bank-transfer-control-plane True
+N 1794468917074 bank-transfer-worker True
+N 1794468917074 bank-transfer-worker2 Unknown
+P 1794468918403 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468918403 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468918403 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468918403 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468918403 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468918403 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468918403 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468918403 bank-transfer-control-plane True
+N 1794468918403 bank-transfer-worker True
+N 1794468918403 bank-transfer-worker2 Unknown
+P 1794468919720 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468919720 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468919720 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468919720 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468919720 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468919720 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468919720 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468919720 bank-transfer-control-plane True
+N 1794468919720 bank-transfer-worker True
+N 1794468919720 bank-transfer-worker2 Unknown
+P 1794468921041 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468921041 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468921041 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468921041 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468921041 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468921041 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468921041 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468921041 bank-transfer-control-plane True
+N 1794468921041 bank-transfer-worker True
+N 1794468921041 bank-transfer-worker2 Unknown
+P 1794468922370 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468922370 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468922370 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468922370 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468922370 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468922370 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468922370 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468922370 bank-transfer-control-plane True
+N 1794468922370 bank-transfer-worker True
+N 1794468922370 bank-transfer-worker2 Unknown
+P 1794468923694 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468923694 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468923694 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468923694 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468923694 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468923694 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468923694 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468923694 bank-transfer-control-plane True
+N 1794468923694 bank-transfer-worker True
+N 1794468923694 bank-transfer-worker2 Unknown
+P 1794468925018 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468925018 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468925018 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468925018 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468925018 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468925018 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468925018 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468925018 bank-transfer-control-plane True
+N 1794468925018 bank-transfer-worker True
+N 1794468925018 bank-transfer-worker2 Unknown
+P 1794468926344 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468926344 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468926344 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468926344 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468926344 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468926344 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468926344 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468926344 bank-transfer-control-plane True
+N 1794468926344 bank-transfer-worker True
+N 1794468926344 bank-transfer-worker2 Unknown
+P 1794468927661 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468927661 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468927661 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468927661 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468927661 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468927661 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468927661 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468927661 bank-transfer-control-plane True
+N 1794468927661 bank-transfer-worker True
+N 1794468927661 bank-transfer-worker2 Unknown
+P 1794468928986 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468928986 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468928986 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468928986 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468928986 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468928986 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468928986 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468928986 bank-transfer-control-plane True
+N 1794468928986 bank-transfer-worker True
+N 1794468928986 bank-transfer-worker2 Unknown
+P 1794468930320 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468930320 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468930320 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468930320 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468930320 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468930320 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468930320 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468930320 bank-transfer-control-plane True
+N 1794468930320 bank-transfer-worker True
+N 1794468930320 bank-transfer-worker2 Unknown
+P 1794468931650 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468931650 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468931650 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468931650 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468931650 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468931650 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468931650 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468931650 bank-transfer-control-plane True
+N 1794468931650 bank-transfer-worker True
+N 1794468931650 bank-transfer-worker2 Unknown
+P 1794468932988 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468932988 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468932988 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468932988 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468932988 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468932988 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468932988 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468932988 bank-transfer-control-plane True
+N 1794468932988 bank-transfer-worker True
+N 1794468932988 bank-transfer-worker2 Unknown
+P 1794468934331 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468934331 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468934331 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468934331 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468934331 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468934331 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468934331 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468934331 bank-transfer-control-plane True
+N 1794468934331 bank-transfer-worker True
+N 1794468934331 bank-transfer-worker2 Unknown
+P 1794468935684 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468935684 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468935684 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468935684 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468935684 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468935684 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468935684 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468935684 bank-transfer-control-plane True
+N 1794468935684 bank-transfer-worker True
+N 1794468935684 bank-transfer-worker2 Unknown
+P 1794468937015 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468937015 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468937015 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468937015 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468937015 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468937015 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468937015 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468937015 bank-transfer-control-plane True
+N 1794468937015 bank-transfer-worker True
+N 1794468937015 bank-transfer-worker2 Unknown
+P 1794468938362 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468938362 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468938362 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468938362 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468938362 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468938362 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468938362 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468938362 bank-transfer-control-plane True
+N 1794468938362 bank-transfer-worker True
+N 1794468938362 bank-transfer-worker2 Unknown
+P 1794468939698 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468939698 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468939698 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468939698 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468939698 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468939698 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468939698 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468939698 bank-transfer-control-plane True
+N 1794468939698 bank-transfer-worker True
+N 1794468939698 bank-transfer-worker2 Unknown
+P 1794468941017 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468941017 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468941017 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468941017 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468941017 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468941017 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468941017 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468941017 bank-transfer-control-plane True
+N 1794468941017 bank-transfer-worker True
+N 1794468941017 bank-transfer-worker2 Unknown
+P 1794468942350 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468942350 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468942350 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468942350 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468942350 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468942350 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468942350 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468942350 bank-transfer-control-plane True
+N 1794468942350 bank-transfer-worker True
+N 1794468942350 bank-transfer-worker2 Unknown
+P 1794468943682 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468943682 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468943682 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468943682 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468943682 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468943682 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468943682 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468943682 bank-transfer-control-plane True
+N 1794468943682 bank-transfer-worker True
+N 1794468943682 bank-transfer-worker2 Unknown
+P 1794468945018 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468945018 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468945018 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468945018 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468945018 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468945018 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468945018 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468945018 bank-transfer-control-plane True
+N 1794468945018 bank-transfer-worker True
+N 1794468945018 bank-transfer-worker2 Unknown
+P 1794468946354 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468946354 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468946354 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468946354 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468946354 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468946354 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468946354 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468946354 bank-transfer-control-plane True
+N 1794468946354 bank-transfer-worker True
+N 1794468946354 bank-transfer-worker2 Unknown
+P 1794468947689 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468947689 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468947689 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468947689 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468947689 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468947689 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468947689 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468947689 bank-transfer-control-plane True
+N 1794468947689 bank-transfer-worker True
+N 1794468947689 bank-transfer-worker2 Unknown
+P 1794468949039 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468949039 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468949039 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468949039 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468949039 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468949039 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468949039 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468949039 bank-transfer-control-plane True
+N 1794468949039 bank-transfer-worker True
+N 1794468949039 bank-transfer-worker2 Unknown
+P 1794468950375 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468950375 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468950375 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468950375 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468950375 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468950375 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468950375 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468950375 bank-transfer-control-plane True
+N 1794468950375 bank-transfer-worker True
+N 1794468950375 bank-transfer-worker2 Unknown
+P 1794468951706 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468951706 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468951706 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468951706 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468951706 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468951706 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468951706 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468951706 bank-transfer-control-plane True
+N 1794468951706 bank-transfer-worker True
+N 1794468951706 bank-transfer-worker2 Unknown
+P 1794468953028 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468953028 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468953028 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468953028 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468953028 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468953028 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468953028 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468953028 bank-transfer-control-plane True
+N 1794468953028 bank-transfer-worker True
+N 1794468953028 bank-transfer-worker2 Unknown
+P 1794468954364 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468954364 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468954364 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468954364 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468954364 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468954364 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468954364 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468954364 bank-transfer-control-plane True
+N 1794468954364 bank-transfer-worker True
+N 1794468954364 bank-transfer-worker2 Unknown
+P 1794468955743 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468955743 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468955743 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468955743 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468955743 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468955743 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468955743 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468955743 bank-transfer-control-plane True
+N 1794468955743 bank-transfer-worker True
+N 1794468955743 bank-transfer-worker2 Unknown
+P 1794468957066 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468957066 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468957066 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468957066 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468957066 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468957066 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468957066 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468957066 bank-transfer-control-plane True
+N 1794468957066 bank-transfer-worker True
+N 1794468957066 bank-transfer-worker2 Unknown
+P 1794468958401 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468958401 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468958401 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468958401 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468958401 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468958401 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468958401 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468958401 bank-transfer-control-plane True
+N 1794468958401 bank-transfer-worker True
+N 1794468958401 bank-transfer-worker2 Unknown
+P 1794468959724 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468959724 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468959724 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468959724 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468959724 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468959724 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468959724 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468959724 bank-transfer-control-plane True
+N 1794468959724 bank-transfer-worker True
+N 1794468959724 bank-transfer-worker2 Unknown
+P 1794468961056 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468961056 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468961056 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468961056 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468961056 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468961056 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468961056 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468961056 bank-transfer-control-plane True
+N 1794468961056 bank-transfer-worker True
+N 1794468961056 bank-transfer-worker2 Unknown
+P 1794468962376 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468962376 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468962376 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468962376 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468962376 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468962376 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468962376 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468962376 bank-transfer-control-plane True
+N 1794468962376 bank-transfer-worker True
+N 1794468962376 bank-transfer-worker2 Unknown
+P 1794468963709 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468963709 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468963709 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468963709 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468963709 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468963709 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468963709 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468963709 bank-transfer-control-plane True
+N 1794468963709 bank-transfer-worker True
+N 1794468963709 bank-transfer-worker2 Unknown
+P 1794468965057 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468965057 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468965057 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468965057 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468965057 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468965057 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468965057 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468965057 bank-transfer-control-plane True
+N 1794468965057 bank-transfer-worker True
+N 1794468965057 bank-transfer-worker2 Unknown
+P 1794468966396 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468966396 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468966396 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468966396 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468966396 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468966396 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468966396 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468966396 bank-transfer-control-plane True
+N 1794468966396 bank-transfer-worker True
+N 1794468966396 bank-transfer-worker2 Unknown
+P 1794468967729 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468967729 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468967729 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468967729 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468967729 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468967729 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468967729 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468967729 bank-transfer-control-plane True
+N 1794468967729 bank-transfer-worker True
+N 1794468967729 bank-transfer-worker2 Unknown
+P 1794468969061 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468969061 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468969061 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468969061 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468969061 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468969061 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468969061 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468969061 bank-transfer-control-plane True
+N 1794468969061 bank-transfer-worker True
+N 1794468969061 bank-transfer-worker2 Unknown
+P 1794468970394 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468970394 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468970394 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468970394 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468970394 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468970394 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468970394 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468970394 bank-transfer-control-plane True
+N 1794468970394 bank-transfer-worker True
+N 1794468970394 bank-transfer-worker2 Unknown
+P 1794468971721 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468971721 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468971721 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468971721 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468971721 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468971721 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468971721 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468971721 bank-transfer-control-plane True
+N 1794468971721 bank-transfer-worker True
+N 1794468971721 bank-transfer-worker2 Unknown
+P 1794468973040 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468973040 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468973040 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468973040 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468973040 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468973040 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468973040 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468973040 bank-transfer-control-plane True
+N 1794468973040 bank-transfer-worker True
+N 1794468973040 bank-transfer-worker2 Unknown
+P 1794468974373 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468974373 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468974373 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468974373 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468974373 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468974373 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468974373 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468974373 bank-transfer-control-plane True
+N 1794468974373 bank-transfer-worker True
+N 1794468974373 bank-transfer-worker2 Unknown
+P 1794468975737 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468975737 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468975737 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468975737 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468975737 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468975737 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468975737 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468975737 bank-transfer-control-plane True
+N 1794468975737 bank-transfer-worker True
+N 1794468975737 bank-transfer-worker2 Unknown
+P 1794468977070 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468977070 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468977070 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468977070 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468977070 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468977070 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468977070 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468977070 bank-transfer-control-plane True
+N 1794468977070 bank-transfer-worker True
+N 1794468977070 bank-transfer-worker2 Unknown
+P 1794468978406 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468978406 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468978406 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468978406 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468978406 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468978406 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468978406 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468978406 bank-transfer-control-plane True
+N 1794468978406 bank-transfer-worker True
+N 1794468978406 bank-transfer-worker2 Unknown
+P 1794468979730 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468979730 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468979730 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468979730 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468979730 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468979730 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468979730 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468979730 bank-transfer-control-plane True
+N 1794468979730 bank-transfer-worker True
+N 1794468979730 bank-transfer-worker2 Unknown
+P 1794468981075 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468981075 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468981075 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468981075 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468981075 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468981075 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468981075 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468981075 bank-transfer-control-plane True
+N 1794468981075 bank-transfer-worker True
+N 1794468981075 bank-transfer-worker2 Unknown
+P 1794468982436 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468982436 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468982436 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468982436 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468982436 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468982436 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468982436 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468982436 bank-transfer-control-plane True
+N 1794468982436 bank-transfer-worker True
+N 1794468982436 bank-transfer-worker2 Unknown
+P 1794468983766 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468983766 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468983766 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468983766 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468983766 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468983766 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468983766 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468983766 bank-transfer-control-plane True
+N 1794468983766 bank-transfer-worker True
+N 1794468983766 bank-transfer-worker2 Unknown
+P 1794468985090 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468985090 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468985090 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468985090 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468985090 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468985090 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468985090 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468985090 bank-transfer-control-plane True
+N 1794468985090 bank-transfer-worker True
+N 1794468985090 bank-transfer-worker2 Unknown
+P 1794468986428 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468986428 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468986428 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468986428 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468986428 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468986428 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468986428 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468986428 bank-transfer-control-plane True
+N 1794468986428 bank-transfer-worker True
+N 1794468986428 bank-transfer-worker2 Unknown
+P 1794468987742 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468987742 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468987742 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468987742 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468987742 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468987742 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468987742 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468987742 bank-transfer-control-plane True
+N 1794468987742 bank-transfer-worker True
+N 1794468987742 bank-transfer-worker2 Unknown
+P 1794468989061 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468989061 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468989061 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468989061 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468989061 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468989061 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468989061 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468989061 bank-transfer-control-plane True
+N 1794468989061 bank-transfer-worker True
+N 1794468989061 bank-transfer-worker2 Unknown
+P 1794468990409 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468990409 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468990409 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468990409 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468990409 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468990409 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468990409 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468990409 bank-transfer-control-plane True
+N 1794468990409 bank-transfer-worker True
+N 1794468990409 bank-transfer-worker2 Unknown
+P 1794468991724 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468991724 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468991724 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468991724 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468991724 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468991724 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468991724 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468991724 bank-transfer-control-plane True
+N 1794468991724 bank-transfer-worker True
+N 1794468991724 bank-transfer-worker2 Unknown
+P 1794468993054 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468993054 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468993054 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468993054 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468993054 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468993054 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468993054 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468993054 bank-transfer-control-plane True
+N 1794468993054 bank-transfer-worker True
+N 1794468993054 bank-transfer-worker2 Unknown
+P 1794468994373 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468994373 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468994373 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468994373 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468994373 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468994373 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468994373 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468994373 bank-transfer-control-plane True
+N 1794468994373 bank-transfer-worker True
+N 1794468994373 bank-transfer-worker2 Unknown
+P 1794468995728 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468995728 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468995728 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468995728 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468995728 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468995728 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468995728 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468995728 bank-transfer-control-plane True
+N 1794468995728 bank-transfer-worker True
+N 1794468995728 bank-transfer-worker2 Unknown
+P 1794468997062 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468997062 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468997062 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468997062 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468997062 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468997062 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468997062 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468997062 bank-transfer-control-plane True
+N 1794468997062 bank-transfer-worker True
+N 1794468997062 bank-transfer-worker2 Unknown
+P 1794468998377 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468998377 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468998377 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468998377 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468998377 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468998377 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468998377 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468998377 bank-transfer-control-plane True
+N 1794468998377 bank-transfer-worker True
+N 1794468998377 bank-transfer-worker2 Unknown
+P 1794468999683 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794468999683 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794468999683 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794468999683 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794468999683 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794468999683 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794468999683 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794468999683 bank-transfer-control-plane True
+N 1794468999683 bank-transfer-worker True
+N 1794468999683 bank-transfer-worker2 Unknown
+P 1794469000995 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794469000995 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794469000995 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794469000995 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794469000995 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794469000995 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794469000995 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794469000995 bank-transfer-control-plane True
+N 1794469000995 bank-transfer-worker True
+N 1794469000995 bank-transfer-worker2 Unknown
+P 1794469002304 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794469002304 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794469002304 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794469002304 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794469002304 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794469002304 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794469002304 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794469002304 bank-transfer-control-plane True
+N 1794469002304 bank-transfer-worker True
+N 1794469002304 bank-transfer-worker2 Unknown
+P 1794469003652 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794469003652 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794469003652 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794469003652 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794469003652 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794469003652 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794469003652 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794469003652 bank-transfer-control-plane True
+N 1794469003652 bank-transfer-worker True
+N 1794469003652 bank-transfer-worker2 Unknown
+P 1794469004967 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794469004967 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794469004967 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794469004967 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794469004967 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794469004967 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794469004967 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794469004967 bank-transfer-control-plane True
+N 1794469004967 bank-transfer-worker True
+N 1794469004967 bank-transfer-worker2 Unknown
+P 1794469006281 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794469006281 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794469006281 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794469006281 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794469006281 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794469006281 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794469006281 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794469006281 bank-transfer-control-plane True
+N 1794469006281 bank-transfer-worker True
+N 1794469006281 bank-transfer-worker2 Unknown
+P 1794469007595 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794469007595 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794469007595 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794469007595 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794469007595 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794469007595 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794469007595 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794469007595 bank-transfer-control-plane True
+N 1794469007595 bank-transfer-worker True
+N 1794469007595 bank-transfer-worker2 Unknown
+P 1794469008901 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794469008901 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794469008901 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794469008901 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794469008901 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794469008901 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794469008901 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794469008901 bank-transfer-control-plane True
+N 1794469008901 bank-transfer-worker True
+N 1794469008901 bank-transfer-worker2 Unknown
+P 1794469010218 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794469010218 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794469010218 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794469010218 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794469010218 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794469010218 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794469010218 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794469010218 bank-transfer-control-plane True
+N 1794469010218 bank-transfer-worker True
+N 1794469010218 bank-transfer-worker2 Unknown
+P 1794469011533 api api-76bf586cfb-9c5pg bank-transfer-worker True 0
+P 1794469011533 api api-76bf586cfb-sd8pl bank-transfer-worker True 0
+P 1794469011533 bank-gateway bank-gateway-784d97df49-fgbn7 bank-transfer-worker True 0
+P 1794469011533 kafka kafka-0 bank-transfer-control-plane True 0
+P 1794469011533 mock-bank mock-bank-748f7c8b76-7pp2z bank-transfer-control-plane True 0
+P 1794469011533 mysql mysql-0 bank-transfer-control-plane True 0
+P 1794469011533 redis redis-64dd8bc478-cwzb6 bank-transfer-control-plane True 0
+N 1794469011533 bank-transfer-control-plane True
+N 1794469011533 bank-transfer-worker True
+N 1794469011533 bank-transfer-worker2 Unknown
