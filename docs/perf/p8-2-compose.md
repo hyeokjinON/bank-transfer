@@ -21,7 +21,7 @@ P8-1 이 은행 연결을 게이트웨이 1대로 모았으니, P8-2 는 api 를
 |---|---|
 | `docker compose --profile app up -d --build` 한 번으로 인프라 + 모의 은행 + 게이트웨이 1대 + api 2대 + nginx, PC 에 JDK 불필요 | E1 · E2 (기동 → healthy 30.3s, 분배 50 : 50) |
 | 2대가 되면 드러나는 인스턴스 안 상태를 하나씩 처리하고 근거를 남김 | E5 (ShedLock), E2 (파티션 3 ↔ 컨슈머 6) |
-| CI 가 같은 구성을 띄워 nginx 로 1원인증 · 출금 `COMPLETED` 확인 | 이 문서 범위 밖 — PR 뒤 CI 로 채움 |
+| CI 가 같은 구성을 띄워 nginx 로 1원인증 · 출금 `COMPLETED` 확인 | CI `app-smoke` 통과 (#27 두 번째 실행, 잡 1m48s) — §5 처음 빌드 |
 | 롤링 재시작 · 강제 종료에서 이중 0, 접수된 출금 전부 완료 | E3 · E4 |
 | (아님) 처리량 증가 | 재지 않았다 |
 
@@ -113,7 +113,7 @@ sequenceDiagram
 - **판단**: api 768m 은 부하 뒤 최대 504MiB 로 여유 약 35% — 적당하다. gateway 512m · mock-bank 256m 은 넉넉하다 (줄일 수 있으나 이번에는 바꾸지 않았다).
 - **크기**: 추정(~300MB)보다 api · gateway 가 크다. JRE Alpine 베이스 위에 의존성이 얹히기 때문이다. 층 분리 덕에 **코드만 바뀌면 새 층은 1.67MB** 이고 116MB 는 그대로라는 점이 핵심이다.
 - **찾은 것**: `.dockerignore` 에 `infra/` · `.github/` 가 없어 스모크 · CI 파일만 바꿔도 `COPY . .` 층이 무효화돼 Gradle 단계가 다시 돌았다 (27.3s). `infra/` · `.github/` · `**/*.md` · `gradlew.bat` 를 추가해 3.7s 로 줄였다 (커밋 3800e4b).
-- 완전한 처음 빌드(캐시 없는 CI 러너)는 PR 뒤 CI 로 채움.
+- **처음 빌드 (CI, 캐시 없음 — #27 첫 실행)**: 이미지 단계 api 3m20s · bank-gateway 12s · mock-bank 6s (api 가 Gradle 빌드 단계를 돌리고 나머지는 그 층을 다시 씀), Compose 기동 → 모두 healthy 55s. **캐시 있음 (두 번째 실행, `infra/` 만 바뀜)**: api 18s · bank-gateway 10s · mock-bank 6s, 기동 50s. GitHub Actions 캐시(`type=gha,mode=max`)를 내보내는 뒤처리는 이미지마다 약 2s 라 세 이미지 모두 `mode=max` 를 유지한다.
 
 ## 6. E2 — 분배
 - nginx 로 `/actuator/info` 100번: `"instance":"api-1"` **50** · `"instance":"api-2"` **50**. upstream `zone api 64k;` 가 워커 사이에 라운드 로빈 카운터를 공유한다. (zone 이 없을 때는 워커 18개가 각자 세어 처음 14건이 api-1 로 쏠렸다 — Task 5 에서 발견.)
@@ -200,7 +200,7 @@ consumer-transfer-processor-13-…    /172.18.0.8   1
 | 설계 항목 | 예상 | 실제 | 판정 |
 |---|---|---|---|
 | §1 한 번에 기동 | `up -d --build` 한 번 · JDK 불필요 | api 한 대 기동 → healthy 30.3s. Compose 로 인프라 + 앱 모두 뜸 | 맞음 |
-| §1 CI app-smoke | nginx 로 1원인증 · 출금 `COMPLETED` | 로컬 스모크는 통과, CI 에서 도는 시간은 | PR 뒤 CI 로 채움 |
+| §1 CI app-smoke | nginx 로 1원인증 · 출금 `COMPLETED` | 첫 실행은 [5/7] 포트 판정이 CI 의 `invalid IP:0` 출력에 헛실패 (앱 문제 아님, adfb6ba 로 고침) → 두 번째 실행 7단계 통과, 잡 1m48s (처음 빌드 5m6s) | 맞음 |
 | §1 이중 0 · 접수 전부 완료 | 재시작 · 강제 종료에서 | 6회차 모두 은행 누락 · 중복 0, 접수 키 = 출금 행, `COMPLETED` 아님 0 | 맞음 |
 | §1 처리량 증가는 목표 아님 | 재지 않음 | 재지 않았다 | 맞음 |
 | E1 이미지 크기 | 계획 추정 ~300MB | api 512MB · gateway 381MB · mock-bank 297MB | **다름** (mock-bank 만 맞음) — JRE Alpine 베이스 위에 의존성이 얹혀 api · gateway 가 더 큼 |
@@ -228,7 +228,7 @@ consumer-transfer-processor-13-…    /172.18.0.8   1
 - **45s 의 손잡이는 `session.timeout.ms` · heartbeat 튜닝이다.** 줄이면 강제 종료 때 지연이 짧아지지만 일시 정지(GC · 느린 처리)에도 불필요한 리밸런스가 늘어난다. **이번 단계에서는 바꾸지 않았다** (기본값 그대로 측정).
 - 표본이 작다: 재시작 2회, 강제 종료 3회, E5 6회. 502 가 3회 중 1회 나온 것은 타이밍이라 반복 빈도를 말할 수 없다.
 - 배치 실행 시간은 개발 DB 규모다 (§8-2). 운영 규모에서는 다시 잰다.
-- 이미지 처음 빌드(CI 캐시 없음) 시간은 PR 뒤 CI 로 채움.
+- 처음 빌드 시간은 GitHub 호스트 러너 1회 값이다 (러너 성능에 따라 흔들린다).
 
 ## 12. 측정 중 생긴 일 · 원자료
 ### 12-1. 측정 중 생긴 일

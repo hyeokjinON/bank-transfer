@@ -9,7 +9,7 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
-## [P8-2] 앱 이미지 · Docker Compose 전체 실행 · api 2대 — 2026-11-11 (PR 번호는 머지 뒤 정리 PR 에서)
+## [P8-2] 앱 이미지 · Docker Compose 전체 실행 · api 2대 — 2026-11-11 ([#27](https://github.com/hyeokjinON/bank-transfer/pull/27), 머지 후 정리 #28)
 ### Added
 - 루트 `Dockerfile` (타깃 `api` · `bank-gateway` · `mock-bank`, 멀티 스테이지 · Boot jar 레이어 추출 · JRE Alpine · root 아닌 사용자) · `.dockerignore` (`infra/.env` 제외), `.gitattributes` 에 `Dockerfile` · `.dockerignore` · `*.conf` LF.
 - Compose `app` 프로필: nginx(PC `127.0.0.1:8000` 하나, 읽기 15s, 라운드 로빈, 연결 단계 실패만 재시도, `zone api`) · api-1 · api-2 · bank-gateway · mock-bank, 공통 블록(`x-java-app` · `x-bank-maintenance` · `x-api-env` · `x-api`), 대사 파일 공유 볼륨 `bank-files`.
@@ -17,7 +17,7 @@
 - `/actuator/info` 의 `instance` (`INFO_INSTANCE`), liveness · readiness 헬스 그룹 명시.
 - `infra/app-smoke.sh` + CI 잡 `app-smoke` (15분 제한, 이미지 빌드 → 기동 → nginx 로 1원인증 · 출금 · 멱등 · 분배 · 포트 · 이미지 비밀값 · 대사 파일 바인딩).
 - 실험 도구 `load/compose/` (`run.sh <steady|restart|kill> <회차>` · `cleanup`)와 실험 E1 ~ E5 ([결과](docs/perf/p8-2-compose.md), 원자료 `docs/perf/raw/p8-2/`).
-- ADR-0016 (제안), OPERATION §14 "컨테이너 실행", SETUP §2-8, `infra/README.md` `app` 프로필 절.
+- ADR-0016 (채택), OPERATION §14 "컨테이너 실행", SETUP §2-8, `infra/README.md` `app` 프로필 절.
 ### Changed
 - `bank.gateway.mode` 기본을 **`http`** 로 (api · api-reactive). 테스트 공통 기반 · 측정 스크립트(`load/lib/gateway.sh`) · 실행 구성 `5. API (부하 측정)` 은 `direct` 를 명시한다.
 - api 에 `server.shutdown=graceful` · `spring.lifecycle.timeout-per-shutdown-phase: 20s` (Compose `stop_grace_period` 30s).
@@ -25,6 +25,8 @@
 - 실행 구성: `0. Mock Bank + API` 에 게이트웨이(`11.`) 추가, `12. API (http 게이트웨이)` → `12. API (direct 직결)`. 실행 구성 `4` · `6` · `7` · `10` 은 이제 `http` 로 뜨므로 게이트웨이가 함께 필요하다.
 - `docs/database.md`: §7 명명 규칙에 `shedlock` 예외 한 줄 · §4-10 · 시간대 예외 (UTC 값).
 - 테스트: 전체 622개 (P8-1 608 + P8-2 14, 건너뜀 2).
+### Fixed (머지 전 CI)
+- `app-smoke` [5/7] 포트 확인이 CI 에서만 실패: CI 의 docker compose 는 공개 안 된 포트를 `invalid IP:0` 으로 찍는다 (로컬은 빈 줄 · `:0`). "안 열림" 출력을 나열하지 않고 `주소:1 이상 포트` 로 끝날 때만 열림으로 본다 (adfb6ba).
 
 ## [P8-1] 은행 게이트웨이 서비스 분리 — 2026-11-10 ([#25](https://github.com/hyeokjinON/bank-transfer/pull/25), 머지 후 정리 [#26](https://github.com/hyeokjinON/bank-transfer/pull/26))
 ### Added
