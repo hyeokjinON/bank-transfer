@@ -12,3 +12,4 @@ resources:
   - api.yaml
   - gateway.yaml
   - networkpolicy.yaml
+  - pdb.yaml
