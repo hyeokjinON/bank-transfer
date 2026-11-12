@@ -1,0 +1,42 @@
+# Redis 7.4 — 영속 없음 (락 전략 측정용, 스펙 §5)
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels: {app: redis}
+spec:
+  selector: {app: redis}
+  ports:
+    - {name: redis, port: 6379}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: redis}
+  template:
+    metadata:
+      labels: {app: redis}
+    spec:
+      enableServiceLinks: false
+      nodeSelector: {bank-transfer/role: infra}
+      tolerations:
+        - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args: ["redis-server", "--appendonly", "no", "--save", ""]
+          ports:
+            - {name: redis, containerPort: 6379}
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          resources:
+            requests: {memory: 64Mi, cpu: 50m}
+            limits: {memory: 128Mi}

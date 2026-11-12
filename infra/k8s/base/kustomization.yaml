@@ -1,0 +1,9 @@
+# P8-3a 공통 매니페스트. namespace 는 여기서 한 번에 (Namespace · GatewayClass 같은 클러스터 범위는 infra/k8s/cluster/)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: bank-transfer
+resources:
+  - config.yaml
+  - mysql.yaml
+  - kafka.yaml
+  - redis.yaml
