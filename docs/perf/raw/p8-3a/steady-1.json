@@ -1,0 +1,11 @@
+{"run":"steady-1","action":"steady","rate":20,"duration":"60s","action_at_s":20,"t0":"2026-11-12T05:53:12Z","t_action":null,"t_action_end":null,
+ "prestop_s":10,"gateway_liveness_bank":null,"api_unreachable_toleration_s":300,"node":null,"victim":null,"new_tag":null,
+ "verify_during_outage":null,"settle_s":1,
+ "first_202":1201,"first_5xx":0,"first_502":0,"first_neterr":0,
+ "retried_requests":0,"accepted_keys":1201,"gave_up_keys":0,"p95_ms":26.872529,
+ "transfers":1201,"not_completed":0,"refunds":0,
+ "negative_balance":0,"balance_ne_ledger":0,
+ "transfer_ne_withdraw":0,"unpublished_outbox":0,
+ "journal_missing":0,"journal_dup":0,"rebalance_lines":0,
+ "api_ready_min":2,"api_recovered_s":0.0,"gw_not_ready_s":0.0,"gw_restarts":0,
+ "node_notready_s":null,"pod_notready_s":null,"replacement_ready_s":null}

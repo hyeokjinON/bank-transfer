@@ -1,0 +1,15 @@
+{
+  "run": "rolling-4",
+  "rate": 20,
+  "duration": "150s",
+  "iterations": 3001,
+  "first_202": 2992,
+  "first_5xx": 9,
+  "first_502": 0,
+  "first_neterr": 0,
+  "retried_requests": 9,
+  "accepted_keys": 3001,
+  "gave_up_keys": 0,
+  "p95_ms": 21.127701799999997,
+  "max_ms": 202.575496
+}

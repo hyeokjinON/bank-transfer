@@ -1,0 +1,20 @@
+# B2 (안티패턴 대조, 스펙 §7): 게이트웨이 liveness 에도 bankConnection → 은행 장애 = 재시작. 끝나면 apply_overlay local <태그>
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../local
+patches:
+  - target: {kind: Deployment, name: bank-gateway}
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: bank-gateway
+      spec:
+        template:
+          spec:
+            containers:
+              - name: bank-gateway
+                env:
+                  - name: MANAGEMENT_ENDPOINT_HEALTH_GROUP_LIVENESS_INCLUDE
+                    value: livenessState,bankConnection

@@ -1,0 +1,7 @@
+# Envoy Gateway 가 맡는 GatewayClass (스펙 결정 3). Gateway 는 base/gateway.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: bank-transfer
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller

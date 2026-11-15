@@ -1,0 +1,5 @@
+# 평소 (PC). 태그는 up.sh · lib.sh apply_overlay 가 build/k8s/local 에서 덮는다
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base

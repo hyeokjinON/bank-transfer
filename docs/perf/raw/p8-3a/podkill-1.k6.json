@@ -1,0 +1,15 @@
+{
+  "run": "podkill-1",
+  "rate": 20,
+  "duration": "60s",
+  "iterations": 1201,
+  "first_202": 1201,
+  "first_5xx": 0,
+  "first_502": 0,
+  "first_neterr": 0,
+  "retried_requests": 0,
+  "accepted_keys": 1201,
+  "gave_up_keys": 0,
+  "p95_ms": 23.498068,
+  "max_ms": 228.980645
+}

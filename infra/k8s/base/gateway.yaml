@@ -1,0 +1,57 @@
+# 입구: Gateway API + Envoy Gateway (스펙 결정 3). Envoy Service 를 NodePort 30080 으로 고정 → kind extraPortMappings → PC 127.0.0.1:8000.
+# Envoy 프록시도 제어 노드에 (워커 장애 실험에서 입구가 같이 죽지 않게 — 스펙 §16)
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: kind-nodeport
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: NodePort
+        patch:   # envoyService 에 nodePort 필드가 없다 — 생성되는 Service 에 덧씌운다 (Task 3 Step 6 에서 30080 확인)
+          type: StrategicMerge
+          value:
+            spec:
+              ports:
+                - port: 80
+                  nodePort: 30080
+      envoyDeployment:
+        replicas: 1
+        pod:
+          nodeSelector: {bank-transfer/role: infra}
+          tolerations:
+            - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: bank-transfer
+spec:
+  gatewayClassName: bank-transfer
+  infrastructure:
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: kind-nodeport
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces: {from: Same}
+---
+# 재시도를 넣지 않는다 (retry 필드 · BackendTrafficPolicy 금지) — 이미 보낸 POST 를 다시 보내지 않는다.
+# 출금은 멱등키로도 막히지만 1원인증 요청에는 키가 없다 (P8-2 nginx non_idempotent 금지와 같은 규칙)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: api
+spec:
+  parentRefs:
+    - name: bank-transfer
+  rules:
+    - backendRefs:
+        - name: api
+          port: 8080

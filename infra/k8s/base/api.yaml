@@ -1,0 +1,78 @@
+# api 2대 (스펙 §5). 이름 = Pod 이름(INFO_INSTANCE). 워커 두 개에 나눠 놓되 ScheduleAnyway —
+# DoNotSchedule 이면 워커 하나가 죽었을 때 남은 노드에 두 번째 api 를 못 띄운다 (스펙 §4-2)
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels: {app: api}
+spec:
+  selector: {app: api}
+  ports:
+    - {name: http, port: 8080}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  replicas: 2
+  strategy:   # 새 Pod 가 ready 가 된 뒤에 옛 Pod 를 내린다 — 배포 중에도 2대 아래로 내려가지 않게
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app: api}
+  template:
+    metadata:
+      labels: {app: api}
+    spec:
+      enableServiceLinks: false   # redis Service 가 REDIS_PORT=tcp://… 를 넣으면 redis 주소가 깨진다 (${REDIS_PORT:6379})
+      terminationGracePeriodSeconds: 45   # preStop 10 + graceful 단계 20 + 여유 (스펙 §6-2). 넘으면 SIGKILL
+      nodeSelector: {bank-transfer/role: app}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app: api}
+          # 롤링 중 옛 ReplicaSet Pod 까지 세면 새 Pod 가 한 워커로 몰린다 — 같은 리비전끼리만 센다
+          matchLabelKeys: [pod-template-hash]
+      containers:
+        - name: api
+          image: bank-transfer/api:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: {name: app-config}
+          env:
+            - name: MYSQL_DATABASE
+              valueFrom: {secretKeyRef: {name: db-credentials, key: MYSQL_DATABASE}}
+            - name: MYSQL_USER
+              valueFrom: {secretKeyRef: {name: db-credentials, key: MYSQL_USER}}
+            - name: MYSQL_PASSWORD
+              valueFrom: {secretKeyRef: {name: db-credentials, key: MYSQL_PASSWORD}}
+            - name: INFO_INSTANCE   # /actuator/info 의 instance · ShedLock locked_by
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+          ports:
+            - {name: http, containerPort: 8080}
+          lifecycle:
+            preStop:
+              # 삭제가 시작되면 EndpointSlice 에서 빠지는 일과 SIGTERM 이 동시에 일어난다. Envoy 가 이 Pod 를 목록에서 지우기 전에
+              # 앱이 먼저 닫으면 그 사이 요청이 실패한다 → 10초 동안 받아 준 뒤 SIGTERM. 이미지의 셸에 기대지 않는 내장 sleep (1.34 GA)
+              sleep: {seconds: 10}
+          startupProbe:   # 기동(최대 120초) 동안은 liveness 가 죽이지 못하게
+            httpGet: {path: /actuator/health/liveness, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 24
+          readinessProbe:   # Spring 기본 readinessState 만 — DB · Kafka · 게이트웨이를 넣지 않는다 (스펙 결정 9)
+            httpGet: {path: /actuator/health/readiness, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          livenessProbe:   # 실패하면 재시작 — 프로세스가 멈췄을 때만. 외부 의존성은 넣지 않는다
+            httpGet: {path: /actuator/health/liveness, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: {memory: 768Mi, cpu: 250m}
+            limits: {memory: 768Mi}

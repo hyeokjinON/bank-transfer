@@ -1,0 +1,56 @@
+# 모의 은행 (스펙 §5 · §16). 제어 노드 — 은행은 원래 클러스터 밖, 워커 장애 실험에 휘말리지 않게.
+# PVC: 거래 기록(journal — 이중 송신 판정 근거)이 B1 의 replicas 0 → 1 에도 남게. RWO 라 Recreate
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mock-bank-files
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-bank
+  labels: {app: mock-bank}
+spec:
+  selector: {app: mock-bank}
+  ports:
+    - {name: tcp, port: 9090}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-bank
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: mock-bank}
+  template:
+    metadata:
+      labels: {app: mock-bank}
+    spec:
+      enableServiceLinks: false
+      nodeSelector: {bank-transfer/role: infra}
+      tolerations:
+        - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+      containers:
+        - name: mock-bank
+          image: bank-transfer/mock-bank:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: tcp, containerPort: 9090}
+          readinessProbe:
+            tcpSocket: {port: tcp}
+            periodSeconds: 5
+            failureThreshold: 2
+          resources:
+            requests: {memory: 256Mi, cpu: 50m}
+            limits: {memory: 256Mi}
+          volumeMounts:
+            - {name: bank-files, mountPath: /data/bank-files}
+      volumes:
+        - name: bank-files
+          persistentVolumeClaim: {claimName: mock-bank-files}

@@ -1,0 +1,11 @@
+{"run":"node-3","action":"node","rate":20,"duration":"90s","action_at_s":20,"t0":"2026-11-12T07:48:13Z","t_action":"2026-11-12T07:48:34.256Z","t_action_end":"2026-11-12T07:48:35.910Z",
+ "prestop_s":10,"gateway_liveness_bank":null,"api_unreachable_toleration_s":300,"node":"bank-transfer-worker","victim":null,"new_tag":null,
+ "verify_during_outage":null,"action_within_load":true,"settle_s":1,
+ "first_202":1230,"first_5xx":512,"first_502":0,"first_neterr":0,
+ "retried_requests":1046,"accepted_keys":1598,"gave_up_keys":144,"p95_ms":5543.419829349999,
+ "transfers":1598,"not_completed":0,"refunds":0,
+ "negative_balance":0,"balance_ne_ledger":0,
+ "transfer_ne_withdraw":0,"unpublished_outbox":0,
+ "journal_missing":0,"journal_dup":0,"rebalance_lines":150,
+ "api_ready_min":1,"api_recovered_s":363.1,"gw_not_ready_s":0.0,"gw_restarts":0,
+ "node_notready_s":52.5,"pod_notready_s":52.5,"replacement_ready_s":363.1}

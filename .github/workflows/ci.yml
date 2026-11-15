@@ -105,3 +105,75 @@ jobs:
       - name: Stop
         if: always()
         run: docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app down -v
+
+  # kind 클러스터에 같은 매니페스트를 올려 Envoy Gateway 입구로 1원인증 · 출금이 되는지 (P8-3a, ADR-0017).
+  # 이미지 캐시는 app-smoke 와 같은 범위(scope)를 함께 쓴다 — 같은 Dockerfile · 같은 타깃
+  k8s-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: CI 용 infra/.env (비밀번호는 임의 값)
+        run: |
+          cp infra/.env.example infra/.env
+          sed -i "s/^MYSQL_PASSWORD=.*/MYSQL_PASSWORD=ci-$(openssl rand -hex 12)/; s/^MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=ci-$(openssl rand -hex 12)/" infra/.env
+      - name: kind · kubectl 설치 (버전은 infra/k8s/versions.env, 체크섬 확인)
+        run: |
+          . infra/k8s/versions.env
+          curl -fsSLo kind "https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION/kind-linux-amd64"
+          echo "$(curl -fsSL "https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION/kind-linux-amd64.sha256sum" | awk '{print $1}')  kind" | sha256sum -c -
+          curl -fsSLo kubectl "https://dl.k8s.io/release/$KUBECTL_VERSION/bin/linux/amd64/kubectl"
+          echo "$(curl -fsSL "https://dl.k8s.io/release/$KUBECTL_VERSION/bin/linux/amd64/kubectl.sha256")  kubectl" | sha256sum -c -
+          chmod +x kind kubectl && sudo mv kind kubectl /usr/local/bin/
+          kind version && kubectl version --client
+      - name: 매니페스트 빌드 (모든 overlay)
+        run: for o in infra/k8s/overlays/*/; do kubectl kustomize "$o" > /dev/null && echo "ok $o"; done
+      - uses: docker/setup-buildx-action@v4
+      - name: Build api image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: api
+          tags: bank-transfer/api:ci
+          load: true
+          cache-from: type=gha,scope=app-api
+          cache-to: type=gha,mode=max,scope=app-api
+      - name: Build bank-gateway image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: bank-gateway
+          tags: bank-transfer/bank-gateway:ci
+          load: true
+          cache-from: type=gha,scope=app-bank-gateway
+          cache-to: type=gha,mode=max,scope=app-bank-gateway
+      - name: Build mock-bank image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: mock-bank
+          tags: bank-transfer/mock-bank:ci
+          load: true
+          cache-from: type=gha,scope=app-mock-bank
+          cache-to: type=gha,mode=max,scope=app-mock-bank
+      - name: kind 클러스터 · Envoy Gateway · 매니페스트 (overlays/ci)
+        env:
+          SKIP_BUILD: "1"
+          IMAGE_TAG: ci
+        run: bash infra/k8s/up.sh ci
+      - name: Smoke through Envoy Gateway
+        run: bash infra/k8s/smoke.sh
+      - name: 실패 시 상태 · 로그
+        if: failure() || cancelled()
+        run: |
+          kubectl --context kind-bank-transfer get nodes -o wide || true
+          kubectl --context kind-bank-transfer get pods -A -o wide || true
+          kubectl --context kind-bank-transfer -n bank-transfer describe pods || true
+          for a in mysql kafka redis mock-bank bank-gateway api; do echo "=== $a"; kubectl --context kind-bank-transfer -n bank-transfer logs -l app=$a --tail=200 --prefix || true; done
+          kubectl --context kind-bank-transfer -n envoy-gateway-system logs deploy/envoy-gateway --tail=200 || true
+          kubectl --context kind-bank-transfer -n envoy-gateway-system logs -l app.kubernetes.io/name=envoy --all-containers --tail=200 || true
+          kubectl --context kind-bank-transfer get events -A --sort-by=.lastTimestamp | tail -50 || true
+          kubectl --context kind-bank-transfer -n bank-transfer get gateways.gateway.networking.k8s.io,httproutes -o yaml || true
+      - name: Stop
+        if: always()
+        run: kind delete cluster --name bank-transfer || true

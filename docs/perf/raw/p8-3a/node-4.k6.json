@@ -1,0 +1,15 @@
+{
+  "run": "node-4",
+  "rate": 20,
+  "duration": "90s",
+  "iterations": 1748,
+  "first_202": 1309,
+  "first_5xx": 439,
+  "first_502": 0,
+  "first_neterr": 0,
+  "retried_requests": 897,
+  "accepted_keys": 1635,
+  "gave_up_keys": 113,
+  "p95_ms": 4946.314497400001,
+  "max_ms": 10005.617675
+}

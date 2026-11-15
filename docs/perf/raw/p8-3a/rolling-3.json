@@ -1,0 +1,11 @@
+{"run":"rolling-3","action":"rolling","rate":20,"duration":"150s","action_at_s":20,"t0":"2026-11-12T06:13:25Z","t_action":"2026-11-12T06:13:45.749Z","t_action_end":"2026-11-12T06:14:06.989Z",
+ "prestop_s":0,"gateway_liveness_bank":null,"api_unreachable_toleration_s":300,"node":null,"victim":null,"new_tag":"dev-9094f48-r1794463985",
+ "verify_during_outage":null,"action_within_load":true,"settle_s":1,
+ "first_202":2996,"first_5xx":4,"first_502":0,"first_neterr":0,
+ "retried_requests":4,"accepted_keys":3000,"gave_up_keys":0,"p95_ms":23.774562749999998,
+ "transfers":3000,"not_completed":0,"refunds":0,
+ "negative_balance":0,"balance_ne_ledger":0,
+ "transfer_ne_withdraw":0,"unpublished_outbox":0,
+ "journal_missing":0,"journal_dup":0,"rebalance_lines":560,
+ "api_ready_min":2,"api_recovered_s":0.0,"gw_not_ready_s":0.0,"gw_restarts":0,
+ "node_notready_s":null,"pod_notready_s":null,"replacement_ready_s":null}
