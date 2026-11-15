@@ -20,6 +20,7 @@
 - Envoy Service 는 `NodePort 80 → 30080` — `EnvoyProxy.envoyService.patch`(StrategicMerge, 공식 문서 예시 없음)가 그대로 동작해 폴백이 필요 없었다. Envoy 프록시 · Envoy Gateway 컨트롤러 · CoreDNS 는 제어 노드.
 - **Flyway**: 첫 배포(14:46)에 api 두 Pod 가 동시에 기동했는데 `flyway_schema_history` 는 6행 · 버전 6개 · 실패 0 — 버전마다 한 번만 적용됐다 (DB 잠금으로 한쪽이 기다림). 이후 교체된 Pod 는 모두 "Schema `bank_transfer` is up to date. No migration necessary."
 - **ShedLock**: `shedlock` 표 0행 — 일마감 대사 cron 이 01 ~ 06시라 측정 시각(15시대)에는 실행이 없었다. **확인 못 함 (측정 시각)**. 두 Pod 중 하나만 도는지는 P8-2 E5 에서 Compose 로 확인한 것과 같은 코드다.
+- **CI `k8s-smoke` 첫 실행** (#29, ubuntu-latest): 전체 5분 45초 — api 이미지 빌드 2분 24초 · 게이트웨이 8초 · 모의 은행 4초 (gha 캐시 범위를 `app-smoke` 와 같이 써서 Gradle 빌드 층 일부를 재사용한 것으로 추정), kind 생성 · Envoy Gateway 설치 · `kind load` · 배포 · 준비 대기 2분 20초, 스모크 [0]~[8] 21초. 20분 제한은 그대로 둔다. (같은 실행: `build` 7분 51초 · `app-smoke` 4분 38초)
 
 ## 단계 2 — 프로브 · 종료 · 롤링 업데이트
 ### R1 롤링 업데이트 (preStop 10s vs 0s)
