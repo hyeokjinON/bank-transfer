@@ -1,6 +1,6 @@
 # ADR-0017: Kubernetes (kind) 로 옮기기 — Envoy Gateway 입구, 프로브 3종 · preStop, 게이트웨이 readiness 에만 은행 연결, NetworkPolicy, 배치 고정
 
-- 상태: 제안 (2026-11-12, 머지 뒤 정리 PR 에서 `채택`)
+- 상태: 채택 (2026-11-16, [#29](https://github.com/hyeokjinON/bank-transfer/pull/29))
 - 관련: [설계](../superpowers/specs/2026-11-12-p8-3a-k8s-design.md) · [계획](../superpowers/plans/2026-11-12-p8-3a-k8s.md) · [측정 결과](../perf/p8-3a-k8s.md) · [ADR-0015](0015-bank-gateway-service.md) (게이트웨이 분리 — 연결 주인 하나) · [ADR-0016](0016-app-images-compose.md) (앱 이미지 · Compose — "다음 (P8-3)" 이 이 단계의 출발점) · [ADR-0004](0004-idempotency-key-and-transactional-outbox.md) (멱등키) · [ADR-0006](0006-inquire-instead-of-resend.md) (모르면 묻는다) · [ADR-0007](0007-retry-topic-and-bounded-republish.md) (재시도 토픽 · 제한 재발행)
 
 ## 맥락

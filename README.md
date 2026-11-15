@@ -208,7 +208,7 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
 - [ ] **P8** 모듈 분리(MSA), Docker Compose → Kubernetes
   - [x] P8-1 은행 게이트웨이 서비스 분리: HTTP · 실패 분류 유지 · 서버 2판 × 클라이언트 2판 · Toxiproxy → [ADR-0015](docs/adr/0015-bank-gateway-service.md) · [측정 결과](docs/perf/p8-1-gateway-split.md)
   - [x] P8-2 앱 이미지 · Compose 전체 실행 · api 2대: Dockerfile 타깃 3 · nginx · ShedLock · mode 기본 http → [ADR-0016](docs/adr/0016-app-images-compose.md) · [실험 결과](docs/perf/p8-2-compose.md)
-  - [ ] P8-3a Kubernetes(kind) 로 옮기기: Envoy Gateway 입구 · 프로브 · preStop · 게이트웨이 readiness 에 은행 연결 · NetworkPolicy · PDB · 노드 실험 (진행 중 — 머지 뒤 `[x]`) → [ADR-0017](docs/adr/0017-kubernetes-kind.md) (제안) · [실험 결과](docs/perf/p8-3a-k8s.md)
+  - [x] P8-3a Kubernetes(kind) 로 옮기기: Envoy Gateway 입구 · 프로브 · preStop · 게이트웨이 readiness 에 은행 연결 · NetworkPolicy · PDB · 노드 실험 → [ADR-0017](docs/adr/0017-kubernetes-kind.md) · [실험 결과](docs/perf/p8-3a-k8s.md)
   - [ ] P8-3b 게이트웨이 이중화 (active-standby · 연결 주인 하나) — 별도 설계
 - [ ] **P9** 관측성: Micrometer, Prometheus, Grafana
 
