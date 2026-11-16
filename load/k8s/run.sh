@@ -257,7 +257,10 @@ JOURNAL_DUP=$({ grep -xF -f "$WORK/refs.txt" "$WORK/journal-refs.txt" || true; }
 k logs -l app=api --prefix --timestamps --tail=-1 --since-time="$T0" > "$WORK/api.log" 2>&1 || true
 k logs -l app=bank-gateway --prefix --timestamps --tail=-1 --since-time="$T0" > "$WORK/gateway.log" 2>&1 || true
 k logs deploy/mock-bank --timestamps --tail=-1 --since-time="$T0" > "$WORK/mock-bank.log" 2>&1 || true
-BANK_SESS_MAX=$({ grep -ao 'sessions=[0-9]*' "$WORK/mock-bank.log" || true; } | cut -d= -f2 | sort -n | tail -1)
+# 세션 최대 = max(T0 직전에 이미 열려 있던 세션 수, T0 이후 기록된 값) — 부하 전에 열린 세션도 센다. 전체 로그는 현재 컨테이너 것뿐이라 mock-bank 가 실험 중 재시작되면 그 앞은 못 본다 (허용)
+k logs deploy/mock-bank --timestamps --tail=-1 > "$WORK/mock-bank-all.log" 2>&1 || true
+SESS_BASE=$({ grep -a 'sessions=[0-9]' "$WORK/mock-bank-all.log" || true; } | awk -v t0="$T0" 'substr($1, 1, 19) < substr(t0, 1, 19) { if (match($0, /sessions=[0-9]+/)) v = substr($0, RSTART + 9, RLENGTH - 9) } END { if (v != "") print v }')
+BANK_SESS_MAX=$({ { grep -ao 'sessions=[0-9]*' "$WORK/mock-bank.log" || true; } | cut -d= -f2; echo "$SESS_BASE"; } | grep -a '^[0-9]' | sort -n | tail -1 || true)
 BANK_REJECTED=$({ grep -a 'session rejected' "$WORK/mock-bank.log" || true; } | wc -l | tr -d ' ')
 BANK_EVICTED=$({ grep -a 'session evicted idle' "$WORK/mock-bank.log" || true; } | wc -l | tr -d ' ')
 BANK_DUP=$({ grep -a 'duplicate tran no' "$WORK/mock-bank.log" || true; } | wc -l | tr -d ' ')
