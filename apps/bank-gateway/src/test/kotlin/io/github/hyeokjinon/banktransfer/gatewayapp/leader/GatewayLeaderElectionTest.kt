@@ -114,6 +114,7 @@ class GatewayLeaderElectionTest {
     fun `API 서버가 응답하지 않아도(패킷 드롭) 갱신 기한 안에 은행 연결을 끊는다`() {
         BlackholeProxy(k8s.url).use { proxy ->
             val proxied = k8s.clientFor(proxy.url)
+            var election: GatewayLeaderElection? = null
             try {
                 k8s.createPod(ns, "gw-a")
                 val tranNo = InMemoryTranNoSource()
@@ -123,9 +124,8 @@ class GatewayLeaderElectionTest {
                         tranNoSource = tranNo,
                     )
                 }
-                val election = GatewayLeaderElection(proxied, props("gw-a"), owner, LeaderLabel(proxied, ns, "gw-a"))
+                election = GatewayLeaderElection(proxied, props("gw-a"), owner, LeaderLabel(proxied, ns, "gw-a"))
                 election.start()
-                started += election
                 await.atMost(Duration.ofSeconds(10)) untilAsserted { assertTrue(owner.isLeader && owner.current()!!.isConnected) }
                 val session = owner.current()!!
 
@@ -137,6 +137,37 @@ class GatewayLeaderElectionTest {
                 assertTrue(fencedMs <= 2_000 + 1_000, "갱신 기한(2s) + 1s 안에 끊어야 한다 (응답 없는 API 서버): ${fencedMs}ms")
                 assertFalse(session.isConnected)
             } finally {
+                runCatching { election?.stop() }   // 클라이언트를 닫기 전에 선출을 멈춘다
+                proxied.close()
+            }
+        }
+    }
+
+    @Test
+    fun `자기 차단 뒤 API 서버가 돌아오면 다시 리더가 정해져 은행에 붙는다 - 리더 없는 상태로 굳지 않는다`() {
+        BlackholeProxy(k8s.url).use { proxy ->
+            val proxied = k8s.clientFor(proxy.url)
+            k8s.createPod(ns, "gw-a")
+            val tranNo = InMemoryTranNoSource()
+            val owner = BankConnectionOwner(tranNo) {
+                BankGatewayClient(
+                    BankGatewayConfig("127.0.0.1", bank.boundPort, reconnectMinDelay = Duration.ofMillis(100), reconnectMaxDelay = Duration.ofMillis(300)),
+                    tranNoSource = tranNo,
+                )
+            }
+            val election = GatewayLeaderElection(proxied, props("gw-a"), owner, LeaderLabel(proxied, ns, "gw-a"))
+            try {
+                election.start()
+                await.atMost(Duration.ofSeconds(10)) untilAsserted { assertTrue(owner.isLeader && owner.current()!!.isConnected) }
+
+                proxy.blackhole()
+                await.atMost(Duration.ofSeconds(8)) untilAsserted { assertFalse(owner.isLeader) }
+                proxy.heal()   // 매달렸던 갱신이 뒤늦게 성공해도, 차단한 선출기는 끝나고 새로 후보가 된다
+
+                await.atMost(Duration.ofSeconds(3 + 3)) untilAsserted { assertTrue(owner.isLeader && owner.current()!!.isConnected) }
+                assertEquals(1, bank.peakSessions())
+            } finally {
+                runCatching { election.stop() }
                 proxied.close()
             }
         }
