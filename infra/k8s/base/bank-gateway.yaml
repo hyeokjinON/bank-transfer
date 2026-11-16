@@ -27,7 +27,7 @@ spec:
     spec:
       serviceAccountName: bank-gateway   # Lease · ConfigMap · 자기 Pod 라벨 (rbac-gateway.yaml)
       enableServiceLinks: false   # bank-gateway Service 가 BANK_GATEWAY_PORT=tcp://… 를 넣으면 bank.gateway.port 바인딩이 깨진다
-      terminationGracePeriodSeconds: 45   # 물러나기(비우기 최대 5s) + graceful 단계 20s + 여유. 넘으면 SIGKILL
+      terminationGracePeriodSeconds: 45   # 정상 ≈ 비우기 5s + graceful 20s. API 서버가 응답 없으면 stop() 이 최대 ≈27s(비우기 5 + worker 2 + 라벨 5 + 반납 10 + 반납 확인 ≤5) + graceful 20s 로 45 를 넘어 SIGKILL 될 수 있다 — 은행 연결은 처음 ≤5s 안에 이미 닫혀 안전하고, 대기자는 Lease 만료를 기다린다
       nodeSelector: {bank-transfer/role: app}
       topologySpreadConstraints:   # 두 대를 다른 워커에 — 노드 하나 장애에 대기자가 산다
         - maxSkew: 1

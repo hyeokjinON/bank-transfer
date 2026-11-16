@@ -20,6 +20,7 @@
 - ADR-0018 (제안), OPERATION §16, ARCHITECTURE "게이트웨이 이중화 (제안)", [측정 결과](docs/perf/p8-3b-gateway-ha.md) (원자료 `docs/perf/raw/p8-3b/`). 테스트: 전체 개수는 PR CI 기준.
 ### Changed
 - 게이트웨이 `Recreate` · preStop 10s → `RollingUpdate`(0/1) · preStop 없음 · replicas 2 · `matchLabelKeys` 분산 · PDB `minAvailable 1`. **이전 구성 → 이중화 첫 적용은 `scale --replicas=0` 뒤 적용** (롤링 교착, OPERATION §16-5).
+- Compose · IntelliJ (선출 꺼짐) 종료 순서가 바뀜: SIGTERM 에 웹 graceful 전에 새 요청 503 BANK_NOT_SENT → 처리 중 전문 최대 5초 비우기 → 끊기 (예산 5 + 20 < 30초 `stop_grace_period`).
 - 문서: README 로드맵(P8-3b 는 `[ ]` — 머지 뒤 정리 PR 에서 `[x]`) · 실행 안내, HANDOVER, `infra/k8s/README.md`, OPERATION §15 머리말.
 ### 측정 요약 ([결과](docs/perf/p8-3b-gateway-ha.md), 이 PC · kind 3노드 기준 — 운영 수치가 아니다)
 - **13회 전부 돈 정확** (접수 = 출금 행 = 거래번호, 전부 `COMPLETED`, 은행 기록 빠짐 0 · 이중 0, 환불 0, 잔고 = 원장 합). **동시 세션 최대 1.**

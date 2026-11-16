@@ -642,6 +642,7 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app r
 ```
 - 한 대씩, 앞의 것이 healthy 가 된 뒤에 다음. 내려가는 동안 nginx 가 다른 한 대로 보낸다 (E3: 첫 시도 5xx 0).
 - **graceful**: 앱은 `server.shutdown=graceful` 로 처리 중인 요청을 끝내고 Kafka 리스너를 정리한 뒤 내려간다. `spring.lifecycle.timeout-per-shutdown-phase: 20s` 는 **종료 단계 하나당** 상한이고 Compose `stop_grace_period` 는 30s 다 — "20s < 30s" 는 단계 하나씩 봤을 때 성립한다 (단계들이 모두 상한까지 쓰는 최악에는 합이 30s 를 넘어 Docker 가 SIGKILL 할 수 있다).
+- **게이트웨이 종료 순서 (P8-3b)**: Compose · IntelliJ (선출 꺼짐) 종료 순서가 바뀜: SIGTERM 에 웹 graceful 전에 새 요청 503 BANK_NOT_SENT → 처리 중 전문 최대 5초 비우기 → 끊기 (예산 5 + 20 < 30초 `stop_grace_period`).
 - **설정을 바꿔 `up -d` 로 컨테이너를 다시 만들면 `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app restart nginx` 도 한다** — nginx 는 기동 때 upstream 이름(api-1 · api-2)을 한 번만 풀어서, 컨테이너 IP 가 바뀌면 옛 IP 로 보내 502 가 난다. (`load/compose/run.sh` 는 재시작 · 강제 종료 회차 뒤마다 nginx 를 재시작해 이름을 다시 풀게 한다.)
 
 ### 14-4. 컨테이너가 죽었을 때
