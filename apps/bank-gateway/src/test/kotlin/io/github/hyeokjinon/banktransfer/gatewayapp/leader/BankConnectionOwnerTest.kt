@@ -114,4 +114,52 @@ class BankConnectionOwnerTest {
         owner.startLeading()
         assertNull(owner.current())   // 종료 중에 늦게 온 "리더 됨" 콜백은 무시
     }
+
+    @Test
+    fun `stepDown 은 거절 확인을 통과한 요청이 대기 표에 오를 때까지 기다린다 - 끊어서 결과 모름을 만들지 않는다`() {
+        val armed = java.util.concurrent.atomic.AtomicBoolean(false)
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val gated = object : TranNoSource {
+            override fun next(): Long {
+                if (armed.get() && Thread.currentThread().name == "gated-transfer") {
+                    entered.countDown()
+                    release.await(5, TimeUnit.SECONDS)   // 거절 확인은 지났고 아직 대기 표에는 오르기 전
+                }
+                return tranNo.next()
+            }
+            override fun prepare() = tranNo.prepare()
+        }
+        val gatedOwner = BankConnectionOwner(gated) {
+            BankGatewayClient(
+                BankGatewayConfig("127.0.0.1", bank.boundPort, reconnectMinDelay = Duration.ofMillis(100), reconnectMaxDelay = Duration.ofMillis(300)),
+                tranNoSource = gated,
+            )
+        }
+        try {
+            gatedOwner.startLeading()
+            await.atMost(Duration.ofSeconds(5)) untilAsserted { assertTrue(gatedOwner.current()!!.isConnected) }
+            armed.set(true)
+
+            var transfer: java.util.concurrent.CompletableFuture<*>? = null
+            val sender = Thread({ transfer = gatedOwner.transfer("090", "1002123456789", 1_000, "m", "T261116INFLIGHT00001") }, "gated-transfer").apply { start() }
+            assertTrue(entered.await(3, TimeUnit.SECONDS))
+
+            val stepping = Thread { gatedOwner.stepDown(Duration.ofSeconds(2)) }.apply { start() }
+            Thread.sleep(300)
+            assertTrue(stepping.isAlive)               // 처리 중인 요청이 있으니 아직 끊지 않았다
+            assertTrue(gatedOwner.current() != null)
+
+            release.countDown()
+            sender.join(3_000)
+            val response = transfer!!.get(3, TimeUnit.SECONDS) as io.github.hyeokjinon.banktransfer.protocol.TransferResponse
+            assertEquals(ResponseCodes.OK, response.header.responseCode)
+            stepping.join(3_000)
+            assertFalse(stepping.isAlive)
+            assertNull(gatedOwner.current())
+        } finally {
+            release.countDown()
+            gatedOwner.close()
+        }
+    }
 }

@@ -286,6 +286,19 @@ class BankGatewayClientTest {
     }
 
     @Test
+    fun `번호 공급원이 예기치 못한 예외를 던져도 보내지 않고 BankNotSentException 이다`() {
+        val bank = MockBankServer().start().closeLater()
+        val client = client(bank.boundPort, tranNo = { throw IllegalStateException("boom") }).start()
+        waitUntil { client.isConnected }
+
+        val error = client.transfer("090", "1002123456789", 1_000, "m", "T261116BADTRANNO001").awaitFailure()
+
+        assertIs<BankNotSentException>(error)
+        assertTrue(error.message!!.contains("tran no source failed: boom"))
+        assertEquals(0, bank.depositsOf("1002123456789").size)
+    }
+
+    @Test
     fun `폴링 번호를 못 받아도 회선을 끊지 않는다 - 다음 폴링에서 다시`() {
         val bank = MockBankServer().start().closeLater()
         val calls = java.util.concurrent.atomic.AtomicInteger()

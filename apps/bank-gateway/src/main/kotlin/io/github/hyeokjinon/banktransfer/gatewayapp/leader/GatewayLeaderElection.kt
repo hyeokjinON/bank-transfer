@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit
  *   끊은 뒤에는 그 선출기도 cancel 한다 (임기당 한 번) — 늦게 성공한 갱신 하나로 fabric8 이 "아직 리더" 라고 믿고 Lease 를 계속 갱신하면
  *   대기자도 못 얻고 우리는 연결이 없는 "리더 없는 상태" 로 굳는다. cancel 은 반납 후 선출기 future 를 끝내 runElector 가 새로 후보가 되게 한다.
  *   fabric8 자체 경로는 요청 타임아웃 + 반납용 조회 + 큐 대기가 겹쳐 기한을 넘길 수 있어 믿지 않는다 (릴리스 시 release 의 Lock.get 이 먼저 돈다).
- *   새 리더는 만료(15s) 뒤 — 겹침 없음 (시계 차 < 5s 전제).
+ *   새 리더는 만료(15s) 뒤 — 겹침 없음 (시계 차 < 약 4.75s (15 − 10 − 0.25) 전제).
  * - 선출기는 한 번 쓰고 버린다: 임기를 잃으면 새 선출기로 다시 후보가 된다.
  * - 종료(SIGTERM) = 정상 교대: 거절 → 비우기 → 끊기 → 라벨 떼기 → Lease 반납. 대기자는 만료를 기다리지 않고 재시도 주기(2s) 안에 이어받는다.
  */
@@ -110,6 +110,9 @@ class GatewayLeaderElection(
         val future = k8s.leaderElector().withConfig(config).build().start()
         elector = future
         if (!running) future.cancel(true)   // stop() 과 동시에 만들어진 선출기도 반납한다
+        // 순서 가정 (fabric8 8.0.0 바이트코드로 확인): 우리 whenComplete 가 fabric8 자신의 stop 의존 단계보다 먼저 등록되고,
+        // CompletableFuture 는 의존 단계를 LIFO 로 실행하므로 fabric8 의 stopLeading · 반납이 끝난 뒤에 우리 재후보(+retryPeriod)가 돈다.
+        // fabric8 버전이 바뀌어 이 순서가 달라지면 늦게 온 onStopLeading 이 새 임기를 끊을 수 있다.
         future.whenComplete { _, error ->
             if (error != null && error !is CancellationException) log.warn("leader election: elector ended: {}", error.message)
             if (running) runCatching { worker.schedule({ runElector() }, props.retryPeriod.toMillis(), TimeUnit.MILLISECONDS) }
@@ -123,7 +126,9 @@ class GatewayLeaderElection(
     private fun onStartLeading() {
         if (!running) return
         log.info("leader election: became leader ({})", props.identity)
-        owner.startLeading()   // 구간 예약 → 접속. 접속 전에는 readiness DOWN 이라 라벨이 붙어도 트래픽이 오지 않는다
+        owner.startLeading()   // 구간 예약 → 접속 시작
+        // 라벨은 획득 직후(은행 연결이 붙기 전)에 맞춘다. 연결 전에 온 요청은 503 BANK_NOT_SENT (안전, 재시도) —
+        // 대기자의 Ready 가 readiness 주기만큼 남아 있어 "트래픽 없음" 이 아니다.
         label.ensure(owner.isLeader)   // 종료 중이라 startLeading 이 무시됐으면 붙이지 않는다
     }
 
@@ -137,6 +142,7 @@ class GatewayLeaderElection(
 
     override fun stop() {
         log.info("leader election: stepping down (drain {}ms)", props.drainTimeout.toMillis())
+        val heldAtStop = owner.isLeader   // 임기를 가진 채 종료하는가 — 대기자 · 이미 잃은 프로세스는 "반납" 로그를 남기지 않는다
         running = false
         owner.stepDown(props.drainTimeout)   // 1 · 2 · 3: 거절 → 비우기 → 끊기
         watchdog.shutdownNow()
@@ -144,7 +150,7 @@ class GatewayLeaderElection(
         runCatching { worker.awaitTermination(2, TimeUnit.SECONDS) }   // 진행 중이던 라벨 맞추기가 끝난 뒤에 떼어야 마지막 말이 된다
         label.ensure(false)                  // 4: Service 대상에서 빠진다
         elector?.cancel(true)                // 5: releaseOnCancel — holder 비움
-        if (awaitReleased()) log.info("leader election: released leadership ({})", props.identity)   // 정상 종료 — 비정상 상실(lost leadership)과 구분
+        if (awaitReleased() && heldAtStop) log.info("leader election: released leadership ({})", props.identity)   // 정상 종료 — 비정상 상실(lost leadership)과 구분
     }
 
     /** 반납이 API 서버에 닿을 때까지 최대 2초 — 프로세스가 먼저 끝나면 대기자가 만료(15s)를 기다린다. */

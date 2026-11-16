@@ -61,7 +61,7 @@ class BankTimeoutException(val tranNo: Long, val timeout: Duration) :
 open class BankUnavailableException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
 /** 전문을 소켓에 쓰기 전에 실패했다 (연결 없음). 은행에 "확실히" 가지 않았으므로 다시 보내도 안전하다. */
-class BankNotSentException(message: String) : BankUnavailableException(message)
+class BankNotSentException(message: String, cause: Throwable? = null) : BankUnavailableException(message, cause)
 
 /**
  * 지금 은행에 보내도 되는지 (P5-1, 점검 시간). 닫혀 있으면 이유를 돌려준다 — 그 요청은 "연결 없음" 과 같이 [BankNotSentException] 으로 끝난다:
@@ -152,6 +152,8 @@ class BankGatewayClient(
             build()
         } catch (e: BankNotSentException) {
             return CompletableFuture.failedFuture(e)
+        } catch (e: RuntimeException) {   // 번호 공급원의 예기치 못한 실패 — 아직 아무것도 쓰지 않았으므로 "안 보냄" 이 맞다
+            return CompletableFuture.failedFuture(BankNotSentException("tran no source failed: ${e.message}", e))
         }
         return send(message)
     }
