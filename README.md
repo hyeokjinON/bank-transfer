@@ -39,6 +39,14 @@
 
 ## 구조
 
+**한눈에 보는 그림** (단계마다 갱신, 원본 `docs/diagrams/`):
+
+| 애플리케이션 구조 — 출금 · 1원인증 흐름 | 실행 구성도 — Kubernetes(kind) 3노드 |
+|---|---|
+| [![애플리케이션 구조](docs/diagrams/app-architecture.svg)](docs/diagrams/app-architecture.svg) | [![실행 구성도](docs/diagrams/runtime-k8s.svg)](docs/diagrams/runtime-k8s.svg) |
+
+아래는 코드 경계 중심의 그림이다.
+
 ```mermaid
 flowchart LR
     U[클라이언트] -- "HTTP/JSON" --> API
@@ -212,6 +220,7 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
   - [x] P8-2 앱 이미지 · Compose 전체 실행 · api 2대: Dockerfile 타깃 3 · nginx · ShedLock · mode 기본 http → [ADR-0016](docs/adr/0016-app-images-compose.md) · [실험 결과](docs/perf/p8-2-compose.md)
   - [x] P8-3a Kubernetes(kind) 로 옮기기: Envoy Gateway 입구 · 프로브 · preStop · 게이트웨이 readiness 에 은행 연결 · NetworkPolicy · PDB · 노드 실험 → [ADR-0017](docs/adr/0017-kubernetes-kind.md) · [실험 결과](docs/perf/p8-3a-k8s.md)
   - [x] P8-3b 게이트웨이 이중화 (active-standby · K8s Lease 리더 선출 · 전문번호 ConfigMap 구간 예약 · 리더 라벨 + 둘 다 Ready) → [ADR-0018](docs/adr/0018-gateway-ha-leader-election.md) · [실험 결과](docs/perf/p8-3b-gateway-ha.md)
+  - [ ] P8-3c 게이트웨이 필수 분산 (`DoNotSchedule` — 두 대는 반드시 다른 워커) — 제안 → [ADR-0019](docs/adr/0019-gateway-required-spread.md) · [실험 결과](docs/perf/p8-3c-gateway-spread.md) (머지 뒤 `[x]`)
 - [ ] **P9** 관측성: Micrometer, Prometheus, Grafana
 
 ## 기술 스택

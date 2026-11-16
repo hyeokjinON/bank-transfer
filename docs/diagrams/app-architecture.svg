@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1300 880" width="1300" height="880" font-family="'Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',sans-serif">
+  <title>bank-transfer 애플리케이션 구조 — 출금 · 1원인증 흐름 · P8-3c 기준</title>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker>
+    <marker id="arrR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b91c1c"/></marker>
+    <marker id="arrB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b45309"/></marker>
+    <style>
+      .t{font-size:20px;font-weight:700;fill:#0f172a}
+      .st{font-size:12px;fill:#475569}
+      .h{font-size:13.5px;font-weight:700;fill:#0f172a}
+      .b{font-size:12px;fill:#1e293b}
+      .s{font-size:11px;fill:#475569}
+      .zone{font-size:13px;font-weight:700;fill:#334155}
+      .box{fill:#ffffff;stroke:#334155;stroke-width:1.2}
+      .step{fill:#ffffff;stroke:#0f766e;stroke-width:1.3}
+      .ln{fill:none;stroke:#334155;stroke-width:1.6}
+    </style>
+  </defs>
+  <rect x="0" y="0" width="1300" height="880" fill="#ffffff"/>
+
+  <text class="t" x="20" y="34">bank-transfer 애플리케이션 구조 — 출금이체 · 1원인증 흐름 (P8-3c 기준)</text>
+  <text class="st" x="20" y="56">2026-11-16 · ①~⑥ = 출금 한 건이 지나가는 순서 / 빨간 선 = 은행에 "안 보냄" 일 때 재시도 경로 / 원칙: 돈이 걸린 외부 호출은 한 번만 보내고, 모르면 묻는다</text>
+
+  <!-- 클라이언트 -->
+  <rect class="box" x="20" y="110" width="155" height="70" rx="10"/>
+  <text x="97" y="138" text-anchor="middle"><tspan class="h">클라이언트</tspan><tspan class="s" x="97" dy="18">Postman · k6 · 거래소</tspan></text>
+
+  <!-- apps/api -->
+  <rect x="200" y="78" width="560" height="760" rx="12" fill="#f8fafc" stroke="#475569" stroke-width="1.4"/>
+  <text class="zone" x="215" y="98">apps/api — Spring Boot 4 · Kotlin · Java 21 (K8s 에서 2대)</text>
+
+  <rect class="box" x="220" y="110" width="520" height="70" rx="8"/>
+  <text x="480" y="134" text-anchor="middle"><tspan class="h">REST API (X-User-Id)</tspan><tspan class="b" x="480" dy="19">1원인증 요청 · 확인 / 출금 접수 (Idempotency-Key) · 조회 / 충전 · 잔고</tspan></text>
+
+  <rect x="220" y="198" width="520" height="92" rx="8" fill="#ecfeff" stroke="#0e7490" stroke-width="1.3"/>
+  <text x="480" y="220" text-anchor="middle"><tspan class="h">도메인 모듈 — Spring · Netty 의존 없음 (빌드가 강제)</tspan><tspan class="b" x="480" dy="19">modules/account (1원인증) · modules/transfer (상태 전이 · 멱등 접수 · 처리 · 정리)</tspan><tspan class="s" x="480" dy="18">포트: BankPort · BankTransferPort · BankInquiryPort · TransferStore · VerifiedAccounts</tspan><tspan class="s" x="480" dy="15">어댑터는 apps/api 가 조립 (포트/어댑터 · ADR-0001)</tspan></text>
+
+  <rect class="step" x="220" y="310" width="250" height="88" rx="8"/>
+  <text x="345" y="332" text-anchor="middle"><tspan class="h">① 접수 트랜잭션</tspan><tspan class="b" x="345" dy="19">출금 행 + 잔고 차감 (조건부 UPDATE)</tspan><tspan class="b" x="345" dy="17">+ 아웃박스 행 → 커밋</tspan><tspan class="s" x="345" dy="17">→ 바로 202 RECEIVED</tspan></text>
+
+  <rect class="step" x="490" y="310" width="250" height="88" rx="8"/>
+  <text x="615" y="332" text-anchor="middle"><tspan class="h">② OutboxRelay (0.5초)</tspan><tspan class="b" x="615" dy="19">미발행 아웃박스 행</tspan><tspan class="b" x="615" dy="17">FOR UPDATE SKIP LOCKED</tspan><tspan class="s" x="615" dy="17">→ Kafka 발행 (적어도 한 번)</tspan></text>
+
+  <rect class="step" x="490" y="418" width="250" height="96" rx="8"/>
+  <text x="615" y="440" text-anchor="middle"><tspan class="h">③ TransferRequestedListener</tspan><tspan class="b" x="615" dy="19">컨슈머 3 · 코루틴 옵션 (P6-1)</tspan><tspan class="b" x="615" dy="17">RECEIVED → SENDING (조건부)</tspan><tspan class="s" x="615" dy="17">결과: 완료 · 거절(환불) · 모름 · 안 보냄</tspan></text>
+
+  <rect class="step" x="220" y="418" width="250" height="96" rx="8"/>
+  <text x="345" y="440" text-anchor="middle"><tspan class="h">④ TransferReconciler (10초)</tspan><tspan class="b" x="345" dy="19">SENDING 30초 → UNKNOWN</tspan><tspan class="b" x="345" dy="17">결과조회 전문으로만 확정</tspan><tspan class="s" x="345" dy="17">결과 모름은 다시 보내지 않는다</tspan></text>
+
+  <rect class="step" x="220" y="534" width="250" height="88" rx="8"/>
+  <text x="345" y="556" text-anchor="middle"><tspan class="h">⑤ 하루 배치 (Spring Batch)</tspan><tspan class="b" x="345" dy="19">일마감 대사 01 ~ 06시</tspan><tspan class="b" x="345" dy="17">보존 배치 06:30</tspan><tspan class="s" x="345" dy="17">ShedLock — 2대 중 한 대만</tspan></text>
+
+  <rect class="step" x="490" y="534" width="250" height="88" rx="8"/>
+  <text x="615" y="556" text-anchor="middle"><tspan class="h">⑥ 게이트웨이 HTTP 클라이언트</tspan><tspan class="b" x="615" dy="19">mode=http · 자동 재시도 없음</tspan><tspan class="b" x="615" dy="17">실패 분류: 연결 전 실패 = 안 보냄</tspan><tspan class="s" x="615" dy="17">modules/bank-gateway-http (P8-1)</tspan></text>
+
+  <rect class="box" x="220" y="642" width="520" height="180" rx="8"/>
+  <text class="h" x="236" y="664">함께 있는 장치</text>
+  <text x="236" y="686"><tspan class="b">· 잔고 차감 전략 4종 — 조건부 UPDATE(기본) · 비관적 · 낙관적 · Redis 락 (P4-2)</tspan><tspan class="b" x="236" dy="20">· 멱등 3겹 — Idempotency-Key UNIQUE · 상태 조건부 UPDATE · 이용기관 거래번호</tspan><tspan class="b" x="236" dy="20">· 은행 점검 23:50 ~ 00:10 (KST) → 은행 쓰는 요청 503, 게이트웨이 송신 보류</tspan><tspan class="b" x="236" dy="20">· 하루 배치 · 정리 작업은 두 대가 같이 돌아도 DB 가 중복을 막는다</tspan><tspan class="b" x="236" dy="20">· apps/api-reactive — WebFlux 1원인증 비교판 :8081 (P6-2)</tspan><tspan class="s" x="236" dy="20">· 가상 스레드는 설정 한 줄로 켤 수 있으나 냉시동 교착으로 기본 꺼짐 (P7)</tspan></text>
+
+  <!-- MySQL · Redis -->
+  <rect x="800" y="78" width="230" height="150" rx="8" fill="#f5f3ff" stroke="#6d28d9" stroke-width="1.3"/>
+  <text x="915" y="100" text-anchor="middle"><tspan class="h">MySQL 8.4 (Flyway)</tspan><tspan class="b" x="915" dy="20">transfer · outbox_event</tspan><tspan class="b" x="915" dy="18">wallet · 원장</tspan><tspan class="b" x="915" dy="18">account_verification</tspan><tspan class="b" x="915" dy="18">shedlock</tspan><tspan class="s" x="915" dy="18">KST 저장 · 상태 조건부 UPDATE</tspan></text>
+  <rect x="1050" y="78" width="230" height="70" rx="8" fill="#f5f3ff" stroke="#6d28d9" stroke-width="1.3"/>
+  <text x="1165" y="102" text-anchor="middle"><tspan class="h">Redis 7.4</tspan><tspan class="s" x="1165" dy="18">사용자 락 (redis 차감 전략 선택 시)</tspan></text>
+
+  <!-- Kafka -->
+  <rect x="800" y="258" width="480" height="242" rx="10" fill="#f5f3ff" stroke="#6d28d9" stroke-width="1.3"/>
+  <text class="zone" x="815" y="278">Kafka 4.1 (KRaft · 파티션 3)</text>
+  <rect class="box" x="820" y="300" width="190" height="44" rx="6"/>
+  <text x="915" y="318" text-anchor="middle"><tspan class="h">transfer.requested</tspan><tspan class="s" x="915" dy="16">원래 토픽</tspan></text>
+  <rect class="box" x="1050" y="300" width="210" height="34" rx="6"/>
+  <text x="1155" y="322" text-anchor="middle" class="b">-retry-0 (5초 뒤)</text>
+  <rect class="box" x="1050" y="344" width="210" height="34" rx="6"/>
+  <text x="1155" y="366" text-anchor="middle" class="b">-retry-1 (30초 뒤)</text>
+  <rect class="box" x="1050" y="388" width="210" height="34" rx="6"/>
+  <text x="1155" y="410" text-anchor="middle" class="b">-retry-2 (60초 뒤)</text>
+  <rect x="1050" y="432" width="210" height="50" rx="6" fill="#fee2e2" stroke="#b91c1c"/>
+  <text x="1155" y="452" text-anchor="middle"><tspan class="h">-dlt</tspan><tspan class="s" x="1155" dy="16">5분 뒤 재발행 · 최대 3번</tspan></text>
+  <text class="s" x="842" y="372">안 보냄 = 은행에 안 갔다는 확신</text>
+  <text class="s" x="842" y="388">→ 재시도 토픽 (예산 약 95초)</text>
+  <text class="s" x="842" y="404">→ DLT → 재발행 (포기까지 약 26분)</text>
+  <text class="s" x="842" y="430">결과 모름은 이 길로 가지 않고</text>
+  <text class="s" x="842" y="446">④ 결과조회로만 확정 (ADR-0006)</text>
+
+  <!-- 게이트웨이 -->
+  <rect x="800" y="528" width="480" height="196" rx="10" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text class="zone" x="815" y="548">apps/bank-gateway — 2대 active-standby, 리더만 은행 연결</text>
+  <text x="815" y="572"><tspan class="b">· HTTP :8082 — 1원 입금 · 출금이체 · 결과조회 (WebFlux 기본 · MVC 판)</tspan><tspan class="b" x="815" dy="19">· modules/bank-gateway — Netty 클라이언트, 전문번호로 응답 짝짓기,</tspan><tspan class="b" x="827" dy="17">폴링 30초 · 재접속 백오프 · 응답 시간 초과 3초</tspan><tspan class="b" x="815" dy="19">· modules/bank-protocol — 4바이트 ASCII 길이 + EUC-KR 고정길이</tspan><tspan class="b" x="815" dy="19">· K8s Lease 리더 선출 (15 · 10 · 2초) + 워치독 자기 차단</tspan><tspan class="b" x="815" dy="19">· 전문번호 ConfigMap 구간 예약 1,000개 (CAS) — 선출과 독립</tspan><tspan class="s" x="815" dy="19">· 응답코드 3001 (번호 중복) → 503 안 보냄 · 두 대는 반드시 다른 노드</tspan></text>
+
+  <!-- 은행 -->
+  <rect x="800" y="752" width="480" height="86" rx="10" fill="#fef3c7" stroke="#b45309" stroke-width="1.4"/>
+  <text x="1040" y="776" text-anchor="middle"><tspan class="h">apps/mock-bank — 모의 은행 FEP :9090 (Netty 서버)</tspan><tspan class="b" x="1040" dy="20">세션 하나 · 전문번호 기관 · 일자별 유일 · 무응답 세션 정리</tspan><tspan class="s" x="1040" dy="18">일마감 파일 RECON_yyyyMMdd.dat → ⑤ 대사가 읽는다 · 거래 기록 journal</tspan></text>
+
+  <!-- 선 -->
+  <line class="ln" x1="175" y1="145" x2="218" y2="145" marker-end="url(#arr)"/>
+  <line class="ln" x1="480" y1="180" x2="480" y2="196" marker-end="url(#arr)"/>
+  <line class="ln" x1="345" y1="290" x2="345" y2="308" marker-end="url(#arr)"/>
+  <line class="ln" x1="760" y1="150" x2="798" y2="150" marker-end="url(#arr)"/>
+  <text class="s" x="764" y="143">SQL</text>
+  <line class="ln" x1="470" y1="354" x2="488" y2="354" marker-end="url(#arr)"/>
+  <line class="ln" x1="740" y1="330" x2="818" y2="322" marker-end="url(#arr)"/>
+  <polyline class="ln" points="830,344 830,466 742,466" marker-end="url(#arr)"/>
+  <line class="ln" x1="615" y1="514" x2="615" y2="532" marker-end="url(#arr)"/>
+  <polyline class="ln" points="400,514 400,526 560,526 560,532" marker-end="url(#arr)"/>
+  <polyline class="ln" points="740,590 770,590 770,620 798,620" marker-end="url(#arr)"/>
+  <text class="s" x="744" y="612">HTTP</text>
+  <line x1="1040" y1="724" x2="1040" y2="750" stroke="#b45309" stroke-width="2.2" marker-end="url(#arrB)"/>
+  <text class="s" x="1048" y="742" fill="#92400e">TCP 전문 (리더의 세션 1개)</text>
+  <!-- 안 보냄 → 재시도 -->
+  <polyline points="742,500 780,500 780,240 1155,240 1155,298" fill="none" stroke="#b91c1c" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arrR)"/>
+  <text class="s" x="1040" y="236" fill="#b91c1c">③ 이 "안 보냄" 이면 재시도 토픽으로</text>
+</svg>

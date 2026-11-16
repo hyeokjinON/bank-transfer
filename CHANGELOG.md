@@ -9,6 +9,20 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
+## [P8-3c] 게이트웨이 필수 분산 — (제안, PR #(PR 생성 뒤))
+### Changed
+- 게이트웨이 `topologySpreadConstraints`: `ScheduleAnyway` → **`DoNotSchedule`** + `nodeTaintsPolicy: Ignore` · `nodeAffinityPolicy: Honor` 명시 (`matchLabelKeys [pod-template-hash]` 유지). 두 게이트웨이는 한 워커에 놓일 수 없다 — 워커가 빠지면 대체 Pod 는 Pending, 돌아오면 그 워커에 뜬다 ([ADR-0019](docs/adr/0019-gateway-required-spread.md), 제안).
+- 스모크 [9]: "두 게이트웨이가 서로 다른 워커" 확인 추가.
+- 실험 도구: `PHASE=p8-3c`, 요약 JSON `gw_pending_s` · `gw_colocated_s` · `gw_nodes_end`, drain · 노드 동작 뒤 게이트웨이 Ready 2/2 까지 표본을 남김.
+- OPERATION §16-3 (필수 분산 · Pending 이 정상), §16-4 표 한 줄.
+### Added
+- 구성도 두 장 `docs/diagrams/app-architecture.svg` (애플리케이션 구조 · 출금 흐름) · `runtime-k8s.svg` (K8s 실행 구성) — README · ARCHITECTURE 에 걸고 단계마다 갱신. ARCHITECTURE 의 Kubernetes 그림을 P8-3b 구성(리더 · 대기)으로 고침.
+- [측정 결과](docs/perf/p8-3c-gateway-spread.md) (원자료 `docs/perf/raw/p8-3c/`).
+### 측정 요약 (이 PC · kind 3노드 기준 — 운영 수치가 아니다, 돈은 전 회차 정확)
+- S1 롤링: 멈추지 않음, 끝난 뒤 두 워커 · 몰림 0. S2 리더 워커 drain: 대체 Pod **Pending 42초 → uncordon 뒤 원래 워커**. S3 대기자 워커 SIGKILL: **Pending 70.5초 → 복구 뒤 원래 워커**, 리더 교대 없음. S4 이어서 리더 워커 SIGKILL: 새 리더 **14.4초** (P8-3b 의 같은 순서 353.4초), 대체 Pod 71.8초 Pending → 원래 워커. 전 회차 몰림 0초 · 세션 거부 · 번호 중복 · 결과 모름 0.
+### CI · 사람 확인
+- PR 생성 뒤 채운다.
+
 ## [P8-3b] 게이트웨이 이중화 — 2026-11-16 ([#31](https://github.com/hyeokjinON/bank-transfer/pull/31), 머지 후 정리 #32)
 ### Added
 - 게이트웨이 2대 active-standby: K8s Lease `bank-gateway-leader` 리더 선출(fabric8 `kubernetes-client` 8.0.0, JDK HttpClient · 재시도 없음 · 연결 2s · 요청 5s) + 로컬 워치독(갱신 기한 + 0.25초 안에 자기 차단 · 선출기 반납 후 재후보) + 리더 라벨 `bank-transfer/gateway-role=leader`(Service selector, 대기자도 Ready — readiness `role: standby`) + 임기마다 새 `BankGatewayClient` (`BankConnectionOwner`) + SIGTERM 종료 훅 교대(새 요청 거절 → 처리 중 전문 비우기 → 연결 끊기 → 라벨 떼기 → Lease 반납). 선출은 `bank.gateway.leader-election.enabled` 기본 꺼짐.

@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1300 860" width="1300" height="860" font-family="'Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',sans-serif">
+  <title>bank-transfer 실행 구성도 — Kubernetes(kind) · P8-3c 기준</title>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker>
+    <marker id="arrB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b45309"/></marker>
+    <marker id="arrL" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/></marker>
+    <marker id="arrC" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/></marker>
+    <marker id="arrS" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker>
+    <style>
+      .t{font-size:20px;font-weight:700;fill:#0f172a}
+      .st{font-size:12px;fill:#475569}
+      .h{font-size:13.5px;font-weight:700;fill:#0f172a}
+      .b{font-size:12px;fill:#1e293b}
+      .s{font-size:11px;fill:#475569}
+      .zone{font-size:13px;font-weight:700;fill:#334155}
+      .box{fill:#ffffff;stroke:#334155;stroke-width:1.2}
+      .ln{fill:none;stroke:#334155;stroke-width:1.6}
+    </style>
+  </defs>
+  <rect x="0" y="0" width="1300" height="860" fill="#ffffff"/>
+
+  <!-- 제목 · 범례 -->
+  <text class="t" x="20" y="34">bank-transfer 실행 구성도 — Kubernetes(kind) 3노드 · P8-3c 기준</text>
+  <text class="st" x="20" y="56">2026-11-16 · 실선 = 요청 · 전문 / 점선 상자 = Service(가상 주소, 노드에 속하지 않음) / 파랑 점선 = Lease 갱신 · 획득 / 보라 점선 = 전문번호 구간 예약</text>
+
+  <!-- PC -->
+  <rect class="box" x="20" y="150" width="160" height="90" rx="10"/>
+  <text x="100" y="185" text-anchor="middle"><tspan class="h">PC</tspan><tspan class="b" x="100" dy="20">Postman · k6</tspan><tspan class="s" x="100" dy="18">127.0.0.1:8000</tspan></text>
+
+  <!-- 클러스터 -->
+  <rect x="200" y="72" width="1080" height="770" rx="14" fill="none" stroke="#475569" stroke-width="1.4" stroke-dasharray="8 5"/>
+  <text class="zone" x="1265" y="92" text-anchor="end">kind 클러스터 bank-transfer — Docker 컨테이너 3개 = 노드 3대</text>
+
+  <!-- 제어 노드 -->
+  <rect x="220" y="102" width="1040" height="228" rx="10" fill="#eef2f7" stroke="#94a3b8"/>
+  <text class="zone" x="235" y="122">제어 노드 bank-transfer-control-plane (role=infra) — 인프라 · 은행 · 입구 고정 (워커 장애 실험에서 같이 죽지 않게)</text>
+
+  <rect class="box" x="240" y="140" width="170" height="95" rx="8"/>
+  <text x="325" y="168" text-anchor="middle"><tspan class="h">Envoy Gateway</tspan><tspan class="b" x="325" dy="19">NodePort 30080</tspan><tspan class="s" x="325" dy="18">입구 · 재시도 없음</tspan><tspan class="s" x="325" dy="15">(1원 이중 송금 방지)</tspan></text>
+
+  <rect x="430" y="140" width="210" height="140" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="1.3"/>
+  <text x="535" y="164" text-anchor="middle"><tspan class="h">mock-bank (모의 은행 FEP)</tspan><tspan class="b" x="535" dy="20">:9090 · TCP 고정길이 전문</tspan><tspan class="s" x="535" dy="19">--single-session (세션 1개)</tspan><tspan class="s" x="535" dy="16">--unique-tran-no (중복 3001)</tspan><tspan class="s" x="535" dy="16">무응답 세션 60초 정리</tspan><tspan class="s" x="535" dy="16">PVC bank-files (거래 기록)</tspan></text>
+
+  <rect class="box" x="660" y="134" width="240" height="150" rx="8"/>
+  <text class="h" x="672" y="154">K8s API 서버 · etcd</text>
+  <rect x="670" y="166" width="105" height="104" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="722" y="188" text-anchor="middle"><tspan class="h">Lease</tspan><tspan class="s" x="722" dy="18">bank-gateway-</tspan><tspan class="s" x="722" dy="14">leader</tspan><tspan class="s" x="722" dy="18">유효 15s</tspan><tspan class="s" x="722" dy="14">갱신 기한 10s</tspan></text>
+  <rect x="785" y="166" width="105" height="104" rx="6" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="837" y="188" text-anchor="middle"><tspan class="h">ConfigMap</tspan><tspan class="s" x="837" dy="18">bank-gateway-</tspan><tspan class="s" x="837" dy="14">tran-no</tspan><tspan class="s" x="837" dy="18">date · reservedTo</tspan><tspan class="s" x="837" dy="14">1,000개씩 CAS</tspan></text>
+
+  <rect x="920" y="140" width="320" height="42" rx="6" fill="#f5f3ff" stroke="#6d28d9"/>
+  <text x="1080" y="158" text-anchor="middle"><tspan class="h">MySQL 8.4</tspan><tspan class="s" x="1080" dy="16">출금 · 아웃박스 · 잔고/원장 · 1원인증 · shedlock</tspan></text>
+  <rect x="920" y="192" width="320" height="42" rx="6" fill="#f5f3ff" stroke="#6d28d9"/>
+  <text x="1080" y="210" text-anchor="middle"><tspan class="h">Kafka 4.1 (KRaft · 파티션 3)</tspan><tspan class="s" x="1080" dy="16">transfer.requested · retry-0/1/2 · dlt</tspan></text>
+  <rect x="920" y="244" width="320" height="42" rx="6" fill="#f5f3ff" stroke="#6d28d9"/>
+  <text x="1080" y="262" text-anchor="middle"><tspan class="h">Redis 7.4</tspan><tspan class="s" x="1080" dy="16">사용자 락 (redis 차감 전략 선택 시)</tspan></text>
+
+  <!-- Service 띠 -->
+  <text class="s" x="1255" y="372" text-anchor="end">Service = 라벨로 대상 Pod 를 고르는 가상 주소</text>
+  <rect x="240" y="358" width="170" height="48" rx="24" fill="#ffffff" stroke="#0f766e" stroke-width="1.4" stroke-dasharray="5 4"/>
+  <text x="325" y="378" text-anchor="middle"><tspan class="h">Service api</tspan><tspan class="s" x="325" dy="16">api Pod 2개로 분배</tspan></text>
+  <rect x="430" y="358" width="170" height="48" rx="24" fill="#ffffff" stroke="#0f766e" stroke-width="1.4" stroke-dasharray="5 4"/>
+  <text x="515" y="378" text-anchor="middle"><tspan class="h">Service bank-gateway</tspan><tspan class="s" x="515" dy="16">selector: gateway-role=leader</tspan></text>
+
+  <!-- 워커 1 -->
+  <rect x="220" y="440" width="490" height="280" rx="10" fill="#f0f7ee" stroke="#86a17f"/>
+  <text class="zone" x="235" y="460">워커 1 bank-transfer-worker (role=app)</text>
+  <rect class="box" x="250" y="478" width="190" height="70" rx="8"/>
+  <text x="345" y="500" text-anchor="middle"><tspan class="h">api Pod</tspan><tspan class="b" x="345" dy="18">Spring Boot 4 · :8080</tspan><tspan class="s" x="345" dy="16">컨슈머 · 아웃박스 릴레이 · 배치</tspan></text>
+  <rect x="250" y="600" width="420" height="100" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6"/>
+  <text x="460" y="622" text-anchor="middle"><tspan class="h">bank-gateway 리더 :8082</tspan><tspan class="b" x="460" dy="19">라벨 gateway-role=leader · Ready</tspan><tspan class="b" x="460" dy="18">은행 TCP 세션 1개 · 전문번호 구간 보유</tspan><tspan class="s" x="460" dy="18">SIGTERM: 거절 → 비우기 → 끊기 → 라벨 떼기 → 반납</tspan></text>
+
+  <!-- 워커 2 -->
+  <rect x="770" y="440" width="490" height="280" rx="10" fill="#f0f7ee" stroke="#86a17f"/>
+  <text class="zone" x="785" y="460">워커 2 bank-transfer-worker2 (role=app)</text>
+  <rect class="box" x="790" y="478" width="190" height="70" rx="8"/>
+  <text x="885" y="500" text-anchor="middle"><tspan class="h">api Pod</tspan><tspan class="b" x="885" dy="18">Spring Boot 4 · :8080</tspan><tspan class="s" x="885" dy="16">컨슈머 · 아웃박스 릴레이 · 배치</tspan></text>
+  <rect x="790" y="600" width="420" height="100" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text x="1000" y="622" text-anchor="middle"><tspan class="h">bank-gateway 대기 :8082</tspan><tspan class="b" x="1000" dy="19">라벨 없음 · Ready (bankConnection role: standby)</tspan><tspan class="b" x="1000" dy="18">은행 연결 없음 · Lease 획득 시도 2초마다</tspan><tspan class="s" x="1000" dy="18">리더가 사라지면 이어받음 (정상 2 ~ 4초 · 노드 손실 약 15초)</tspan></text>
+
+  <!-- P8-3c 띠 -->
+  <rect x="220" y="736" width="1040" height="92" rx="8" fill="#fff7ed" stroke="#c2410c" stroke-width="1.3"/>
+  <text x="240" y="760"><tspan class="h" fill="#9a3412">P8-3c 필수 분산 — 게이트웨이 2대는 반드시 다른 워커</tspan><tspan class="b" x="240" dy="20">topologySpreadConstraints: whenUnsatisfiable DoNotSchedule · nodeTaintsPolicy Ignore · matchLabelKeys [pod-template-hash]</tspan><tspan class="b" x="240" dy="19">워커 하나가 빠지면 대체 Pod 는 남은 워커로 가지 않고 Pending → 돌아오면 그 워커에 뜬다 (나뉜 상태가 저절로 복구).</tspan><tspan class="s" x="240" dy="18">실측: 한 워커 장애 → 복귀 → 다른 워커 장애 순서에서 새 리더 353.4초(P8-3b, 한 워커에 몰림) → 14.4초(P8-3c, Lease 만료). Pending 42 ~ 72초 뒤 원래 워커로.</tspan></text>
+
+  <!-- 흐름 선 -->
+  <line class="ln" x1="180" y1="195" x2="238" y2="195" marker-end="url(#arr)"/>
+  <line class="ln" x1="325" y1="235" x2="325" y2="356" marker-end="url(#arr)"/>
+  <line class="ln" x1="325" y1="406" x2="325" y2="476" marker-end="url(#arr)"/>
+  <polyline class="ln" points="390,406 390,425 885,425 885,476" marker-end="url(#arr)"/>
+  <polyline class="ln" points="440,500 465,500 465,408" marker-end="url(#arr)"/>
+  <polyline class="ln" points="790,500 722,500 722,385 602,385" marker-end="url(#arr)"/>
+  <line class="ln" x1="540" y1="406" x2="540" y2="598" marker-end="url(#arr)"/>
+  <text class="s" x="546" y="580">리더에게만</text>
+  <!-- 리더 → 은행 -->
+  <line x1="620" y1="600" x2="620" y2="282" stroke="#b45309" stroke-width="2.2" marker-end="url(#arrB)"/>
+  <text class="s" x="660" y="556" fill="#92400e">TCP 전문</text>
+  <text class="s" x="660" y="571" fill="#92400e">세션 1개</text>
+  <!-- api → 인프라 -->
+  <polyline class="ln" points="980,505 1180,505 1180,288" marker-end="url(#arr)"/>
+  <text class="s" x="1186" y="392">api ×2 →</text>
+  <text class="s" x="1186" y="406">DB · Kafka</text>
+  <text class="s" x="1186" y="420">· Redis</text>
+  <!-- Lease · ConfigMap -->
+  <polyline points="650,600 650,300 705,300 705,272" fill="none" stroke="#2563eb" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrL)"/>
+  <polyline points="670,670 758,670 758,315 830,315 830,272" fill="none" stroke="#7c3aed" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrC)"/>
+  <polyline points="1000,600 1000,296 765,296 765,272" fill="none" stroke="#64748b" stroke-width="1.4" stroke-dasharray="3 4" marker-end="url(#arrS)"/>
+  <text class="s" x="1006" y="590" fill="#475569">획득 시도</text>
+</svg>
