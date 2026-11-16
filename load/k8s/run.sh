@@ -12,7 +12,7 @@
 # 확인 (P8-2 load/compose/run.sh 와 같은 기준): 접수된 키 = 출금 행, 전부 COMPLETED, 은행 거래 기록 = 출금 행(같은 거래번호 두 번 0), 잔고 = 원장 합.
 #   통과 못 하면 요약을 .json.invalid 로. 시간 지표는 timeline.sh(1 ~ 2초 간격) → timeline.awk.
 # 사용 (Git Bash · Linux): bash load/k8s/run.sh <동작> <회차>      먼저: bash infra/k8s/up.sh
-# 환경변수: RATE(20) DURATION(60s, rolling 은 150s) ACTION_AT(20) SETTLE(300) BANK_DOWN_S(60) NODE_DOWN_S(420) NODE(drain · node 대상) OVERLAY(tagtrap, local) PHASE(p8-3a | p8-3b, 기본 p8-3a) CUT_S(40, gwcut)
+# 환경변수: RATE(20) DURATION(60s, rolling 은 150s) ACTION_AT(20) SETTLE(300) BANK_DOWN_S(60) NODE_DOWN_S(420) NODE(drain · node 대상) OVERLAY(tagtrap, local) PHASE(p8-3a | p8-3b, 기본 p8-3a) CUT_S(40, gwcut) NODE_KILL(0 | 1, node · gwnode — 1 이면 docker kill)
 # 결과: docs/perf/raw/<PHASE>/<동작>-<회차>.json · .k6.json · .timeline.txt · .rebalance.txt, 작업 파일 build/load-<PHASE>/<동작>-<회차>/
 set -euo pipefail
 . "$(dirname "$0")/../../infra/k8s/lib.sh"
@@ -79,6 +79,9 @@ DEF_DURATION=60s; [ "$ACTION" = rolling ] && DEF_DURATION=150s
 RATE=${RATE:-20}; DURATION=${DURATION:-$DEF_DURATION}; ACTION_AT=${ACTION_AT:-20}; SETTLE=${SETTLE:-300}
 BANK_DOWN_S=${BANK_DOWN_S:-60}; NODE_DOWN_S=${NODE_DOWN_S:-420}
 CUT_S=${CUT_S:-40}
+NODE_KILL=${NODE_KILL:-0}   # docker stop = SIGTERM → 노드 안 Pod 가 정상 종료(교대) / kill = SIGKILL, 갑작스런 노드 손실 (은행에 FIN 없음 · Lease 만료 · 모의 은행 유휴 정리)
+[[ "$NODE_KILL" =~ ^[01]$ ]] || die "NODE_KILL 은 0 | 1: $NODE_KILL"
+node_down() { if [ "$NODE_KILL" = 1 ]; then d kill "$NODE"; else d stop "$NODE"; fi; }
 for v in RATE ACTION_AT SETTLE BANK_DOWN_S NODE_DOWN_S CUT_S; do [[ "${!v}" =~ ^[1-9][0-9]*$ ]] || die "$v 는 양의 정수: ${!v}"; done
 [[ "$DURATION" =~ ^([1-9][0-9]*)s$ ]] || die "DURATION 은 <숫자>s: $DURATION"
 DURATION_S=${BASH_REMATCH[1]}
@@ -206,12 +209,12 @@ if [ "$ACTION" != steady ]; then
              k scale deploy/mock-bank --replicas=1 >/dev/null; RESTORE= ;;
     drain)   RESTORE=drain; ka drain "$NODE" --ignore-daemonsets --delete-emptydir-data --timeout=240s > "$WORK/drain.txt" 2>&1 \
                || echo "[$RUN] 주의: drain 이 240초 안에 안 끝났다 — $WORK/drain.txt" >&2 ;;
-    node)    RESTORE=node; d stop "$NODE" >/dev/null ;;
+    node)    RESTORE=node; node_down >/dev/null ;;
     gwroll)  k set image deploy/bank-gateway "bank-gateway=bank-transfer/bank-gateway:$NEW" >/dev/null
              k rollout status deploy/bank-gateway --timeout=300s > "$WORK/rollout.txt" 2>&1 || echo "[$RUN] 주의: 게이트웨이 롤링이 300초 안에 안 끝났다" >&2 ;;
     gwkill)  VICTIM=$GW_LEADER
              k delete pod "$VICTIM" --grace-period=0 --force > "$WORK/delete.txt" 2>&1 ;;
-    gwnode)  RESTORE=node; VICTIM=$GW_LEADER; d stop "$NODE" >/dev/null ;;
+    gwnode)  RESTORE=node; VICTIM=$GW_LEADER; node_down >/dev/null ;;
     gwcut)   RESTORE=gwcut; VICTIM=$GW_LEADER
              k label pod "$VICTIM" bank-transfer/experiment=apicut --overwrite >/dev/null
              k apply -f load/k8s/apicut-netpol.yaml >/dev/null
@@ -284,7 +287,7 @@ num() { if [[ "${1:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then echo "$1"; else echo null
 str() { if [ -n "${1:-}" ]; then echo "\"$1\""; else echo null; fi; }
 cat > "$OUT.tmp" <<JSON
 {"run":"$RUN","action":"$ACTION","rate":$RATE,"duration":"$DURATION","action_at_s":$ACTION_AT,"t0":"$T0","t_action":$T_ACTION,"t_action_end":$T_ACTION_END,
- "prestop_s":$PRESTOP,"gateway_liveness_bank":$(str "$LIVE_BANK"),"api_unreachable_toleration_s":$TOL,"node":$(str "${NODE#-}"),"victim":$(str "$VICTIM"),"new_tag":$(str "$NEW"),
+ "prestop_s":$PRESTOP,"gateway_liveness_bank":$(str "$LIVE_BANK"),"api_unreachable_toleration_s":$TOL,"node":$(str "${NODE#-}"),"node_kill":$NODE_KILL,"victim":$(str "$VICTIM"),"new_tag":$(str "$NEW"),
  "verify_during_outage":$(str "$VERIFY_DURING"),"action_within_load":$WITHIN,"settle_s":$SETTLE_S,
  "first_202":$(num "$(k6v first_202)"),"first_5xx":$(num "$(k6v first_5xx)"),"first_502":$(num "$(k6v first_502)"),"first_neterr":$(num "$(k6v first_neterr)"),
  "retried_requests":$(num "$(k6v retried_requests)"),"accepted_keys":$(num "$ACCEPTED"),"gave_up_keys":$(num "$(k6v gave_up_keys)"),"p95_ms":$(num "$(k6v p95_ms)"),
