@@ -31,7 +31,7 @@
 | 2 | **active-standby** (리더 1대만 은행 연결) | 세션 수 제한 · 번호 유일 두 제약을 가장 단순하게 | active-active (세션 여러 개 은행이면 실무에서 더 흔함 — §14) |
 | 3 | **K8s Lease + fabric8 `LeaderElector`** | 새 인프라 없음, 표준, 게이트웨이 DB 없음 원칙(ADR-0015) 유지 | Lease 직접 구현 (위험), MySQL 잠금 (DB 장애 = 은행 연결 장애) |
 | 4 | 리더 임기마다 `BankGatewayClient` 새로 생성 · 상실 시 즉시 close | 지금 클라이언트는 close 가 이벤트 루프까지 닫아 재사용 불가, 임기 단위로 상태를 끊는다 | stop/start 추가 |
-| 5 | readiness = 리더만 UP (`bankConnection` 이 리더 아니면 DOWN), liveness 그대로 | Service 가 리더에게만. P8-3a B1 원칙 그대로 | 라벨 · 별도 Service |
+| 5 | **트래픽 = 리더 라벨** (리더가 자기 Pod 에 `bank-transfer/gateway-role=leader`, Service selector 에 이 라벨). **readiness 는 둘 다 UP** — 대기자의 `bankConnection` = UP(`role: standby`), 리더는 은행 연결이 끊기면 DOWN (P8-3a B1 그대로). liveness 그대로 (§16) | 대기자가 Ready 여야 롤링(`maxUnavailable 0`) · `rollout status` · PDB 가 정상 동작한다. 리더만 Ready 로 두면 새 Pod 가 영원히 NotReady 라 롤링이 멈춘다. Patroni(`role=master` 라벨) 같은 실무 패턴 | readiness = 리더만 UP (롤링 정지), `Recreate` 로 되돌리기 (배포마다 공백) |
 | 6 | Lease 15s · 갱신 기한 10s · 재시도 2s, 갱신 실패 시 자기 차단 | 옛 리더가 늦어도 10초에 끊고 새 리더는 15초 만료 뒤 획득 (노드 시계 차 5초 미만 전제) | 갱신 기한 = 유효 시간 |
 | 7 | `bank.gateway.leader-election.enabled` 기본 false (항상 리더) | IntelliJ · Compose · 테스트 그대로 | 모든 환경에서 선출 |
 | 8 | **전문번호 = ConfigMap 구간 예약** (`date` · `reservedTo`, 1,000개씩, `resourceVersion` CAS) | 번호 유일성이 **선출 정확성과 독립** — 두 대가 잠깐 겹쳐도 구간은 겹치지 않는다 (hi/lo) | Lease 주석에 저장, 시각 기반 번호 |
@@ -46,20 +46,22 @@
 | 17 | `TranNoSource` 인터페이스 (`modules/bank-gateway`), 기본 메모리 카운터 · K8s 는 앱 모듈의 ConfigMap 구현 | 포트/어댑터(ADR-0001), 통신 모듈이 K8s 를 모름 | 클라이언트가 K8s API 직접 호출 |
 | 18 | `BankConnectionOwner` 가 "지금 클라이언트" 의 단일 진실 — 엔드포인트 · 헬스 · 종료 훅이 Owner 를 거침 | 상태가 어긋날 틈 제거 | 컴포넌트별 콜백 구독 |
 | 19 | 게이트웨이 2대 · RollingUpdate(0/1) · preStop 없음 · 분산(`matchLabelKeys`) · PDB `minAvailable 1` | 롤링이 안전해짐, 노드 하나 장애에 생존 | `Recreate` 유지 |
-| 20 | RBAC: ServiceAccount `bank-gateway`, Role = Lease `bank-gateway-leader` · ConfigMap `bank-gateway-tran-no` 이름 한정 get · update (+ create) | 최소 권한 | 넓은 권한 |
+| 20 | RBAC: ServiceAccount `bank-gateway`, Role = Lease `bank-gateway-leader` · ConfigMap `bank-gateway-tran-no` 이름 한정 get · update (+ create), **Pod get · patch (namespace 범위 — 자기 라벨용, Pod 이름을 미리 몰라 이름 한정 불가)** | 최소 권한 (라벨 때문에 Pod 권한만 namespace 범위) | 넓은 권한 |
 | 21 | NetworkPolicy 변경 없음 | 게이트웨이 → API 서버는 egress, 지금 정책은 ingress 만 | — |
-| 22 | 스모크 [9]: 게이트웨이 Ready 1/2 · Lease 보유자 = Ready Pod · 모의 은행 동시 세션 1 | PR 마다 "주인 하나" 회귀 확인 | 실험에서만 |
+| 22 | 스모크 [9]: 게이트웨이 Ready 2/2 · **리더 라벨 Pod 정확히 1개 = Lease 보유자** · Service 엔드포인트 = 그 Pod · 모의 은행 동시 세션 1 | PR 마다 "주인 하나" 회귀 확인 | 실험에서만 |
 
 ## 4. 구조
 ```
              ┌──────────── Lease bank-gateway-leader (holder = Pod 이름)
              │              ConfigMap bank-gateway-tran-no (date, reservedTo)
-api ×2 ─▶ Service bank-gateway ─▶ gateway-A (리더, Ready) ──TCP 세션 1개──▶ 모의 은행 (--single-session …)
-                                  gateway-B (대기, NotReady — 은행 연결 없음)
+api ×2 ─▶ Service bank-gateway ─▶ gateway-A (리더, 라벨 gateway-role=leader, Ready) ──TCP 세션 1개──▶ 모의 은행 (--single-session …)
+          (selector: app=bank-gateway,   gateway-B (대기, 라벨 없음, Ready — 은행 연결 없음, Service 대상 아님)
+           gateway-role=leader)
 ```
 - `LeaderElection` (앱): fabric8 `LeaderElector`, identity = Pod 이름(`POD_NAME`), namespace = `POD_NAMESPACE`. 콜백 → `BankConnectionOwner`.
 - `BankConnectionOwner` (앱): `onStartLeading` → `TranNoSource` 로 새 `BankGatewayClient` 생성 · `start()`; `onStopLeading` → 즉시 `close()`. 선출 꺼짐이면 기동 때 바로 리더.
-- `GatewayEndpoints` · `BankConnectionHealthIndicator`: Owner 의 현재 클라이언트를 쓴다. 없으면 엔드포인트는 `503 BANK_NOT_SENT`, 헬스는 DOWN(`reason: not leader` 또는 `not connected`).
+- `GatewayEndpoints` · `BankConnectionHealthIndicator`: Owner 의 현재 클라이언트를 쓴다. 리더가 아니면 엔드포인트는 `503 BANK_NOT_SENT`, 헬스는 **UP(`role: standby`)** — 대기자도 Ready. 리더인데 은행 연결이 없으면 DOWN(`role: leader, reason: not connected`).
+- `LeaderLabel` (앱): 리더가 되면 자기 Pod 에 `bank-transfer/gateway-role=leader` 를 붙이고(JSON merge patch), 물러날 때 뗀다. 선출 꺼짐이면 아무것도 안 한다 (Compose · IntelliJ 는 Service selector 가 없다).
 - 종료 훅: `SmartLifecycle`(웹 서버보다 먼저 멈추는 phase) — §6.
 
 ## 5. 전문번호 구간 예약
@@ -74,13 +76,14 @@ api ×2 ─▶ Service bank-gateway ─▶ gateway-A (리더, Ready) ──TCP �
 1. 송신 문을 닫는다 — 새 요청 `503 BANK_NOT_SENT`.
 2. 응답 대기 전문(`pendingCount`)이 0이 될 때까지 최대 5초(응답 시간 초과 3초 + 여유).
 3. 은행 연결 close.
-4. Lease 반납(holder 비움 — fabric8 `releaseOnCancel`).
-5. 나머지 Spring graceful 종료. `terminationGracePeriodSeconds` 45 그대로.
-- 대기자: 2초(재시도 주기) 안에 획득 → 구간 예약 → 접속 → readiness(5s 주기) UP. 공백 약 3 ~ 7초 (추정, H1 · H2 로 잰다).
+4. 자기 Pod 의 리더 라벨 떼기 (Service 대상에서 빠짐).
+5. Lease 반납(holder 비움 — fabric8 `releaseOnCancel`).
+6. 나머지 Spring graceful 종료. `terminationGracePeriodSeconds` 45 그대로.
+- 대기자: 2초(재시도 주기) 안에 획득 → 구간 예약 → 접속 → **자기 Pod 에 리더 라벨** → Service 엔드포인트 반영(수 초). 공백 약 3 ~ 7초 (추정, H1 · H2 로 잰다).
 
 ### 6-2. 비정상 교대
 - SIGKILL · 노드 손실: 반납 없음 → 15초 만료 뒤 대기자 획득. 노드째 사라지면 은행 쪽에 FIN 이 없어 옛 세션이 남는다 → 모의 은행 `--session-idle-timeout=60s` 가 정리 → 새 리더 접속(그 전까지 거부 · 재접속 백오프). 공백 약 60초 (추정, H4).
-- API 서버와만 단절: 리더는 10초 갱신 기한에 자기 차단(연결 close), 대기자는 15초 만료 뒤 획득 (H5).
+- API 서버와만 단절: 리더는 10초 갱신 기한에 자기 차단(연결 close), 대기자는 15초 만료 뒤 획득 (H5). 옛 리더는 API 서버에 닿지 않아 **라벨을 못 뗀다** → 잠깐 리더 라벨 Pod 가 둘 — 옛 리더로 간 요청은 연결이 없어 `503 BANK_NOT_SENT` 로 재시도된다. **은행 동시 세션은 여전히 최대 1** (라벨이 아니라 연결이 기준).
 - 응답 못 받은 전문: `BANK_UNAVAILABLE`(502) → api 결과 모름 → 결과조회(P3-3a)로 확정.
 
 ## 7. 규격 v0.3 · 모의 은행
@@ -96,8 +99,8 @@ api ×2 ─▶ Service bank-gateway ─▶ gateway-A (리더, Ready) ──TCP �
 - 모든 연결 수락 · 종료 때 `sessions=<현재> max=<최대>` 를 남긴다.
 
 ## 8. 매니페스트 (`infra/k8s`)
-- `base/bank-gateway.yaml`: replicas 2, `RollingUpdate` (maxUnavailable 0, maxSurge 1), preStop 제거, `serviceAccountName: bank-gateway`, env `POD_NAME`(fieldRef) · `POD_NAMESPACE`(fieldRef) · `BANK_GATEWAY_LEADERELECTION_ENABLED=true`, `topologySpreadConstraints`(hostname, ScheduleAnyway, `matchLabelKeys: [pod-template-hash]`).
-- `base/rbac-gateway.yaml` (새): ServiceAccount · Role · RoleBinding.
+- `base/bank-gateway.yaml`: Service selector 에 `bank-transfer/gateway-role: leader` 추가, replicas 2, `RollingUpdate` (maxUnavailable 0, maxSurge 1), preStop 제거, `serviceAccountName: bank-gateway`, env `POD_NAME`(fieldRef) · `POD_NAMESPACE`(fieldRef) · `BANK_GATEWAY_LEADERELECTION_ENABLED=true`, `topologySpreadConstraints`(hostname, ScheduleAnyway, `matchLabelKeys: [pod-template-hash]`).
+- `base/rbac-gateway.yaml` (새): ServiceAccount · Role(Lease · ConfigMap 이름 한정 + Pod get · patch) · RoleBinding.
 - `base/pdb.yaml`: 게이트웨이 PDB `minAvailable: 1` 추가.
 - `base/mock-bank.yaml`: args 에 세 옵션.
 - `experiment-*` overlay (실험용): `experiment-gateway-single` — H0 대조 (게이트웨이 replicas 1 · `Recreate` · 선출 끔).
@@ -117,11 +120,13 @@ api ×2 ─▶ Service bank-gateway ─▶ gateway-A (리더, Ready) ──TCP �
 - `TranNoSource` ConfigMap 구현: 두 예약자 동시 경쟁 → 구간 안 겹침, 날짜 변경 → 1부터, 409 재시도, 예약 실패 → 송신 안 함 (fabric8 `kubernetes-server-mock`).
 - 선출 · Owner: 획득 → 접속, 상실 → 즉시 close, 갱신 실패 → 자기 차단, 종료 훅 순서(거절 → 비우기 → 끊기 → 반납), 선출 꺼짐 → 기동 즉시 리더.
 - 모의 은행: 세 옵션 각각.
-- 게이트웨이: `3001` → `503 BANK_NOT_SENT`, 리더 아님 → `503` · readiness DOWN.
+- 게이트웨이: `3001` → `503 BANK_NOT_SENT`, 리더 아님 → `503` · readiness **UP(standby)**, 리더 + 은행 끊김 → readiness DOWN.
+- 리더 라벨: 리더 획득 → 자기 Pod 에 라벨, 물러남 → 라벨 제거 (fabric8 가짜 API 서버).
 - 기존 623개 그대로 통과.
 
 ## 11. CI · 스모크
-- `smoke.sh` [9]: 게이트웨이 2대 · Ready 1, Lease holder = Ready Pod 이름, 모의 은행 로그의 최신 `sessions=1`.
+- `smoke.sh` [0] · [6] · [7] 의 게이트웨이 가정을 고친다: 준비 확인은 Ready 2/2, readiness · `id -u` 는 리더 라벨 Pod 로.
+- `smoke.sh` [9]: 게이트웨이 2대 Ready, 리더 라벨 Pod 정확히 1개 = Lease holder, Service 엔드포인트 = 그 Pod, 모의 은행 로그의 최신 `sessions=1`.
 - `k8s-smoke` 잡 변경 없음 (시간 확인 — 지금 5분 45초).
 
 ## 12. 변경 목록
@@ -142,3 +147,10 @@ api ×2 ─▶ Service bank-gateway ─▶ gateway-A (리더, Ready) ──TCP �
 ## 15. 문서 · 작업 순서
 ADR-0018 (제안 → 머지 뒤 채택), `docs/protocol.md` v0.3, 측정 `docs/perf/p8-3b-gateway-ha.md`, OPERATION §16, README · ARCHITECTURE · HANDOVER · CHANGELOG · `infra/k8s/README.md`.
 작업 순서: 의존성 확인(Jackson) → `TranNoSource` · 규격 v0.3 · 모의 은행 옵션 → Owner · 선출 · 구간 예약 · 종료 훅 → 매니페스트 · 스모크 [9] → 실험 H0 ~ H5 → 문서.
+
+## 16. 계획 단계에서 고친 점 (2026-11-16)
+| 고친 곳 | 내용 | 이유 |
+|---|---|---|
+| §3 결정 5 · §4 · §6 · §8 · §11 | "readiness = 리더만 UP" → **리더 라벨 + Service selector, 둘 다 Ready** | 대기자가 영원히 NotReady 면 `maxUnavailable 0` 롤링이 새 Pod 를 기다리다 멈추고, `rollout status` · `up.sh` 준비 대기 · 스모크 [0] · 실험 도구 사전 확인("Ready = replicas")이 모두 막힌다 |
+| §3 결정 20 | RBAC 에 Pod get · patch (namespace 범위) | 리더 라벨을 자기 Pod 에 붙이고 떼려면 필요. Pod 이름을 미리 몰라 이름 한정 불가 — 최소 권한이 조금 넓어진 대가 |
+| §6 | 교대 순서에 라벨 떼기 · 붙이기 | 정상 교대: 끊기 → 라벨 떼기 → 반납. 새 리더: 접속 → 라벨 붙이기 |
