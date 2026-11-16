@@ -19,6 +19,15 @@ bank:
     port: 9090
     response-timeout: 3s       # 호출자의 HTTP 응답 시간 초과(5s)보다 짧아야 한다 (스펙 §4-4)
     poll-interval: 30s
+    leader-election:           # 게이트웨이 이중화 (P8-3b). 기본 꺼짐 = 기동 즉시 리더 (IntelliJ · Compose · 테스트). K8s 매니페스트가 켠다
+      enabled: false
+      identity: ${POD_NAME:}         # Downward API (Lease holder · 리더 라벨 대상)
+      namespace: ${POD_NAMESPACE:}
+      lease-duration: 15s            # 갱신 기한(10s)에 옛 리더가 스스로 끊고, 새 리더는 만료(15s) 뒤 — 시계 차 5초 미만 전제 (스펙 §13)
+      renew-deadline: 10s
+      retry-period: 2s
+      drain-timeout: 5s              # 정상 교대 때 처리 중 전문을 기다리는 최대 시간 (응답 시간 초과 3s + 여유)
+      tran-no-block-size: 1000       # 전문번호 구간 예약 단위 (ConfigMap bank-gateway-tran-no)
   maintenance:                 # 송신 보류 (P5-1). api 의 접수 503 과 같은 창이어야 한다 (두 곳 설정 — 스펙 §10)
     enabled: true
     start: "23:50"

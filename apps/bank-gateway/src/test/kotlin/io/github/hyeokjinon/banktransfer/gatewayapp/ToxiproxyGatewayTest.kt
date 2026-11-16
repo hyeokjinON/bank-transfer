@@ -53,7 +53,7 @@ class ToxiproxyGatewayTest {
             proxy = ToxiproxyClient(toxiproxy.host, toxiproxy.controlPort)
                 .createProxy("gateway", "0.0.0.0:8666", "host.testcontainers.internal:${app.port()}")
             baseUrl = "http://${toxiproxy.host}:${toxiproxy.getMappedPort(8666)}"
-            await.atMost(Duration.ofSeconds(10)) untilAsserted { assertTrue(app.getBean(BankGatewayClient::class.java).isConnected) }
+            await.atMost(Duration.ofSeconds(10)) untilAsserted { assertTrue(app.bankClient().isConnected) }
         }
 
         @JvmStatic

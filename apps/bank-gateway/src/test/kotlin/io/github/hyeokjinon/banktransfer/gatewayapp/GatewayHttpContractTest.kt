@@ -57,7 +57,7 @@ class GatewayHttpContractTest {
 
     @Test
     fun `200 - 은행 응답 본문 그대로, 거절 1001 도 200`() {
-        awaitConnected(app.getBean(BankGatewayClient::class.java))
+        awaitConnected(app.bankClient())
         val ok = post(app.port(), transferJson(OK_ACCOUNT))
         assertEquals(200, ok.statusCode())
         assertEquals("0000", GatewayJson.read(ok.body(), TransferResult::class.java).header.responseCode)
@@ -70,7 +70,7 @@ class GatewayHttpContractTest {
     fun `503 BANK_NOT_SENT - 은행 연결이 없다`() {
         val isolated = MockBankServer().start().also { closeables += it }
         val ctx = GatewayApps.start(WebApplicationType.REACTIVE, isolated.boundPort).also { closeables += it }
-        val gw = ctx.getBean(BankGatewayClient::class.java)
+        val gw = ctx.bankClient()
         awaitConnected(gw)
         isolated.pause()
         await.atMost(Duration.ofSeconds(10)) untilAsserted { assert(!gw.isConnected) }
@@ -81,7 +81,7 @@ class GatewayHttpContractTest {
 
     @Test
     fun `504 BANK_TIMEOUT - tranNo 와 timeoutMs 를 싣는다`() {
-        awaitConnected(app.getBean(BankGatewayClient::class.java))
+        awaitConnected(app.bankClient())
         val res = post(app.port(), transferJson(SILENT))
         assertEquals(504, res.statusCode())
         val error = GatewayJson.errorOrNull(res.body())!!
@@ -94,7 +94,7 @@ class GatewayHttpContractTest {
     fun `502 BANK_UNAVAILABLE - 보낸 뒤 응답 전에 은행 회선이 끊겼다`() {
         val isolated = MockBankServer().start().also { closeables += it }
         val ctx = GatewayApps.start(WebApplicationType.REACTIVE, isolated.boundPort, "--bank.gateway.response-timeout=3s").also { closeables += it }
-        awaitConnected(ctx.getBean(BankGatewayClient::class.java))
+        awaitConnected(ctx.bankClient())
         isolated.responseDelay = Duration.ofMillis(300)
         val pauser = Thread { Thread.sleep(100); isolated.pause() }.also { it.start() }
         val res = post(ctx.port(), transferJson(OK_ACCOUNT))
