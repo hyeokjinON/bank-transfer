@@ -677,7 +677,7 @@ bash load/compose/run.sh cleanup       # 끝나면 반드시 — load-p82-u001 ~
 - 결과: `docs/perf/raw/p8-2/<동작>-<회차>.json` (요약) · `.k6.json` · `.nginx-errors.txt` · `.rebalance.txt`, 작업 파일은 `build/load-p82/<동작>-<회차>/`. 먼저 앱을 띄우고 IntelliJ 의 API 는 끈다 (14-1).
 
 ## 15. Kubernetes 실행 (P8-3a)
-> 게이트웨이는 P8-3b 부터 2대 active-standby 다 (§16, 제안) — 아래 §15 의 "게이트웨이 1대 · `Recreate`" 설명은 P8-3a 시점이며 이전 구성(H0)이다.
+> 게이트웨이는 P8-3b 부터 2대 active-standby 다 (§16, ADR-0018 채택) — 아래 §15 의 "게이트웨이 1대 · `Recreate`" 설명은 P8-3a 시점이며 이전 구성(H0)이다.
 
 kind 클러스터(제어 1 + 워커 2): PC `127.0.0.1:8000` → 제어 노드 NodePort 30080 → Envoy → Service `api` → api Pod ×2(워커) → bank-gateway(워커) → mock-bank(제어 노드), 인프라(MySQL · Kafka · Redis)는 제어 노드. 이유 · 숫자는 [ADR-0017](docs/adr/0017-kubernetes-kind.md) · [측정 결과](docs/perf/p8-3a-k8s.md), 파일 · 막히는 곳은 [infra/k8s/README.md](infra/k8s/README.md). 모든 명령은 저장소 루트의 Git Bash 에서. 아래 `kubectl` 은 `--context kind-bank-transfer` 를 줄여 적었다 (여러 클러스터를 쓰면 붙인다).
 
@@ -771,7 +771,7 @@ bash load/k8s/run.sh cleanup               # 끝나면 반드시 — load-p82-u0
 - 클러스터 DB 에 쓰는 행은 `load-p82-u001 ~ u020` · `load-p83a-smoke-<시각>` 뿐이다 (스모크는 끝에서 지운다).
 
 ## 16. 게이트웨이 이중화 (P8-3b)
-> 제안 단계 ([ADR-0018](docs/adr/0018-gateway-ha-leader-election.md) — 머지 뒤 채택). 이유 · 숫자는 ADR 과 [측정 결과](docs/perf/p8-3b-gateway-ha.md), 규격은 [protocol.md](docs/protocol.md) v0.4.
+> [ADR-0018](docs/adr/0018-gateway-ha-leader-election.md) 채택 (2026-11-16, [#31](https://github.com/hyeokjinON/bank-transfer/pull/31)). 이유 · 숫자는 ADR 과 [측정 결과](docs/perf/p8-3b-gateway-ha.md), 규격은 [protocol.md](docs/protocol.md) v0.4.
 
 게이트웨이가 2대(리더 1 · 대기 1)다. **은행에 붙는 것은 리더뿐**이다. 리더는 K8s Lease `bank-gateway-leader` 로 정해지고, 리더가 자기 Pod 에 라벨 `bank-transfer/gateway-role=leader` 를 붙이면 Service `bank-gateway` 가 그 Pod 로만 보낸다. 대기자도 Ready 다 (롤링 · `rollout status` 가 동작하게). 전문번호는 ConfigMap `bank-gateway-tran-no` 에서 1,000개씩 구간을 예약해 쓰므로 선출과 무관하게 겹치지 않는다. 선출은 **K8s 매니페스트에서만** 켜진다 (`bank.gateway.leader-election.enabled` 기본 false — IntelliJ · Compose 는 그대로 1대가 항상 리더). 모든 명령은 저장소 루트의 Git Bash 에서, `kubectl` 은 `--context kind-bank-transfer` 를 줄여 적었다.
 

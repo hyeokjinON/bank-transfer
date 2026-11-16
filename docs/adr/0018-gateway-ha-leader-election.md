@@ -1,6 +1,6 @@
 # ADR-0018: 게이트웨이 이중화 — active-standby, K8s Lease 리더 선출, 리더 라벨 + 둘 다 Ready, 전문번호 ConfigMap 구간 예약
 
-- 상태: 제안 (2026-11-16) — 머지 뒤 정리 PR 에서 `채택`
+- 상태: 채택 (2026-11-16, [#31](https://github.com/hyeokjinON/bank-transfer/pull/31))
 - 관련: [설계](../superpowers/specs/2026-11-16-p8-3b-gateway-ha-design.md) · [계획](../superpowers/plans/2026-11-16-p8-3b-gateway-ha.md) · [측정 결과](../perf/p8-3b-gateway-ha.md) · [규격 v0.4](../protocol.md) · [ADR-0017](0017-kubernetes-kind.md) (Kubernetes — "위험 · 다음" 이 이 단계의 출발점) · [ADR-0015](0015-bank-gateway-service.md) (게이트웨이 분리 — 연결 주인 하나, 게이트웨이는 DB 를 모른다) · [ADR-0006](0006-inquire-instead-of-resend.md) (모르면 묻는다) · [ADR-0001](0001-modular-monolith-ports.md) (포트/어댑터)
 
 ## 맥락

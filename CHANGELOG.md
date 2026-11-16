@@ -9,7 +9,7 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
-## [P8-3b] 게이트웨이 이중화 — (제안, PR #(PR 생성 뒤))
+## [P8-3b] 게이트웨이 이중화 — 2026-11-16 ([#31](https://github.com/hyeokjinON/bank-transfer/pull/31), 머지 후 정리 #32)
 ### Added
 - 게이트웨이 2대 active-standby: K8s Lease `bank-gateway-leader` 리더 선출(fabric8 `kubernetes-client` 8.0.0, JDK HttpClient · 재시도 없음 · 연결 2s · 요청 5s) + 로컬 워치독(갱신 기한 + 0.25초 안에 자기 차단 · 선출기 반납 후 재후보) + 리더 라벨 `bank-transfer/gateway-role=leader`(Service selector, 대기자도 Ready — readiness `role: standby`) + 임기마다 새 `BankGatewayClient` (`BankConnectionOwner`) + SIGTERM 종료 훅 교대(새 요청 거절 → 처리 중 전문 비우기 → 연결 끊기 → 라벨 떼기 → Lease 반납). 선출은 `bank.gateway.leader-election.enabled` 기본 꺼짐.
 - 전문번호 ConfigMap 구간 예약 `bank-gateway-tran-no` (1,000개씩, `resourceVersion` 조건부 update, 경쟁 테스트) — `TranNoSource` 인터페이스(기본 메모리 카운터). 저장된 날짜가 더 새로우면 예약하지 않고, 깨진 기록은 덮어쓰지 않으며, 둘 다 송신 안 함(fail-closed).
@@ -17,19 +17,20 @@
 - 모의 은행 옵션(기본 꺼짐, K8s 에서만): `--single-session` · `--session-idle-timeout=60s` · `--unique-tran-no`, 세션 수 로그. readiness 프로브는 `/proc/net/tcp` LISTEN exec (tcpSocket 은 세션을 먹는다).
 - 매니페스트: `base/rbac-gateway.yaml`(ServiceAccount · Role · RoleBinding), 게이트웨이 PDB, `overlays/experiment-gateway-single`(H0 이전 구성 대조). 스모크 [9](Ready 2/2 · 리더 라벨 1개 = Lease 보유자 · 엔드포인트 = 그 Pod · 모의 은행 동시 세션 1).
 - 실험 도구 `load/k8s/run.sh`: `PHASE=p8-3b`, 동작 `gwroll` · `gwkill` · `gwnode` · `gwcut`, `NODE_KILL=1`, 게이트웨이 분산 사전 확인, 요약 JSON 확장(`bank_sessions_*` · `bank_dup_tran_no` · `unknown_results` · `gw_acquired_s` · 은행 공백).
-- ADR-0018 (제안), OPERATION §16, ARCHITECTURE "게이트웨이 이중화 (제안)", [측정 결과](docs/perf/p8-3b-gateway-ha.md) (원자료 `docs/perf/raw/p8-3b/`). 테스트: 전체 개수는 PR CI 기준.
+- ADR-0018 (채택), OPERATION §16, ARCHITECTURE "게이트웨이 이중화", [측정 결과](docs/perf/p8-3b-gateway-ha.md) (원자료 `docs/perf/raw/p8-3b/`). 테스트 41개 추가 — 전체 664개 (P8-3a 623 + 41, 건너뜀 2).
 ### Changed
 - 게이트웨이 `Recreate` · preStop 10s → `RollingUpdate`(0/1) · preStop 없음 · replicas 2 · `matchLabelKeys` 분산 · PDB `minAvailable 1`. **이전 구성 → 이중화 첫 적용은 `scale --replicas=0` 뒤 적용** (롤링 교착, OPERATION §16-5).
 - Compose · IntelliJ (선출 꺼짐) 종료 순서가 바뀜: SIGTERM 에 웹 graceful 전에 새 요청 503 BANK_NOT_SENT → 처리 중 전문 최대 5초 비우기 → 끊기 (예산 5 + 20 < 30초 `stop_grace_period`).
-- 문서: README 로드맵(P8-3b 는 `[ ]` — 머지 뒤 정리 PR 에서 `[x]`) · 실행 안내, HANDOVER, `infra/k8s/README.md`, OPERATION §15 머리말.
+- 문서: README 로드맵(P8-3b `[x]`) · 실행 안내, HANDOVER, `infra/k8s/README.md`, OPERATION §15 머리말.
 ### 측정 요약 ([결과](docs/perf/p8-3b-gateway-ha.md), 이 PC · kind 3노드 기준 — 운영 수치가 아니다)
 - **13회 전부 돈 정확** (접수 = 출금 행 = 거래번호, 전부 `COMPLETED`, 은행 기록 빠짐 0 · 이중 0, 환불 0, 잔고 = 원장 합). **동시 세션 최대 1.**
 - **H0 ↔ H1**: 이전 구성 drain 세션 거부 **7** · 번호 중복 **591** → 이중화 **0 · 0** (2회). preStop 없는 H0 변형은 중복 387 — 번호 중복은 재시작만으로 생긴다.
 - **정상 교대 · 롤링 · 강제 삭제** 6회 은행 공백 **1.1 ~ 3.7초**, 결과 모름 0. **노드 SIGKILL(H4′)** 새 리더 **14.6초** · 공백 14.3초(Lease 만료). `docker stop` 은 SIGTERM 이라 정상 교대와 같다(4.3초).
 - 발견: 첫 전환 롤링 교착 · 두 복제본이 한 노드면 새 리더 **353.4초**(`ScheduleAnyway` 는 재분산 안 함) · 모의 은행 tcp 프로브가 세션을 먹음(거부 13). H5(API 서버 단절)는 kind(kindnet)가 API 서버 egress 를 막지 않아 재현 못 함 → `GatewayLeaderElectionTest` 로 대체.
 - 구현 리뷰가 찾은 안전 결함(측정 전 수정): 응답 없는 API 서버에서 자기 차단이 15 ~ 20초 늦음(워치독), 워치독 뒤 리더 없음 고착, 전문번호 날짜 되돌림.
-### CI · 사람 확인
-- PR 생성 뒤 채운다 (CI `k8s-smoke` 시간 · 전체 테스트 수 · Postman 직접 확인).
+### CI · 사람 확인 (머지 전)
+- CI (#31, `dcfb203`): `build` 9분 12초 · `infra-smoke` 48초 · `app-smoke` 4분 10초 · **`k8s-smoke` 5분 52초** (P8-3a 5분 45초 — 스모크 [9] 를 더하고도 스모크 단계 21초 그대로, 20분 제한 그대로).
+- Postman 직접 확인 (2026-11-16, kind · 이미지 `dev-dcfb203`): 1원인증 `VERIFIED` · 충전 → 출금 `COMPLETED` · 같은 키 재요청 200 같은 id · **리더 Pod 삭제 2번** 직후 출금 모두 `COMPLETED` (리더 · Lease 보유자가 다른 Pod 로 옮겨 감) · 대기자 `bankConnection` = `role: standby` UP · 모의 은행 세션 `closed sessions=0 → opened sessions=1` (은행 공백 4.0 · 3.0초), `session rejected` 0 · `duplicate tran no` 0 · 번호 장부 `reservedTo` 28000 → 30000 (교대마다 +1,000) — 7항목 모두 기대대로.
 
 ## [P8-3a] Kubernetes(kind) 로 옮기기 — 2026-11-16 ([#29](https://github.com/hyeokjinON/bank-transfer/pull/29), 머지 후 정리 #30)
 ### Added

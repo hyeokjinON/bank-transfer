@@ -1,6 +1,6 @@
 # ARCHITECTURE — 구조와 흐름
 
-> 기준: P8-3a Kubernetes(kind) 로 옮기기 (2026-11-16, [#29](https://github.com/hyeokjinON/bank-transfer/pull/29) 머지 — [ADR-0017](docs/adr/0017-kubernetes-kind.md), 실행 그림은 아래 §1 의 "Kubernetes 실행"). 그 앞: P8-2 앱 이미지 · Compose 전체 실행 · api 2대 (2026-11-11, [#27](https://github.com/hyeokjinON/bank-transfer/pull/27) 머지 — [ADR-0016](docs/adr/0016-app-images-compose.md) — 기본 `bank.gateway.mode` 가 `http` 로 바뀌었고, 컨테이너 실행은 아래 §1 의 "컨테이너 실행" 그림). 그 앞: P8-1 은행 게이트웨이 서비스 분리 (2026-11-10, [#25](https://github.com/hyeokjinON/bank-transfer/pull/25) 머지 — [ADR-0015](docs/adr/0015-bank-gateway-service.md), P8-2 전에는 기본이 `direct` 라 아래 그림의 직결 경로가 평소 모양이었다). P5-1 일마감 대사 · 점검 시간 · 알림 완료 (2026-10-30, PR #15 머지). P4-2 잔고 차감 락 전략 완료 (2026-10-28, PR #13 머지). P4-1 원화 잔고 완료 (2026-10-26, PR #11 머지). P3 완료(P3-3b PR #9 머지). P3 ~ P5 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p5)에 적는다.
+> 기준: P8-3b 게이트웨이 이중화 (2026-11-16, [#31](https://github.com/hyeokjinON/bank-transfer/pull/31) 머지 — [ADR-0018](docs/adr/0018-gateway-ha-leader-election.md), 아래 §1 의 "게이트웨이 이중화"). 그 앞: P8-3a Kubernetes(kind) 로 옮기기 (2026-11-16, [#29](https://github.com/hyeokjinON/bank-transfer/pull/29) 머지 — [ADR-0017](docs/adr/0017-kubernetes-kind.md), 실행 그림은 아래 §1 의 "Kubernetes 실행"). 그 앞: P8-2 앱 이미지 · Compose 전체 실행 · api 2대 (2026-11-11, [#27](https://github.com/hyeokjinON/bank-transfer/pull/27) 머지 — [ADR-0016](docs/adr/0016-app-images-compose.md) — 기본 `bank.gateway.mode` 가 `http` 로 바뀌었고, 컨테이너 실행은 아래 §1 의 "컨테이너 실행" 그림). 그 앞: P8-1 은행 게이트웨이 서비스 분리 (2026-11-10, [#25](https://github.com/hyeokjinON/bank-transfer/pull/25) 머지 — [ADR-0015](docs/adr/0015-bank-gateway-service.md), P8-2 전에는 기본이 `direct` 라 아래 그림의 직결 경로가 평소 모양이었다). P5-1 일마감 대사 · 점검 시간 · 알림 완료 (2026-10-30, PR #15 머지). P4-2 잔고 차감 락 전략 완료 (2026-10-28, PR #13 머지). P4-1 원화 잔고 완료 (2026-10-26, PR #11 머지). P3 완료(P3-3b PR #9 머지). P3 ~ P5 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p5)에 적는다.
 
 ## 1. 한눈에 보기
 
@@ -103,8 +103,8 @@ flowchart LR
 - NetworkPolicy 는 namespace 전체 ingress 기본 거부 + 위 화살표(허용 목록)만. 허용 목록 밖 Pod 는 게이트웨이 · MySQL 에 못 붙는다 (N0). 프로브 3종은 Pod 별로 다르다: api readiness = Spring 기본, **게이트웨이 readiness 에만 `bankConnection`** (은행 장애 = Service 에서 빠짐, 재시작 아님).
 - (P8-3a 시점) 게이트웨이 1대 = 단일 장애점이었다. `Recreate` 는 배포 때만 연결 주인을 하나로 지키고 퇴거(drain)에는 못 지켰다 → 아래 P8-3b.
 
-### 게이트웨이 이중화 (P8-3b, 제안)
-> 제안 — [ADR-0018](docs/adr/0018-gateway-ha-leader-election.md) (머지 뒤 채택, 이 "(제안)" 표시는 정리 PR 에서 뗀다). 위 그림의 게이트웨이 1대가 2대 active-standby 가 된다. 이유 · 실험 숫자는 ADR 과 [측정 결과](docs/perf/p8-3b-gateway-ha.md), 운영은 [OPERATION §16](OPERATION.md#16-게이트웨이-이중화-p8-3b).
+### 게이트웨이 이중화 (P8-3b)
+> [ADR-0018](docs/adr/0018-gateway-ha-leader-election.md) (2026-11-16, [#31](https://github.com/hyeokjinON/bank-transfer/pull/31) 머지). 위 그림의 게이트웨이 1대가 2대 active-standby 가 된다. 이유 · 실험 숫자는 ADR 과 [측정 결과](docs/perf/p8-3b-gateway-ha.md), 운영은 [OPERATION §16](OPERATION.md#16-게이트웨이-이중화-p8-3b).
 
 ```mermaid
 flowchart LR
@@ -481,4 +481,4 @@ flowchart TB
 | [0015](docs/adr/0015-bank-gateway-service.md) | 은행 게이트웨이를 별도 서비스(동기 HTTP)로 분리, 실패 분류 · 재시도 끔 · 송신 취소 안 함은 그대로, 기본은 `direct` 유지 (P8-2 에서 `http` 로 변경 — ADR-0016) |
 | [0016](docs/adr/0016-app-images-compose.md) | 루트 Dockerfile 하나 · 타깃 3 · nginx 앞 api 2대(보낸 POST 는 다시 보내지 않음), 하루 배치만 ShedLock, `mode` 기본 `http`, 파티션 3 유지 |
 | [0017](docs/adr/0017-kubernetes-kind.md) | 같은 구성을 kind(Kubernetes)로 — Envoy Gateway 입구(재시도 없음), preStop 10s · 프로브 3종, 게이트웨이 readiness 에만 은행 연결, NetworkPolicy 기본 거부, 인프라 · 모의 은행은 제어 노드, 연결 주인 하나는 P8-3b |
-| [0018](docs/adr/0018-gateway-ha-leader-election.md) | 게이트웨이 2대 active-standby — K8s Lease 리더 선출, 리더 라벨 + 둘 다 Ready, 전문번호 ConfigMap 구간 예약, 정상 교대 순서(종료 훅), 규격 v0.4 `3001` (제안) |
+| [0018](docs/adr/0018-gateway-ha-leader-election.md) | 게이트웨이 2대 active-standby — K8s Lease 리더 선출, 리더 라벨 + 둘 다 Ready, 전문번호 ConfigMap 구간 예약, 정상 교대 순서(종료 훅), 규격 v0.4 `3001` |

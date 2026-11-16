@@ -1,6 +1,6 @@
 # Kubernetes (kind) — P8-3a · P8-3b
 
-kind 클러스터(제어 1 + 워커 2)에 인프라 · 모의 은행 · 게이트웨이 · api 2대 · Envoy Gateway 입구를 띄운다. 이유 · 결정은 [ADR-0017](../../docs/adr/0017-kubernetes-kind.md), 설계는 [스펙](../../docs/superpowers/specs/2026-11-12-p8-3a-k8s-design.md), 실험 숫자는 [측정 결과](../../docs/perf/p8-3a-k8s.md), 운영 절차는 [OPERATION §15](../../OPERATION.md#15-kubernetes-실행-p8-3a), 게이트웨이 2대(P8-3b, 제안 — [ADR-0018](../../docs/adr/0018-gateway-ha-leader-election.md) · [측정](../../docs/perf/p8-3b-gateway-ha.md))는 [OPERATION §16](../../OPERATION.md#16-게이트웨이-이중화-p8-3b), 설치는 [SETUP §2-9](../../SETUP.md). 모든 명령은 저장소 루트의 Git Bash(또는 Linux bash)에서.
+kind 클러스터(제어 1 + 워커 2)에 인프라 · 모의 은행 · 게이트웨이 · api 2대 · Envoy Gateway 입구를 띄운다. 이유 · 결정은 [ADR-0017](../../docs/adr/0017-kubernetes-kind.md), 설계는 [스펙](../../docs/superpowers/specs/2026-11-12-p8-3a-k8s-design.md), 실험 숫자는 [측정 결과](../../docs/perf/p8-3a-k8s.md), 운영 절차는 [OPERATION §15](../../OPERATION.md#15-kubernetes-실행-p8-3a), 게이트웨이 2대(P8-3b — [ADR-0018](../../docs/adr/0018-gateway-ha-leader-election.md) · [측정](../../docs/perf/p8-3b-gateway-ha.md))는 [OPERATION §16](../../OPERATION.md#16-게이트웨이-이중화-p8-3b), 설치는 [SETUP §2-9](../../SETUP.md). 모든 명령은 저장소 루트의 Git Bash(또는 Linux bash)에서.
 
 ## 올리기 · 확인 · 내리기
 ```bash
