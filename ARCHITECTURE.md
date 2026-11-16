@@ -4,6 +4,16 @@
 
 ## 1. 한눈에 보기
 
+그림 두 장 (단계마다 갱신 — 구성이 바뀌는 PR 은 이 그림도 고친다):
+- [애플리케이션 구조 — 출금 · 1원인증 흐름](docs/diagrams/app-architecture.svg): 접수 트랜잭션 → 아웃박스 → Kafka → 컨슈머 → 게이트웨이 → 은행, 재시도 토픽 · 결과조회 · 하루 배치
+- [실행 구성도 — Kubernetes(kind) 3노드](docs/diagrams/runtime-k8s.svg): 제어 노드(인프라 · 은행 · 입구) · 워커 2(api · 게이트웨이 리더/대기) · Service · Lease · ConfigMap · 필수 분산
+
+![애플리케이션 구조](docs/diagrams/app-architecture.svg)
+
+![실행 구성도](docs/diagrams/runtime-k8s.svg)
+
+아래 mermaid 그림은 코드 경계(모듈 · 포트/어댑터) 중심이다.
+
 ```mermaid
 flowchart LR
     C[클라이언트] -- "HTTP/JSON" --> API
@@ -88,17 +98,18 @@ flowchart LR
     end
     subgraph W1["워커 1 (role=app)"]
         A1[api Pod]
+        G[bank-gateway 리더 :8082]
     end
     subgraph W2["워커 2 (role=app)"]
         A2[api Pod]
-        G[bank-gateway :8082<br/>Recreate · 1대]
+        G2[bank-gateway 대기 :8082<br/>은행 연결 없음]
     end
     E -- "Service api<br/>(NetworkPolicy 허용: Envoy → api)" --> A1 & A2
-    A1 & A2 -- "허용: api → 게이트웨이" --> G
+    A1 & A2 -- "허용: api → 게이트웨이<br/>(Service 는 리더 라벨만)" --> G
     G -- "허용: 게이트웨이 → 모의 은행<br/>TCP 전문 1개" --> M
     A1 & A2 -- "허용: api → MySQL · Redis · Kafka" --> DB & R & K
 ```
-게이트웨이는 워커(role=app) 중 한 대에 뜬다 — 그림의 위치는 예시.
+게이트웨이는 P8-3b 부터 2대(리더 · 대기)이고 P8-3c 부터 **반드시 서로 다른 워커**다 — 어느 워커가 리더인지는 그때그때 다르다 (그림은 예시). P8-3a 시점에는 1대 · `Recreate` 였다.
 - 노드 배치: 인프라 · 모의 은행 · CoreDNS · Envoy Gateway 컨트롤러 · Envoy 프록시 = 제어 노드(워커 장애 실험에서 같이 죽지 않게), api · 게이트웨이 = 워커. api 는 `topologySpreadConstraints` 로 워커에 하나씩. PV 는 제어 노드에 묶인다.
 - NetworkPolicy 는 namespace 전체 ingress 기본 거부 + 위 화살표(허용 목록)만. 허용 목록 밖 Pod 는 게이트웨이 · MySQL 에 못 붙는다 (N0). 프로브 3종은 Pod 별로 다르다: api readiness = Spring 기본, **게이트웨이 readiness 에만 `bankConnection`** (은행 장애 = Service 에서 빠짐, 재시작 아님).
 - (P8-3a 시점) 게이트웨이 1대 = 단일 장애점이었다. `Recreate` 는 배포 때만 연결 주인을 하나로 지키고 퇴거(drain)에는 못 지켰다 → 아래 P8-3b.
@@ -117,7 +128,7 @@ flowchart LR
     L -- "구간 1,000개 예약<br/>(resourceVersion CAS)" --> CM[("ConfigMap<br/>bank-gateway-tran-no")]
 ```
 - 리더 선출 (fabric8 `LeaderElector`, 로컬 워치독이 갱신 기한 + 0.25초 안에 자기 차단) → 리더 라벨 (접속 뒤 붙이고, 교대 때 끊은 뒤 뗀다) → 전문번호 구간 예약(선출과 독립 — 두 대가 겹쳐도 번호가 안 겹친다). 정상 교대: 새 요청 거절 → 처리 중 전문 비우기 → 연결 끊기 → 라벨 떼기 → Lease 반납 (SIGTERM 종료 훅). 선출은 K8s 에서만 켜진다 (기본 꺼짐).
-- 두 복제본이 한 노드에 있으면 이중화가 아니다 (OPERATION §16-3).
+- 두 복제본이 한 노드에 있으면 이중화가 아니다 — P8-3c 부터 `DoNotSchedule` 분산으로 한 노드에 놓일 수 없다. 워커가 빠지면 대체 게이트웨이는 Pending, 돌아오면 그 워커에 뜬다 ([ADR-0019](docs/adr/0019-gateway-required-spread.md), 제안 · OPERATION §16-3).
 
 ## 2. 모듈
 
@@ -482,3 +493,4 @@ flowchart TB
 | [0016](docs/adr/0016-app-images-compose.md) | 루트 Dockerfile 하나 · 타깃 3 · nginx 앞 api 2대(보낸 POST 는 다시 보내지 않음), 하루 배치만 ShedLock, `mode` 기본 `http`, 파티션 3 유지 |
 | [0017](docs/adr/0017-kubernetes-kind.md) | 같은 구성을 kind(Kubernetes)로 — Envoy Gateway 입구(재시도 없음), preStop 10s · 프로브 3종, 게이트웨이 readiness 에만 은행 연결, NetworkPolicy 기본 거부, 인프라 · 모의 은행은 제어 노드, 연결 주인 하나는 P8-3b |
 | [0018](docs/adr/0018-gateway-ha-leader-election.md) | 게이트웨이 2대 active-standby — K8s Lease 리더 선출, 리더 라벨 + 둘 다 Ready, 전문번호 ConfigMap 구간 예약, 정상 교대 순서(종료 훅), 규격 v0.4 `3001` |
+| [0019](docs/adr/0019-gateway-required-spread.md) | 게이트웨이 두 복제본 필수 분산 — `DoNotSchedule` + `matchLabelKeys`(롤링 교착 방지) + `nodeTaintsPolicy Ignore`(빠진 워커로 복귀) (제안) |

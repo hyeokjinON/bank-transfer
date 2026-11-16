@@ -12,7 +12,7 @@
 # 확인 (P8-2 load/compose/run.sh 와 같은 기준): 접수된 키 = 출금 행, 전부 COMPLETED, 은행 거래 기록 = 출금 행(같은 거래번호 두 번 0), 잔고 = 원장 합.
 #   통과 못 하면 요약을 .json.invalid 로. 시간 지표는 timeline.sh(1 ~ 2초 간격) → timeline.awk.
 # 사용 (Git Bash · Linux): bash load/k8s/run.sh <동작> <회차>      먼저: bash infra/k8s/up.sh
-# 환경변수: RATE(20) DURATION(60s, rolling 은 150s) ACTION_AT(20) SETTLE(300) BANK_DOWN_S(60) NODE_DOWN_S(420) NODE(drain · node 대상) OVERLAY(tagtrap, local) PHASE(p8-3a | p8-3b, 기본 p8-3a) CUT_S(40, gwcut) NODE_KILL(0 | 1, node · gwnode — 1 이면 docker kill)
+# 환경변수: RATE(20) DURATION(60s, rolling 은 150s) ACTION_AT(20) SETTLE(300) BANK_DOWN_S(60) NODE_DOWN_S(420) NODE(drain · node 대상) OVERLAY(tagtrap, local) PHASE(p8-3a | p8-3b | p8-3c, 기본 p8-3a) CUT_S(40, gwcut) NODE_KILL(0 | 1, node · gwnode — 1 이면 docker kill)
 # 결과: docs/perf/raw/<PHASE>/<동작>-<회차>.json · .k6.json · .timeline.txt · .rebalance.txt, 작업 파일 build/load-<PHASE>/<동작>-<회차>/
 set -euo pipefail
 . "$(dirname "$0")/../../infra/k8s/lib.sh"
@@ -53,8 +53,8 @@ ACTION=${1:?동작: steady | rolling | podkill | tagtrap | bank | drain | node |
 ROUND=${2:?회차: 1, 2 …}
 case "$ACTION" in steady|rolling|podkill|tagtrap|bank|drain|node|gwroll|gwkill|gwnode|gwcut) ;; *) die "모르는 동작: $ACTION" ;; esac
 [[ "$ROUND" =~ ^[0-9]{1,2}$ ]] || die "회차는 숫자 1 ~ 2자리: $ROUND"
-PHASE=${PHASE:-p8-3a}   # 결과 폴더 — P8-3b 실험은 PHASE=p8-3b
-[[ "$PHASE" =~ ^p8-3[ab]$ ]] || die "PHASE 는 p8-3a | p8-3b: $PHASE"
+PHASE=${PHASE:-p8-3a}   # 결과 폴더 — P8-3b 실험은 PHASE=p8-3b, P8-3c(필수 분산)는 p8-3c
+[[ "$PHASE" =~ ^p8-3[abc]$ ]] || die "PHASE 는 p8-3a | p8-3b | p8-3c: $PHASE"
 RUN="$ACTION-$ROUND"
 OUT_DIR=docs/perf/raw/$PHASE; OUT="$OUT_DIR/$RUN.json"; WORK="build/load-$PHASE/$RUN"
 rm -rf "$WORK"; mkdir -p "$OUT_DIR" "$WORK"; rm -f "$OUT" "$OUT.invalid" "$OUT.tmp" "$OUT_DIR/$RUN.k6.json"
@@ -244,6 +244,15 @@ case "$ACTION" in
          d start "$NODE" >/dev/null; RESTORE=
          ka wait "node/$NODE" --for=condition=Ready --timeout=300s >/dev/null || die "노드 $NODE 가 돌아오지 않는다 — down.sh → up.sh (스펙 §13)" ;;
 esac
+# P8-3c: 노드가 돌아온(uncordon) 뒤 Pending 이던 게이트웨이가 그 노드에 다시 뜨는 것까지 표본에 남긴다 (최대 300초, 최선 노력 — 판정 아님)
+case "$ACTION" in
+  drain|node|gwnode)
+    for _ in $(seq 300); do
+      r=$(k get deploy bank-gateway -o jsonpath='{.status.readyReplicas}' 2>/dev/null); w=$(k get deploy bank-gateway -o jsonpath='{.spec.replicas}' 2>/dev/null)
+      [ -n "$w" ] && [ "${r:-0}" = "$w" ] && break
+      sleep 1
+    done ;;
+esac
 
 # --- 4. 완료 대기 ---
 P=-1; SETTLE_S=0
@@ -306,7 +315,8 @@ cat > "$OUT.tmp" <<JSON
  "journal_missing":$JOURNAL_MISSING,"journal_dup":$JOURNAL_DUP,"rebalance_lines":$(wc -l < "$WORK/rebalance.txt" | tr -d ' '),
  "api_ready_min":${M[api_ready_min]:-null},"api_recovered_s":${M[api_recovered_s]:-null},"gw_not_ready_s":${M[gw_not_ready_s]:-null},"gw_restarts":${M[gw_restarts]:-null},
  "node_notready_s":${M[node_notready_s]:-null},"pod_notready_s":${M[pod_notready_s]:-null},"replacement_ready_s":${M[replacement_ready_s]:-null},
- "gw_leader_before":$(str "$GW_LEADER"),"bank_sessions_max":$(num "$BANK_SESS_MAX"),"bank_sessions_rejected":$(num "$BANK_REJECTED"),"bank_sessions_evicted":$(num "$BANK_EVICTED"),"bank_dup_tran_no":$(num "$BANK_DUP"),"unknown_results":$(num "$UNKNOWN"),"gw_lost_s":$GW_LOST_S,"gw_acquired_s":$GW_ACQ_S,"gw_leaderless_s":${M[gw_leaderless_s]:-null},"leader_changes":${M[leader_changes]:-null}}
+ "gw_leader_before":$(str "$GW_LEADER"),"bank_sessions_max":$(num "$BANK_SESS_MAX"),"bank_sessions_rejected":$(num "$BANK_REJECTED"),"bank_sessions_evicted":$(num "$BANK_EVICTED"),"bank_dup_tran_no":$(num "$BANK_DUP"),"unknown_results":$(num "$UNKNOWN"),"gw_lost_s":$GW_LOST_S,"gw_acquired_s":$GW_ACQ_S,"gw_leaderless_s":${M[gw_leaderless_s]:-null},"leader_changes":${M[leader_changes]:-null},
+ "gw_pending_s":${M[gw_pending_s]:-null},"gw_colocated_s":${M[gw_colocated_s]:-null},"gw_nodes_end":${M[gw_nodes_end]:-null}}
 JSON
 FAILS=()
 [[ "$ACCEPTED" =~ ^[1-9][0-9]*$ ]] || FAILS+=("접수된 키가 양의 정수가 아님: ${ACCEPTED:-없음}")

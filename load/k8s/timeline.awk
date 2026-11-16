@@ -9,6 +9,8 @@ $1 == "P" {
     if ($5 == node && $6 != "True") apiOnNodeNot[t]++
   }
   if ($3 == "bank-gateway") {
+    if ($5 == "-") gwPend[t] = 1   # 노드가 정해지지 않은 Pod = Pending (P8-3c: 필수 분산이 막은 것)
+    if ($6 == "True" && $5 != "-") { gwRC[t]++; if (!((t, $5) in gwRN)) { gwRN[t, $5] = 1; gwRD[t]++ } }   # Ready 게이트웨이 수 · 그들이 있는 노드 수
     if ($6 == "True") gwReady[t] = 1
     if ($6 == "True" && $8 == "leader") gwLead[t] = 1
     if (!($4 in r0)) r0[$4] = $7
@@ -25,6 +27,7 @@ function allnull() {
   print "api_ready_min=null"; print "api_recovered_s=null"; print "gw_not_ready_s=null"; print "gw_restarts=null"
   print "node_notready_s=null"; print "pod_notready_s=null"; print "replacement_ready_s=null"
   print "gw_leaderless_s=null"; print "leader_changes=null"
+  print "gw_pending_s=null"; print "gw_colocated_s=null"; print "gw_nodes_end=null"
 }
 END {
   if (n == 0) { allnull(); exit }
@@ -37,6 +40,8 @@ END {
     if (c < 2) lastBad = t
     if (!(t in gwReady) && i < n) gwNot += ts[i + 1] - t
     if (!(t in gwLead) && i < n) gwNoLead += ts[i + 1] - t
+    if ((t in gwPend) && i < n) gwPendMs += ts[i + 1] - t
+    if (gwRC[t] + 0 >= 2 && gwRD[t] + 0 == 1 && i < n) gwColoMs += ts[i + 1] - t   # Ready 게이트웨이 2대 이상이 한 노드에만
     if (podNot == "" && apiOnNodeNot[t] > 0) podNot = t
   }
   rec = ""
@@ -53,4 +58,7 @@ END {
   print "replacement_ready_s=" (repl == "" ? "null" : repl)
   print "gw_leaderless_s=" sprintf("%.1f", gwNoLead / 1000)   # Ready 이면서 리더 라벨인 게이트웨이가 없던 시간 (선출 끈 H0 은 전 구간 — gw_not_ready_s 를 본다)
   print "leader_changes=" (changes + 0)
+  print "gw_pending_s=" sprintf("%.1f", gwPendMs / 1000)     # 게이트웨이 Pod 가 노드 없이 기다린 시간 (동작 뒤)
+  print "gw_colocated_s=" sprintf("%.1f", gwColoMs / 1000)   # Ready 게이트웨이가 모두 한 노드에 있던 시간 (동작 뒤)
+  print "gw_nodes_end=" (gwRD[ts[n]] + 0)                    # 마지막 표본에서 Ready 게이트웨이가 있는 노드 수
 }
