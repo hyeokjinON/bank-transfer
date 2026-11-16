@@ -1,5 +1,9 @@
 package io.github.hyeokjinon.banktransfer.gatewayapp.config
 
+import io.fabric8.kubernetes.client.Config
+import io.fabric8.kubernetes.client.ConfigBuilder
+import io.fabric8.kubernetes.client.KubernetesClient
+import io.fabric8.kubernetes.client.KubernetesClientBuilder
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
 import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceWindow
@@ -8,6 +12,11 @@ import io.github.hyeokjinon.banktransfer.gateway.TranNoSource
 import io.github.hyeokjinon.banktransfer.gatewayapp.health.BankConnectionHealthIndicator
 import io.github.hyeokjinon.banktransfer.gatewayapp.leader.AlwaysLeader
 import io.github.hyeokjinon.banktransfer.gatewayapp.leader.BankConnectionOwner
+import io.github.hyeokjinon.banktransfer.gatewayapp.leader.ConfigMapTranNoSource
+import io.github.hyeokjinon.banktransfer.gatewayapp.leader.GatewayLeaderElection
+import io.github.hyeokjinon.banktransfer.gatewayapp.leader.LeaderLabel
+import org.springframework.beans.factory.ObjectProvider
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.context.SmartLifecycle
 import org.springframework.context.annotation.Bean
@@ -65,9 +74,31 @@ class GatewayConfiguration {
     @Bean
     fun clock(): Clock = Clock.system(ZoneId.of("Asia/Seoul"))   // 저장소 시간대 정책은 KST (docs/database.md)
 
-    /** 전문번호 발급. Task 6 이 선출 켜짐이면 ConfigMap 구간 예약으로 바꾼다. */
+    /**
+     * K8s API 클라이언트 — 선출이 켜졌을 때만 (Pod 안 ServiceAccount 토큰으로 자동 설정, 테스트는 가짜 API 서버 주소).
+     * 빨리 실패: 재시도 없음 · 연결 2초 · 요청 5초. fabric8 기본 재시도(지수 백오프)는 API 서버 단절 때 갱신 실패를 늦게 알려
+     * "갱신 기한(10s) 안에 자기 차단" 을 흐린다 — 재시도는 선출기의 재시도 주기(2s)가 맡는다.
+     */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(prefix = "bank.gateway.leader-election", name = ["enabled"], havingValue = "true")
+    fun kubernetesClient(election: LeaderElectionProperties): KubernetesClient {
+        val base = if (election.apiServerUrl.isBlank()) {
+            Config.autoConfigure(null)
+        } else {
+            ConfigBuilder(Config.empty()).withMasterUrl(election.apiServerUrl).withNamespace(election.namespace).build()
+        }
+        val config = ConfigBuilder(base).withRequestRetryBackoffLimit(0).withConnectionTimeout(2_000).withRequestTimeout(5_000).build()
+        return KubernetesClientBuilder().withConfig(config).build()
+    }
+
+    /** 전문번호 발급: 선출 켜짐 = ConfigMap 구간 예약(게이트웨이 여러 대 사이 유일), 꺼짐 = 메모리 카운터 (지금과 같다). */
     @Bean
-    fun tranNoSource(): TranNoSource = InMemoryTranNoSource()
+    fun tranNoSource(election: LeaderElectionProperties, k8s: ObjectProvider<KubernetesClient>, clock: Clock): TranNoSource =
+        if (election.enabled) {
+            ConfigMapTranNoSource(k8s.getObject(), election.namespace, election.tranNoConfigMap, clock, election.tranNoBlockSize)
+        } else {
+            InMemoryTranNoSource()
+        }
 
     /**
      * 은행 연결의 주인. 컨트롤러는 이 빈을 BankGateway 로 받는다 (리더가 아니면 503 BANK_NOT_SENT).
@@ -93,10 +124,15 @@ class GatewayConfiguration {
         }.apply { if (!election.enabled) startLeading() }
     }
 
-    /** 종료 훅 (웹 서버보다 먼저). Task 6 이 선출 켜짐이면 GatewayLeaderElection 으로 바꾼다. */
+    /** 종료 훅 + (켜짐이면) 선출. 둘 다 웹 서버 graceful 종료보다 먼저 멈춘다. */
     @Bean
-    fun gatewayLeadership(owner: BankConnectionOwner, election: LeaderElectionProperties): SmartLifecycle =
-        AlwaysLeader(owner, election.drainTimeout)
+    fun gatewayLeadership(owner: BankConnectionOwner, election: LeaderElectionProperties, k8s: ObjectProvider<KubernetesClient>): SmartLifecycle =
+        if (election.enabled) {
+            val client = k8s.getObject()
+            GatewayLeaderElection(client, election, owner, LeaderLabel(client, election.namespace, election.identity))
+        } else {
+            AlwaysLeader(owner, election.drainTimeout)
+        }
 
     @Bean
     fun bankConnectionHealthIndicator(owner: BankConnectionOwner) = BankConnectionHealthIndicator(owner)
