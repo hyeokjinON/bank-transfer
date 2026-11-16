@@ -24,8 +24,11 @@ class MockK8s : AutoCloseable {
 
     private val serverClient: KubernetesClient = server.createClient()
     val url: String get() = serverClient.configuration.masterUrl
-    val client: KubernetesClient = KubernetesClientBuilder().withConfig(
-        ConfigBuilder(Config.empty()).withMasterUrl(url).withRequestRetryBackoffLimit(0).withConnectionTimeout(1_000).withRequestTimeout(3_000).build(),
+    val client: KubernetesClient = clientFor(url)
+
+    /** 같은 "빨리 실패" 설정으로 다른 주소(예: 패킷 드롭 프록시)를 가리키는 클라이언트. 닫는 책임은 호출자. */
+    fun clientFor(masterUrl: String): KubernetesClient = KubernetesClientBuilder().withConfig(
+        ConfigBuilder(Config.empty()).withMasterUrl(masterUrl).withRequestRetryBackoffLimit(0).withConnectionTimeout(1_000).withRequestTimeout(3_000).build(),
     ).build()
 
     fun createPod(namespace: String, name: String) {

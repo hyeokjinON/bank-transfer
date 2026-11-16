@@ -4,6 +4,7 @@ import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
 import io.github.hyeokjinon.banktransfer.gateway.InMemoryTranNoSource
 import io.github.hyeokjinon.banktransfer.gatewayapp.config.LeaderElectionProperties
+import io.github.hyeokjinon.banktransfer.gatewayapp.k8s.BlackholeProxy
 import io.github.hyeokjinon.banktransfer.gatewayapp.k8s.MockK8s
 import io.github.hyeokjinon.banktransfer.mockbank.MockBankServer
 import org.awaitility.kotlin.await
@@ -107,5 +108,37 @@ class GatewayLeaderElectionTest {
         await.atMost(Duration.ofSeconds(5)) untilAsserted { assertFalse(a.isLeader) }
         val fencedMs = (System.nanoTime() - cutAt) / 1_000_000
         assertTrue(fencedMs <= 2_000 + 1_500, "갱신 기한(2s) + 재시도 여유 안에 끊어야 한다: ${fencedMs}ms")
+    }
+
+    @Test
+    fun `API 서버가 응답하지 않아도(패킷 드롭) 갱신 기한 안에 은행 연결을 끊는다`() {
+        BlackholeProxy(k8s.url).use { proxy ->
+            val proxied = k8s.clientFor(proxy.url)
+            try {
+                k8s.createPod(ns, "gw-a")
+                val tranNo = InMemoryTranNoSource()
+                val owner = BankConnectionOwner(tranNo) {
+                    BankGatewayClient(
+                        BankGatewayConfig("127.0.0.1", bank.boundPort, reconnectMinDelay = Duration.ofMillis(100), reconnectMaxDelay = Duration.ofMillis(300)),
+                        tranNoSource = tranNo,
+                    )
+                }
+                val election = GatewayLeaderElection(proxied, props("gw-a"), owner, LeaderLabel(proxied, ns, "gw-a"))
+                election.start()
+                started += election
+                await.atMost(Duration.ofSeconds(10)) untilAsserted { assertTrue(owner.isLeader && owner.current()!!.isConnected) }
+                val session = owner.current()!!
+
+                val cutAt = System.nanoTime()
+                proxy.blackhole()
+
+                await.atMost(Duration.ofSeconds(8)) untilAsserted { assertFalse(owner.isLeader) }
+                val fencedMs = (System.nanoTime() - cutAt) / 1_000_000
+                assertTrue(fencedMs <= 2_000 + 1_000, "갱신 기한(2s) + 1s 안에 끊어야 한다 (응답 없는 API 서버): ${fencedMs}ms")
+                assertFalse(session.isConnected)
+            } finally {
+                proxied.close()
+            }
+        }
     }
 }
