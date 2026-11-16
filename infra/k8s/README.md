@@ -1,12 +1,12 @@
-# Kubernetes (kind) — P8-3a
+# Kubernetes (kind) — P8-3a · P8-3b
 
-kind 클러스터(제어 1 + 워커 2)에 인프라 · 모의 은행 · 게이트웨이 · api 2대 · Envoy Gateway 입구를 띄운다. 이유 · 결정은 [ADR-0017](../../docs/adr/0017-kubernetes-kind.md), 설계는 [스펙](../../docs/superpowers/specs/2026-11-12-p8-3a-k8s-design.md), 실험 숫자는 [측정 결과](../../docs/perf/p8-3a-k8s.md), 운영 절차는 [OPERATION §15](../../OPERATION.md#15-kubernetes-실행-p8-3a), 설치는 [SETUP §2-9](../../SETUP.md). 모든 명령은 저장소 루트의 Git Bash(또는 Linux bash)에서.
+kind 클러스터(제어 1 + 워커 2)에 인프라 · 모의 은행 · 게이트웨이 · api 2대 · Envoy Gateway 입구를 띄운다. 이유 · 결정은 [ADR-0017](../../docs/adr/0017-kubernetes-kind.md), 설계는 [스펙](../../docs/superpowers/specs/2026-11-12-p8-3a-k8s-design.md), 실험 숫자는 [측정 결과](../../docs/perf/p8-3a-k8s.md), 운영 절차는 [OPERATION §15](../../OPERATION.md#15-kubernetes-실행-p8-3a), 게이트웨이 2대(P8-3b, 제안 — [ADR-0018](../../docs/adr/0018-gateway-ha-leader-election.md) · [측정](../../docs/perf/p8-3b-gateway-ha.md))는 [OPERATION §16](../../OPERATION.md#16-게이트웨이-이중화-p8-3b), 설치는 [SETUP §2-9](../../SETUP.md). 모든 명령은 저장소 루트의 Git Bash(또는 Linux bash)에서.
 
 ## 올리기 · 확인 · 내리기
 ```bash
 # 먼저: Docker Desktop 켜기, IntelliJ 의 API · 게이트웨이 · 모의 은행 끄기, Compose app 프로필 내리기 (둘 다 127.0.0.1:8000)
 bash infra/k8s/up.sh            # 클러스터 + Envoy Gateway + 이미지 빌드 · kind load + Secret + 매니페스트 + 준비 대기 (클러스터가 있을 때 재실행 약 2분 7초 — 이미지 빌드 · `kind load` 포함. 처음 생성 시간은 재지 않았다)
-bash infra/k8s/smoke.sh         # [0] ~ [8] 입구로 1원인증 · 출금 · 멱등 · 분배 · 분산 배치 · 게이트웨이 · 비root · NetworkPolicy
+bash infra/k8s/smoke.sh         # [0] ~ [9] 입구로 1원인증 · 출금 · 멱등 · 분배 · 분산 배치 · 게이트웨이 · 비root · NetworkPolicy · 리더 1개
 kubectl --context kind-bank-transfer -n bank-transfer get pods -o wide
 bash infra/k8s/down.sh          # 클러스터 삭제 (PV · 데이터까지)
 ```
@@ -21,18 +21,20 @@ bash infra/k8s/down.sh          # 클러스터 삭제 (PV · 데이터까지)
 | `kind.yaml` | 클러스터 설정: 제어 노드(라벨 `bank-transfer/role=infra`, NodePort 30080 → `127.0.0.1:8000`) + 워커 2(`role=app`) |
 | `lib.sh` | 스크립트 공통: 저장소 루트로 `cd`, 래퍼 `k`(namespace) · `ka`(전체) · `d` · `kindc`(여기에만 `MSYS_NO_PATHCONV`), `sql`, `image_tag`, `apply_overlay`, `wait_ready`, `pin_patch`, `np_probe` |
 | `up.sh` · `down.sh` | 올리기 · 삭제 |
-| `smoke.sh` | 입구 기준 확인 [0] ~ [8] (CI `k8s-smoke` 도 같은 파일) |
+| `smoke.sh` | 입구 기준 확인 [0] ~ [9] — [9] 는 게이트웨이 2대 Ready · 리더 라벨 Pod 정확히 1개 = Lease 보유자 · Service 엔드포인트 = 그 Pod · 모의 은행 동시 세션 1 (CI `k8s-smoke` 도 같은 파일) |
 | `cluster/` | 클러스터 범위: `namespace.yaml` · `gatewayclass.yaml` (Kustomize namespace 변환 밖에서 `up.sh` 가 apply) |
 | `base/config.yaml` | ConfigMap `app-config` (주소 · 점검 설정 — 비밀번호 없음) |
 | `base/{mysql,kafka,redis}.yaml` | 인프라: MySQL · Kafka(KRaft) StatefulSet + PVC + headless Service, Redis Deployment |
-| `base/mock-bank.yaml` · `bank-gateway.yaml` · `api.yaml` | 앱 3개 (Service · Deployment · 프로브 · preStop). 모의 은행은 PVC `mock-bank-files` |
+| `base/mock-bank.yaml` · `bank-gateway.yaml` · `api.yaml` | 앱 3개 (Service · Deployment · 프로브 · preStop). 모의 은행은 PVC `mock-bank-files` + 제약 옵션 3개(`--single-session` 등)와 `/proc/net/tcp` LISTEN exec readiness. 게이트웨이는 replicas 2 · `RollingUpdate` · Service selector 에 리더 라벨 (P8-3b) |
+| `base/rbac-gateway.yaml` | 게이트웨이 ServiceAccount · Role(Lease `bank-gateway-leader` · ConfigMap `bank-gateway-tran-no` 이름 한정 + Pod get · patch namespace 범위) · RoleBinding (P8-3b) |
 | `base/gateway.yaml` | `EnvoyProxy`(NodePort 30080 패치 · 제어 노드) + `Gateway` + `HTTPRoute` (재시도 없음) |
 | `base/networkpolicy.yaml` | ingress 기본 거부 + 허용 7개 (스펙 §8) |
-| `base/pdb.yaml` | api `minAvailable: 1` |
+| `base/pdb.yaml` | api · 게이트웨이 `minAvailable: 1` |
 | `overlays/local` · `ci` | 평소 · CI (`ci` 는 점검 시간 503 을 끈다) |
 | `overlays/experiment-prestop0` | R1 대조: api preStop 제거 |
 | `overlays/experiment-liveness-bank` | B2 대조: 게이트웨이 liveness 에도 `bankConnection` |
 | `overlays/experiment-fast-evict` | D2' 대조: api 퇴거 대기 30초 |
+| `overlays/experiment-gateway-single` | H0 대조 (P8-3b): 이전 구성 — 게이트웨이 1대 · `Recreate` · preStop 10s · 선출 끔 · PDB 삭제. 들어갈 때 · 돌아올 때 절차는 OPERATION §16-5 (돌아올 때 `scale --replicas=0` 먼저) |
 | `../../load/k8s/` | 실험 도구 `run.sh` · `timeline.sh` · `timeline.awk` (OPERATION §15-7) |
 
 ## overlay 바꾸기 · 태그 규칙
@@ -54,7 +56,7 @@ for o in infra/k8s/overlays/*/; do kubectl kustomize "$o" > /dev/null && echo "o
 | mysql · kafka · redis · mock-bank | 제어 노드 | `nodeSelector: {bank-transfer/role: infra}` + toleration `node-role.kubernetes.io/control-plane:NoSchedule` |
 | CoreDNS · Envoy Gateway 컨트롤러 | 제어 노드 | `up.sh` 가 `pin_patch` 로 패치 |
 | Envoy 프록시 | 제어 노드 | `EnvoyProxy.envoyDeployment.pod` |
-| api ×2 · bank-gateway | 워커 | `nodeSelector: {bank-transfer/role: app}`. api 는 `topologySpreadConstraints` (`maxSkew 1` · `ScheduleAnyway` · `matchLabelKeys: [pod-template-hash]`) 로 워커에 하나씩 |
+| api ×2 · bank-gateway ×2 | 워커 | `nodeSelector: {bank-transfer/role: app}`. 둘 다 `topologySpreadConstraints` (`maxSkew 1` · `ScheduleAnyway` · `matchLabelKeys: [pod-template-hash]`) 로 워커에 하나씩. **`ScheduleAnyway` 는 노드가 돌아와도 다시 퍼뜨리지 않아 게이트웨이 두 대가 한 노드에 몰릴 수 있다** (OPERATION §16-3) |
 
 PV(`data-mysql-0` · `data-kafka-0` · `mock-bank-files`)는 제어 노드에 묶인다 (`kubectl get pv -o yaml` 의 nodeAffinity).
 

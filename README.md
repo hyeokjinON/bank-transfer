@@ -114,6 +114,8 @@ sequenceDiagram
 
 > Kubernetes 로 (P8-3a): Compose `app` 프로필을 내리고(둘 다 8000) 먼저 [SETUP §2-9](SETUP.md) 로 kind 를 설치한 뒤 `bash infra/k8s/up.sh` → `http://127.0.0.1:8000` (Envoy 뒤 api Pod 2대, kind 클러스터 3노드). 확인 `bash infra/k8s/smoke.sh`, 내리기 `bash infra/k8s/down.sh`, 자세히는 [OPERATION §15](OPERATION.md#15-kubernetes-실행-p8-3a) · [infra/k8s/README.md](infra/k8s/README.md).
 
+> 게이트웨이 2대 active-standby (P8-3b, 제안): K8s 에서는 게이트웨이가 2대(리더 1 · 대기 1)이고 은행에 붙는 것은 리더뿐이다. 리더 확인 · 장애 대응 · 첫 도입 절차(옛 Pod 를 먼저 내린다)는 [OPERATION §16](OPERATION.md#16-게이트웨이-이중화-p8-3b), 이유는 [ADR-0018](docs/adr/0018-gateway-ha-leader-election.md). IntelliJ · Compose 는 선출이 꺼져 있어 1대가 그대로 동작한다.
+
 > 디버깅 추천 위치: `BankGatewayClient.send` (요청 등록), `ClientHandler.channelRead0` (전문번호로 응답 매칭), `AccountVerificationService.request` (성명조회 → 1원 이체 연결).
 
 ### 로컬 인프라 (P3 부터 필요)
@@ -209,7 +211,7 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
   - [x] P8-1 은행 게이트웨이 서비스 분리: HTTP · 실패 분류 유지 · 서버 2판 × 클라이언트 2판 · Toxiproxy → [ADR-0015](docs/adr/0015-bank-gateway-service.md) · [측정 결과](docs/perf/p8-1-gateway-split.md)
   - [x] P8-2 앱 이미지 · Compose 전체 실행 · api 2대: Dockerfile 타깃 3 · nginx · ShedLock · mode 기본 http → [ADR-0016](docs/adr/0016-app-images-compose.md) · [실험 결과](docs/perf/p8-2-compose.md)
   - [x] P8-3a Kubernetes(kind) 로 옮기기: Envoy Gateway 입구 · 프로브 · preStop · 게이트웨이 readiness 에 은행 연결 · NetworkPolicy · PDB · 노드 실험 → [ADR-0017](docs/adr/0017-kubernetes-kind.md) · [실험 결과](docs/perf/p8-3a-k8s.md)
-  - [ ] P8-3b 게이트웨이 이중화 (active-standby · 연결 주인 하나) — 별도 설계
+  - [ ] P8-3b 게이트웨이 이중화 (active-standby · K8s Lease 리더 선출 · 전문번호 ConfigMap 구간 예약 · 리더 라벨 + 둘 다 Ready) — 제안 → [ADR-0018](docs/adr/0018-gateway-ha-leader-election.md) · [실험 결과](docs/perf/p8-3b-gateway-ha.md) (머지 뒤 `[x]`)
 - [ ] **P9** 관측성: Micrometer, Prometheus, Grafana
 
 ## 기술 스택
