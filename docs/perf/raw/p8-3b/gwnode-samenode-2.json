@@ -1,0 +1,12 @@
+{"run":"gwnode-2","action":"gwnode","rate":20,"duration":"60s","action_at_s":20,"t0":"2026-11-16T03:49:45Z","t_action":"2026-11-16T03:50:05.724Z","t_action_end":"2026-11-16T03:50:06.556Z",
+ "prestop_s":10,"gateway_liveness_bank":null,"api_unreachable_toleration_s":300,"node":"bank-transfer-worker2","node_kill":1,"victim":"bank-gateway-6f7b79ddb-hf2zx","new_tag":null,
+ "verify_during_outage":null,"action_within_load":true,"settle_s":201,
+ "first_202":741,"first_5xx":394,"first_502":0,"first_neterr":0,
+ "retried_requests":854,"accepted_keys":1010,"gave_up_keys":125,"p95_ms":5611.523351199991,
+ "transfers":1010,"not_completed":0,"refunds":0,
+ "negative_balance":0,"balance_ne_ledger":0,
+ "transfer_ne_withdraw":0,"unpublished_outbox":0,
+ "journal_missing":0,"journal_dup":0,"rebalance_lines":150,
+ "api_ready_min":1,"api_recovered_s":359.0,"gw_not_ready_s":307.4,"gw_restarts":0,
+ "node_notready_s":48.6,"pod_notready_s":48.6,"replacement_ready_s":359.0,
+ "gw_leader_before":"bank-gateway-6f7b79ddb-hf2zx","bank_sessions_max":1,"bank_sessions_rejected":0,"bank_sessions_evicted":0,"bank_dup_tran_no":0,"unknown_results":0,"gw_lost_s":null,"gw_acquired_s":353.4,"gw_leaderless_s":307.4,"leader_changes":1}

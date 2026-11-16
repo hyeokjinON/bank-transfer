@@ -1,0 +1,15 @@
+{
+  "run": "gwnode-1",
+  "rate": 20,
+  "duration": "60s",
+  "iterations": 1149,
+  "first_202": 771,
+  "first_5xx": 378,
+  "first_502": 0,
+  "first_neterr": 0,
+  "retried_requests": 786,
+  "accepted_keys": 1039,
+  "gave_up_keys": 110,
+  "p95_ms": 5551.1819842,
+  "max_ms": 10006.768416
+}
