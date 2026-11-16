@@ -98,6 +98,15 @@ k get pods -o wide > "$WORK/pods-before.txt"
 LIVE_API=$(live_pods api) || die "api Pod 목록을 못 읽었다"
 LIVE_GW=$(live_pods bank-gateway) || die "bank-gateway Pod 목록을 못 읽었다"
 [ "$(printf '%s\n' "$LIVE_API" | awk 'NF {print $2}' | sort -u | grep -c . || true)" = 2 ]   || die "살아 있는 api Pod 두 대가 서로 다른 워커에 있지 않다 — kubectl -n bank-transfer rollout restart deploy/api 후 다시"
+GW_NODES=$(printf '%s
+' "$LIVE_GW" | awk 'NF {print $2}' | sort -u | tr '
+' ' ' | sed 's/ $//')
+GW_REPLICAS=$(k get deploy bank-gateway -o jsonpath='{.spec.replicas}')
+# 게이트웨이가 2대 이상이면 서로 다른 워커여야 한다 — 한 노드에 몰리면 노드 장애에 리더와 대기가 같이 죽어 "대기가 살아남는" 경우를 못 잰다 (H0 의 1대짜리는 건너뜀)
+if [ "${GW_REPLICAS:-1}" != 1 ] && [ "$(printf '%s
+' "$GW_NODES" | wc -w | tr -d ' ')" -lt 2 ]; then
+  die "살아 있는 게이트웨이 두 대가 서로 다른 워커에 있지 않다 — kubectl -n bank-transfer rollout restart deploy/bank-gateway 후 다시"
+fi
 GW_LEADER=$(gw_leader)   # 리더 라벨 Pod (P8-3b). 선출을 끈 H0 은 비어 있다 → 첫 게이트웨이
 if [ -n "$GW_LEADER" ]; then
   GW_NODE=$(printf '%s\n' "$LIVE_GW" | awk -v p="$GW_LEADER" '$1 == p {print $2; exit}')
@@ -287,7 +296,7 @@ num() { if [[ "${1:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then echo "$1"; else echo null
 str() { if [ -n "${1:-}" ]; then echo "\"$1\""; else echo null; fi; }
 cat > "$OUT.tmp" <<JSON
 {"run":"$RUN","action":"$ACTION","rate":$RATE,"duration":"$DURATION","action_at_s":$ACTION_AT,"t0":"$T0","t_action":$T_ACTION,"t_action_end":$T_ACTION_END,
- "prestop_s":$PRESTOP,"gateway_liveness_bank":$(str "$LIVE_BANK"),"api_unreachable_toleration_s":$TOL,"node":$(str "${NODE#-}"),"node_kill":$NODE_KILL,"victim":$(str "$VICTIM"),"new_tag":$(str "$NEW"),
+ "prestop_s":$PRESTOP,"gateway_liveness_bank":$(str "$LIVE_BANK"),"api_unreachable_toleration_s":$TOL,"node":$(str "${NODE#-}"),"node_kill":$NODE_KILL,"gw_nodes_before":$(str "$GW_NODES"),"victim":$(str "$VICTIM"),"new_tag":$(str "$NEW"),
  "verify_during_outage":$(str "$VERIFY_DURING"),"action_within_load":$WITHIN,"settle_s":$SETTLE_S,
  "first_202":$(num "$(k6v first_202)"),"first_5xx":$(num "$(k6v first_5xx)"),"first_502":$(num "$(k6v first_502)"),"first_neterr":$(num "$(k6v first_neterr)"),
  "retried_requests":$(num "$(k6v retried_requests)"),"accepted_keys":$(num "$ACCEPTED"),"gave_up_keys":$(num "$(k6v gave_up_keys)"),"p95_ms":$(num "$(k6v p95_ms)"),
