@@ -40,7 +40,7 @@
 | 11 | 정상 교대 순서: **새 요청 거절 → 처리 중 전문 비우기(최대 5s) → 연결 끊기 → Lease 반납** | 결과 모름 0, 반납 전에 세션을 비워 새 리더가 바로 붙음 | 반납 먼저, 비우기 없이 끊기 |
 | 12 | 물러나는 시점 = **SIGTERM 종료 훅** (게이트웨이 preStop 없음) | 호출자(api)는 "안 보냄" 을 안전하게 재시도 — 기다릴 이유 없음. 공백 약 3 ~ 7초 (추정) | preStop sleep 10s 유지 (공백 약 13 ~ 17초), preStop 반납 호출 |
 | 13 | 비정상 교대: Lease 만료 15s, 응답 못 받은 전문 = 결과 모름 → 결과조회 | 기존 안전망 (ADR-0006) | 다시 보내기 |
-| 14 | 규격 v0.3: 전문번호 기관 · 일자(KST)별 유일, 응답코드 **`3001` 전문번호 중복 (처리 안 함)** | 실무 제약 재현 | v0.2 유지 |
+| 14 | 규격 v0.4 (§16): 전문번호 기관 · 일자(KST)별 유일, 응답코드 **`3001` 전문번호 중복 (처리 안 함)** | 실무 제약 재현 | v0.2 유지 |
 | 15 | 게이트웨이는 `3001` → `503 BANK_NOT_SENT` | 은행이 처리하지 않음 — api 가 실패(환불)로 확정하면 안 된다 (P8-1 분류) | 응답 코드 그대로 |
 | 16 | 모의 은행 옵션 (기본 꺼짐, K8s 에서만 켬): `--single-session` · `--session-idle-timeout=60s` · `--unique-tran-no` | 실무 제약 재현, 개발 흐름 불변. 60s = 게이트웨이 폴링(30s)의 2배 | 항상 켬 (개발 재시작마다 중복 거절) |
 | 17 | `TranNoSource` 인터페이스 (`modules/bank-gateway`), 기본 메모리 카운터 · K8s 는 앱 모듈의 ConfigMap 구현 | 포트/어댑터(ADR-0001), 통신 모듈이 K8s 를 모름 | 클라이언트가 K8s API 직접 호출 |
@@ -86,8 +86,8 @@ api ×2 ─▶ Service bank-gateway ─▶ gateway-A (리더, 라벨 gateway-rol
 - API 서버와만 단절: 리더는 10초 갱신 기한에 자기 차단(연결 close), 대기자는 15초 만료 뒤 획득 (H5). 옛 리더는 API 서버에 닿지 않아 **라벨을 못 뗀다** → 잠깐 리더 라벨 Pod 가 둘 — 옛 리더로 간 요청은 연결이 없어 `503 BANK_NOT_SENT` 로 재시도된다. **은행 동시 세션은 여전히 최대 1** (라벨이 아니라 연결이 기준).
 - 응답 못 받은 전문: `BANK_UNAVAILABLE`(502) → api 결과 모름 → 결과조회(P3-3a)로 확정.
 
-## 7. 규격 v0.3 · 모의 은행
-- `docs/protocol.md`: 전문번호 정의 변경, 응답코드 표에 `3001`, 변경 이력 v0.3.
+## 7. 규격 v0.4 · 모의 은행
+- `docs/protocol.md`: 전문번호 정의 변경, 응답코드 표에 `3001`, 변경 이력 v0.4 (§16).
 - 모의 은행 옵션 (`MockBankOptions`):
 
 | 옵션 | 동작 | 로그 |
@@ -135,7 +135,7 @@ api ×2 ─▶ Service bank-gateway ─▶ gateway-A (리더, 라벨 gateway-rol
 - 매니페스트 · 스크립트 · CI 스모크 · 실험 도구 · 문서 (§15).
 
 ## 13. 위험
-- **Jackson 2 (fabric8) · Jackson 3 (Boot 4) 공존** — 패키지가 달라 공존할 것으로 추정. 계획 첫 Task 에서 확인, 안 되면 설계로 돌아간다 (대안: Lease 직접 구현 B).
+- **fabric8 · Boot 4 의 Jackson 버전 차** — (§16) fabric8 8.0.0 은 Jackson 3(3.2.3)이라 "Jackson 2 공존" 문제는 없고, Boot 4.1.1 BOM 이 3.1.5 로 내려 맞추는 차이가 위험. 계획 Task 1 에서 확인, 안 되면 Jackson BOM 을 3.2.3 으로 올리고, 그래도 안 되면 설계로 돌아간다 (대안: Lease 직접 구현 B).
 - 시계 차: 자기 차단의 안전은 노드 간 시계 차 < 5초 전제. kind 는 같은 호스트 시계라 문제 없음, 운영은 NTP 필수.
 - API 서버 장기 장애 = 리더 자기 차단 = 송신 중단 (안전 쪽으로 실패 — 의도).
 - 노드 손실 공백 약 60초 (세션 정리 대기) — 실무 은행의 세션 정리 시간에 좌우된다.
@@ -145,8 +145,8 @@ api ×2 ─▶ Service bank-gateway ─▶ gateway-A (리더, 라벨 gateway-rol
 고정 출구 IP(egress gateway · NAT)와 은행 IP 등록, 망분리 · 전용선, 대외계 VM + VIP(keepalived) 방식, 업무개시 · 종료 전문, active-active(세션 여러 개 은행 + 번호 공유 발급 — 이 설계의 구간 예약으로 확장 가능), Envoy outlier detection, 재접속 백오프 상한, 여러 은행, 서비스 간 인증(mTLS).
 
 ## 15. 문서 · 작업 순서
-ADR-0018 (제안 → 머지 뒤 채택), `docs/protocol.md` v0.3, 측정 `docs/perf/p8-3b-gateway-ha.md`, OPERATION §16, README · ARCHITECTURE · HANDOVER · CHANGELOG · `infra/k8s/README.md`.
-작업 순서: 의존성 확인(Jackson) → `TranNoSource` · 규격 v0.3 · 모의 은행 옵션 → Owner · 선출 · 구간 예약 · 종료 훅 → 매니페스트 · 스모크 [9] → 실험 H0 ~ H5 → 문서.
+ADR-0018 (제안 → 머지 뒤 채택), `docs/protocol.md` v0.4, 측정 `docs/perf/p8-3b-gateway-ha.md`, OPERATION §16, README · ARCHITECTURE · HANDOVER · CHANGELOG · `infra/k8s/README.md`.
+작업 순서: 의존성 확인(Jackson) → `TranNoSource` · 규격 v0.4 · 모의 은행 옵션 → Owner · 선출 · 구간 예약 · 종료 훅 → 매니페스트 · 스모크 [9] → 실험 H0 ~ H5 → 문서.
 
 ## 16. 계획 단계에서 고친 점 (2026-11-16)
 | 고친 곳 | 내용 | 이유 |
@@ -154,3 +154,6 @@ ADR-0018 (제안 → 머지 뒤 채택), `docs/protocol.md` v0.3, 측정 `docs/p
 | §3 결정 5 · §4 · §6 · §8 · §11 | "readiness = 리더만 UP" → **리더 라벨 + Service selector, 둘 다 Ready** | 대기자가 영원히 NotReady 면 `maxUnavailable 0` 롤링이 새 Pod 를 기다리다 멈추고, `rollout status` · `up.sh` 준비 대기 · 스모크 [0] · 실험 도구 사전 확인("Ready = replicas")이 모두 막힌다 |
 | §3 결정 20 | RBAC 에 Pod get · patch (namespace 범위) | 리더 라벨을 자기 Pod 에 붙이고 떼려면 필요. Pod 이름을 미리 몰라 이름 한정 불가 — 최소 권한이 조금 넓어진 대가 |
 | §6 | 교대 순서에 라벨 떼기 · 붙이기 | 정상 교대: 끊기 → 라벨 떼기 → 반납. 새 리더: 접속 → 라벨 붙이기 |
+| §3 결정 14 · §7 · §15 | 규격 **v0.3 → v0.4** | `docs/protocol.md` 변경 이력에 v0.3(2026-10-29 대사 파일)이 이미 있다 |
+| §12 · §13 | fabric8 **8.0.0** 고정 (2026-09-24, Jackson 3 · JDK HttpClient, vertx 제외) | 2주 이상 지난 안정판. Jackson 2 가 아니라 Jackson 3 계열 — 위험은 버전 차(3.2.3 ↔ Boot 3.1.5) |
+| §4 · §6-2 | K8s 클라이언트 빨리 실패 (재시도 0 · 연결 2s · 요청 5s) | fabric8 기본 재시도(지수 백오프)는 API 서버 단절 때 갱신 실패를 늦게 알려 "10초 안 자기 차단" 을 흐린다 |
