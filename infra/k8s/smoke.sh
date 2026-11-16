@@ -143,24 +143,24 @@ done
 ok "양성 대조(API 서버 443 연결) 뒤, 허용 안 된 Pod 는 bank-gateway:8082 · mysql:3306 에 못 붙는다"
 
 echo "[9/9] 게이트웨이 이중화"
-# 리더가 정해지고 라벨이 붙기까지 잠깐 걸릴 수 있다 (기동 직후) — 최대 30초
-for _ in $(seq 15); do
-  LEADERS=$(k get pods -l app=bank-gateway,bank-transfer/gateway-role=leader -o jsonpath='{range .items[*]}{.metadata.name}{"
-"}{end}')
+# 리더 · 라벨 · 엔드포인트 · 세션이 자리 잡기까지 잠깐 걸릴 수 있다 (기동 · 롤아웃 직후) — 전부 맞을 때까지 최대 30초
+gw_state() {
+  LEADERS=$(k get pods -l app=bank-gateway,bank-transfer/gateway-role=leader -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
   HOLDER=$(k get lease bank-gateway-leader -o jsonpath='{.spec.holderIdentity}' 2>/dev/null || true)
-  [ "$(grep -c . <<<"$LEADERS" || true)" = 1 ] && [ "$LEADERS" = "$HOLDER" ] && break
+  EP=$(k get endpointslices -l kubernetes.io/service-name=bank-gateway -o jsonpath='{range .items[*].endpoints[*]}{.targetRef.name}{" "}{.conditions.ready}{"\n"}{end}' | awk '$2 == "true" {print $1}')
+  SESS=$(k logs deploy/mock-bank --tail=-1 | grep -o 'sessions=[0-9]*' | tail -1 | cut -d= -f2 || true)
+}
+gw_ok() { [ "$(grep -c . <<<"$LEADERS" || true)" = 1 ] && [ "$LEADERS" = "$HOLDER" ] && [ "$EP" = "$HOLDER" ] && [ "$SESS" = 1 ]; }
+for _ in $(seq 15); do
+  gw_state
+  gw_ok && break
   sleep 2
 done
 r=$(k get deploy bank-gateway -o jsonpath='{.status.readyReplicas}')
 [ "${r:-0}" = 2 ] || fail "게이트웨이 Ready ${r:-0}/2 (대기자도 Ready 여야 한다 — bankConnection role=standby)"
-[ "$(grep -c . <<<"$LEADERS" || true)" = 1 ] || fail "리더 라벨 Pod 가 정확히 1개가 아니다: '$(tr '
-' ' ' <<<"$LEADERS")'"
+[ "$(grep -c . <<<"$LEADERS" || true)" = 1 ] || fail "리더 라벨 Pod 가 정확히 1개가 아니다: '$(tr '\n' ' ' <<<"$LEADERS")'"
 [ "$LEADERS" = "$HOLDER" ] || fail "리더 라벨 Pod($LEADERS) ≠ Lease holder($HOLDER)"
-EP=$(k get endpointslices -l kubernetes.io/service-name=bank-gateway -o jsonpath='{range .items[*].endpoints[*]}{.targetRef.name}{" "}{.conditions.ready}{"
-"}{end}' | awk '$2 == "true" {print $1}')
-[ "$EP" = "$HOLDER" ] || fail "Service bank-gateway 엔드포인트($(tr '
-' ' ' <<<"$EP")) ≠ 리더($HOLDER)"
-SESS=$(k logs deploy/mock-bank --tail=-1 | grep -o 'sessions=[0-9]*' | tail -1 | cut -d= -f2)
+[ "$EP" = "$HOLDER" ] || fail "Service bank-gateway 엔드포인트($(tr '\n' ' ' <<<"$EP")) ≠ 리더($HOLDER)"
 [ "$SESS" = 1 ] || fail "모의 은행의 지금 세션 수가 1이 아니다: '${SESS:-없음}' (kubectl -n bank-transfer logs deploy/mock-bank | grep sessions=)"
 ok "게이트웨이 Ready 2/2, 리더 $HOLDER = Lease holder = Service 엔드포인트, 모의 은행 세션 1"
 
