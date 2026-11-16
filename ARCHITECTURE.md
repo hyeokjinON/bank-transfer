@@ -1,6 +1,6 @@
 # ARCHITECTURE — 구조와 흐름
 
-> 기준: P8-3b 게이트웨이 이중화 (2026-11-16, [#31](https://github.com/hyeokjinON/bank-transfer/pull/31) 머지 — [ADR-0018](docs/adr/0018-gateway-ha-leader-election.md), 아래 §1 의 "게이트웨이 이중화"). 그 앞: P8-3a Kubernetes(kind) 로 옮기기 (2026-11-16, [#29](https://github.com/hyeokjinON/bank-transfer/pull/29) 머지 — [ADR-0017](docs/adr/0017-kubernetes-kind.md), 실행 그림은 아래 §1 의 "Kubernetes 실행"). 그 앞: P8-2 앱 이미지 · Compose 전체 실행 · api 2대 (2026-11-11, [#27](https://github.com/hyeokjinON/bank-transfer/pull/27) 머지 — [ADR-0016](docs/adr/0016-app-images-compose.md) — 기본 `bank.gateway.mode` 가 `http` 로 바뀌었고, 컨테이너 실행은 아래 §1 의 "컨테이너 실행" 그림). 그 앞: P8-1 은행 게이트웨이 서비스 분리 (2026-11-10, [#25](https://github.com/hyeokjinON/bank-transfer/pull/25) 머지 — [ADR-0015](docs/adr/0015-bank-gateway-service.md), P8-2 전에는 기본이 `direct` 라 아래 그림의 직결 경로가 평소 모양이었다). P5-1 일마감 대사 · 점검 시간 · 알림 완료 (2026-10-30, PR #15 머지). P4-2 잔고 차감 락 전략 완료 (2026-10-28, PR #13 머지). P4-1 원화 잔고 완료 (2026-10-26, PR #11 머지). P3 완료(P3-3b PR #9 머지). P3 ~ P5 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p5)에 적는다.
+> 기준: P8-3c 게이트웨이 필수 분산 (2026-11-17, [#33](https://github.com/hyeokjinON/bank-transfer/pull/33) 머지 — [ADR-0019](docs/adr/0019-gateway-required-spread.md), 두 게이트웨이는 반드시 다른 워커 · 구성도 두 장 `docs/diagrams/`). 그 앞: P8-3b 게이트웨이 이중화 (2026-11-16, [#31](https://github.com/hyeokjinON/bank-transfer/pull/31) 머지 — [ADR-0018](docs/adr/0018-gateway-ha-leader-election.md), 아래 §1 의 "게이트웨이 이중화"). 그 앞: P8-3a Kubernetes(kind) 로 옮기기 (2026-11-16, [#29](https://github.com/hyeokjinON/bank-transfer/pull/29) 머지 — [ADR-0017](docs/adr/0017-kubernetes-kind.md), 실행 그림은 아래 §1 의 "Kubernetes 실행"). 그 앞: P8-2 앱 이미지 · Compose 전체 실행 · api 2대 (2026-11-11, [#27](https://github.com/hyeokjinON/bank-transfer/pull/27) 머지 — [ADR-0016](docs/adr/0016-app-images-compose.md) — 기본 `bank.gateway.mode` 가 `http` 로 바뀌었고, 컨테이너 실행은 아래 §1 의 "컨테이너 실행" 그림). 그 앞: P8-1 은행 게이트웨이 서비스 분리 (2026-11-10, [#25](https://github.com/hyeokjinON/bank-transfer/pull/25) 머지 — [ADR-0015](docs/adr/0015-bank-gateway-service.md), P8-2 전에는 기본이 `direct` 라 아래 그림의 직결 경로가 평소 모양이었다). P5-1 일마감 대사 · 점검 시간 · 알림 완료 (2026-10-30, PR #15 머지). P4-2 잔고 차감 락 전략 완료 (2026-10-28, PR #13 머지). P4-1 원화 잔고 완료 (2026-10-26, PR #11 머지). P3 완료(P3-3b PR #9 머지). P3 ~ P5 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p5)에 적는다.
 
 ## 1. 한눈에 보기
 
@@ -128,7 +128,7 @@ flowchart LR
     L -- "구간 1,000개 예약<br/>(resourceVersion CAS)" --> CM[("ConfigMap<br/>bank-gateway-tran-no")]
 ```
 - 리더 선출 (fabric8 `LeaderElector`, 로컬 워치독이 갱신 기한 + 0.25초 안에 자기 차단) → 리더 라벨 (접속 뒤 붙이고, 교대 때 끊은 뒤 뗀다) → 전문번호 구간 예약(선출과 독립 — 두 대가 겹쳐도 번호가 안 겹친다). 정상 교대: 새 요청 거절 → 처리 중 전문 비우기 → 연결 끊기 → 라벨 떼기 → Lease 반납 (SIGTERM 종료 훅). 선출은 K8s 에서만 켜진다 (기본 꺼짐).
-- 두 복제본이 한 노드에 있으면 이중화가 아니다 — P8-3c 부터 `DoNotSchedule` 분산으로 한 노드에 놓일 수 없다. 워커가 빠지면 대체 게이트웨이는 Pending, 돌아오면 그 워커에 뜬다 ([ADR-0019](docs/adr/0019-gateway-required-spread.md), 제안 · OPERATION §16-3).
+- 두 복제본이 한 노드에 있으면 이중화가 아니다 — P8-3c 부터 `DoNotSchedule` 분산으로 한 노드에 놓일 수 없다. 워커가 빠지면 대체 게이트웨이는 Pending, 돌아오면 그 워커에 뜬다 ([ADR-0019](docs/adr/0019-gateway-required-spread.md) · OPERATION §16-3).
 
 ## 2. 모듈
 
@@ -493,4 +493,4 @@ flowchart TB
 | [0016](docs/adr/0016-app-images-compose.md) | 루트 Dockerfile 하나 · 타깃 3 · nginx 앞 api 2대(보낸 POST 는 다시 보내지 않음), 하루 배치만 ShedLock, `mode` 기본 `http`, 파티션 3 유지 |
 | [0017](docs/adr/0017-kubernetes-kind.md) | 같은 구성을 kind(Kubernetes)로 — Envoy Gateway 입구(재시도 없음), preStop 10s · 프로브 3종, 게이트웨이 readiness 에만 은행 연결, NetworkPolicy 기본 거부, 인프라 · 모의 은행은 제어 노드, 연결 주인 하나는 P8-3b |
 | [0018](docs/adr/0018-gateway-ha-leader-election.md) | 게이트웨이 2대 active-standby — K8s Lease 리더 선출, 리더 라벨 + 둘 다 Ready, 전문번호 ConfigMap 구간 예약, 정상 교대 순서(종료 훅), 규격 v0.4 `3001` |
-| [0019](docs/adr/0019-gateway-required-spread.md) | 게이트웨이 두 복제본 필수 분산 — `DoNotSchedule` + `matchLabelKeys`(롤링 교착 방지) + `nodeTaintsPolicy Ignore`(빠진 워커로 복귀) (제안) |
+| [0019](docs/adr/0019-gateway-required-spread.md) | 게이트웨이 두 복제본 필수 분산 — `DoNotSchedule` + `matchLabelKeys`(롤링 교착 방지) + `nodeTaintsPolicy Ignore`(빠진 워커로 복귀) |

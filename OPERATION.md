@@ -802,7 +802,11 @@ kubectl -n bank-transfer logs deploy/mock-bank | grep -c 'duplicate tran no'   #
 kubectl -n bank-transfer get pods -l app=bank-gateway -o wide -L bank-transfer/gateway-role   # NODE 열이 서로 다르다 (스모크 [9] 도 확인)
 ```
 - **워커 하나가 빠지면(drain · 장애) 대체 게이트웨이는 `Pending` 이 정상이다.** 남은 워커로 가지 않고 기다리다가, 그 워커가 돌아오면(uncordon · 노드 Ready) 그 워커에 뜬다 — 나뉜 상태가 저절로 복구된다 (S2 drain: Pending 42초 → uncordon 뒤 원래 워커). 그동안 게이트웨이는 1대(리더)라 **대기자가 없다** — 남은 워커까지 죽으면 게이트웨이 0 (몰려 있었어도 같았다).
-- `Pending` 사유 확인: `kubectl -n bank-transfer describe pod <Pending Pod>` 의 Events 에 `didn't match pod topology spread constraints` (분산 규칙이 막은 것) — 장애가 아니다. 다른 사유(자원 부족 등)면 그것을 고친다.
+- `Pending` 사유 확인 — 사유만 바로 본다 (`describe … | tail` 은 실행 순간 Events 칸이 없거나 길면 사유가 잘린다, 2026-11-17 사람 확인에서 겪음):
+  ```bash
+  kubectl -n bank-transfer get events --field-selector involvedObject.name=<Pending Pod>,reason=FailedScheduling
+  ```
+  `didn't match pod topology spread constraints` (분산 규칙이 막은 것) 가 있으면 장애가 아니다. 나머지 문구로 워커가 왜 빠졌는지도 보인다 — drain(cordon)이면 `were unschedulable`, 노드 장애(`unreachable` taint)면 `had untolerated taint(s)` (제어 노드도 늘 taint 1개로 센다). `Insufficient cpu` · `Insufficient memory` 같은 다른 사유면 그것을 고친다.
 - 워커가 오래 못 돌아오고 대기자가 꼭 필요하면 (운영 판단): 새 워커를 붙인다. 분산 규칙을 풀어 같은 노드에 띄우는 것은 권하지 않는다 (노드 장애에는 어차피 함께 죽는다).
 - 롤링 업데이트는 그대로 된다 — 분산 규칙이 같은 리비전끼리만 세서(`matchLabelKeys: [pod-template-hash]`) 새 Pod 가 옛 Pod 옆에 잠깐 뜰 수 있고, 끝나면 나뉜다 (S1). 필수 pod anti-affinity 는 옛 Pod 까지 세어 워커 2개에서 롤링이 멈춘다 — 고르지 않은 이유.
 - 아직 안 한 것: descheduler, 노드 도달 불가 `tolerationSeconds` 단축 (P8-3a D2' 88초 — 짧은 끊김에도 Pod 를 옮기는 대가). 워커가 3개 이상이면 빠진 워커 대신 다른 워커에 뜰 수 있다 (`maxSkew 1` 안에서 — 추정, 이 클러스터는 워커 2).
@@ -815,7 +819,7 @@ kubectl -n bank-transfer get pods -l app=bank-gateway -o wide -L bank-transfer/g
 | Lease 보유자는 있는데 라벨 Pod 없음 | 새 리더가 접속 · 번호 예약 중이거나(접속 뒤 라벨) 못 하는 중 | 몇 초 기다린 뒤 로그: 은행 연결 · 번호 예약 오류, Pod patch 권한(RBAC `rbac-gateway.yaml`) |
 | 모의 은행 `3001`(`duplicate tran no`) 증가, 출금이 `BANK_NOT_SENT` 로 재시도 | 전문번호가 겹쳤다 — 번호 저장소(ConfigMap)가 되돌려졌거나 기록 삭제 | 16-2 로 `date` · `reservedTo` 확인. **`reservedTo` 를 은행에서 이미 쓴 최대 번호보다 크게 올리는 방향으로만** 고친다 (줄이지 않는다). 기록이 없으면 처음 예약자가 1부터 만든다 — 같은 날이면 겹친다 |
 | 게이트웨이 로그에 번호 예약 실패 · 저장된 날짜가 더 새롭다 · 기록이 깨졌다, `503 BANK_NOT_SENT` 지속 | fail-closed — 번호 저장소를 믿을 수 없어 송신을 멈춘 것 | 아래 "깨진 번호 기록 고치기" |
-| 게이트웨이 1대가 `Pending` | 워커 하나가 drain · 장애로 빠졌다 — 필수 분산(P8-3c)이 남은 워커로 보내지 않고 기다리게 한 것 (16-3) | 정상. 워커가 돌아오면 그 워커에 뜬다. `describe pod` Events 가 분산 규칙이 아니면 그 사유를 고친다 |
+| 게이트웨이 1대가 `Pending` | 워커 하나가 drain · 장애로 빠졌다 — 필수 분산(P8-3c)이 남은 워커로 보내지 않고 기다리게 한 것 (16-3) | 정상. 워커가 돌아오면 그 워커에 뜬다. `get events --field-selector involvedObject.name=<Pod>,reason=FailedScheduling` 의 사유가 분산 규칙이 아니면 그 사유를 고친다 (16-3) |
 | Lease 가 **15초 넘게** 안 넘어간다 | 옛 리더 노드가 죽었고 만료 대기 중(정상 15초) / 대기자가 안 뜨는 중(대기자가 `Pending` 이면 남은 워커가 리더뿐 — 16-3) | `kubectl get nodes`, `get pods -o wide`. 노드째 죽었으면 정상 — 15초 뒤 획득 (H4′ 14.6초). 길게 가면 대기자 Pod 상태 · 한 노드 몰림 |
 | 리더가 은행에 못 붙고 readiness DOWN | 은행 장애 (P8-3a B1 — §15-5) | 은행 복구를 기다린다. 재시작은 백오프만 초기화하고 처리 중 요청을 끊는다 |
 | 롤링이 끝나지 않는다 (새 Pod 가 NotReady) | 옛 구성(선출 끔) Pod 가 은행 세션을 쥐고 있다 — 첫 전환 교착 | 16-5 (scale 0 → 적용) |
