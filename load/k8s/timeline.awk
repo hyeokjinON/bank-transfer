@@ -16,7 +16,7 @@ $1 == "P" {
   }
 }
 $1 == "N" && $3 == node && $4 != "True" && ($2 + 0) >= ta && nodeDown == "" { nodeDown = $2 + 0 }
-$1 == "L" && ($2 + 0) >= ta {
+$1 == "L" && $3 != "-" && ($2 + 0) >= ta {   # holder 가 빈 표본(-, 인계 중 · kubectl 일시 실패)은 세지 않는다 — 실제 holder 만
   if (lastHolder != "" && $3 != lastHolder) changes++
   lastHolder = $3
 }
