@@ -6,7 +6,8 @@
 #   5) api 두 Pod 가 서로 다른 워커                  6) 리더 게이트웨이 readiness UP, Service 는 전부 ClusterIP, (CI) PC 에 내부 포트 없음
 #   7) 컨테이너 사용자 ≠ root
 #   8) NetworkPolicy: 허용 목록에 없는 Pod 에서 bank-gateway:8082 · mysql:3306 에 못 붙는다 (N0, 스펙 §8)
-#   9) 게이트웨이 이중화: Ready 2/2, 리더 라벨 Pod 1개 = Lease holder = Service 엔드포인트, 모의 은행 세션 1 (P8-3b)
+#   9) 게이트웨이 이중화: Ready 2/2, 리더 라벨 Pod 1개 = Lease holder = Service 엔드포인트, 모의 은행 세션 1 (P8-3b),
+#      두 게이트웨이가 서로 다른 워커 (P8-3c 필수 분산 — 깨지면 매니페스트가 바뀐 것)
 # 사용 (Git Bash · Linux): bash infra/k8s/smoke.sh
 # 클러스터 DB 에는 사용자 load-p83a-smoke-<시각> 의 행만 쓰고 끝에서 지운다.
 set -euo pipefail
@@ -162,6 +163,8 @@ r=$(k get deploy bank-gateway -o jsonpath='{.status.readyReplicas}')
 [ "$LEADERS" = "$HOLDER" ] || fail "리더 라벨 Pod($LEADERS) ≠ Lease holder($HOLDER)"
 [ "$EP" = "$HOLDER" ] || fail "Service bank-gateway 엔드포인트($(tr '\n' ' ' <<<"$EP")) ≠ 리더($HOLDER)"
 [ "$SESS" = 1 ] || fail "모의 은행의 지금 세션 수가 1이 아니다: '${SESS:-없음}' (kubectl -n bank-transfer logs deploy/mock-bank | grep sessions=)"
-ok "게이트웨이 Ready 2/2, 리더 $HOLDER = Lease holder = Service 엔드포인트, 모의 은행 세션 1"
+GW_NODES=$(k get pods -l app=bank-gateway -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.spec.nodeName}{"\n"}{end}' | sort -u | tr '\n' ' ')
+[ "$(wc -w <<<"$GW_NODES" | tr -d ' ')" = 2 ] || fail "게이트웨이 두 대가 서로 다른 워커가 아니다: $GW_NODES (P8-3c 는 DoNotSchedule 이라 한 노드에 놓일 수 없다 — 분산 규칙이 바뀌었는지 base/bank-gateway.yaml 확인)"
+ok "게이트웨이 Ready 2/2, 리더 $HOLDER = Lease holder = Service 엔드포인트, 모의 은행 세션 1, 노드 $GW_NODES"
 
 echo "k8s smoke 통과"
