@@ -22,7 +22,12 @@ class BankGatewayClientTest {
 
     private fun <T : AutoCloseable> T.closeLater(): T = also { resources += it }
 
-    private fun client(port: Int, timeout: Duration = Duration.ofSeconds(2), poll: Duration = Duration.ofSeconds(30)) =
+    private fun client(
+        port: Int,
+        timeout: Duration = Duration.ofSeconds(2),
+        poll: Duration = Duration.ofSeconds(30),
+        tranNo: TranNoSource = InMemoryTranNoSource(),
+    ) =
         BankGatewayClient(
             BankGatewayConfig(
                 host = "127.0.0.1",
@@ -32,6 +37,7 @@ class BankGatewayClientTest {
                 reconnectMinDelay = Duration.ofMillis(100),
                 reconnectMaxDelay = Duration.ofMillis(500),
             ),
+            tranNoSource = tranNo,
         ).closeLater()
 
     private fun waitUntil(timeoutMs: Long = 5_000, condition: () -> Boolean) {
@@ -240,6 +246,57 @@ class BankGatewayClientTest {
         futures.forEach { it.get(5, TimeUnit.SECONDS) }
 
         assertEquals(20, bank.peakPendingResponses())   // 20건이 1초 동안 함께 응답을 기다렸다
+    }
+
+    @Test
+    fun `전문번호는 TranNoSource 에서 받는다`() {
+        val bank = MockBankServer().start().closeLater()
+        val numbers = java.util.concurrent.atomic.AtomicLong(500)
+        val client = client(bank.boundPort, tranNo = { numbers.getAndIncrement() }).start()
+        waitUntil { client.isConnected }
+
+        assertEquals(500, client.inquireName("090", "1002123456789").get(3, TimeUnit.SECONDS).header.tranNo)
+        assertEquals(501, client.inquireName("090", "1002123456789").get(3, TimeUnit.SECONDS).header.tranNo)
+    }
+
+    @Test
+    fun `은행이 전문번호 중복(3001)으로 거절하면 BankNotSentException - 처리 안 했으니 다시 보내도 된다`() {
+        val bank = MockBankServer(uniqueTranNo = true).start().closeLater()
+        val first = client(bank.boundPort).start()
+        val second = client(bank.boundPort).start()   // 메모리 카운터 — 둘 다 1부터 (이중화 전 문제)
+        waitUntil { first.isConnected && second.isConnected }
+
+        assertEquals(ResponseCodes.OK, first.transfer("090", "1002123456789", 1_000, "m", "T261116DUPCLIENT001").get(3, TimeUnit.SECONDS).header.responseCode)
+        val error = second.transfer("090", "1002123456789", 1_000, "m", "T261116DUPCLIENT002").awaitFailure()
+
+        assertIs<BankNotSentException>(error)
+        assertEquals(1, bank.depositsOf("1002123456789").size)
+    }
+
+    @Test
+    fun `번호를 못 받으면 보내지 않고 future 가 BankNotSentException (동기로 던지지 않는다)`() {
+        val bank = MockBankServer().start().closeLater()
+        val client = client(bank.boundPort, tranNo = { throw BankNotSentException("no tran no block") }).start()
+        waitUntil { client.isConnected }
+
+        val future = client.transfer("090", "1002123456789", 1_000, "m", "T261116NOTRANNO0001")
+
+        assertIs<BankNotSentException>(future.awaitFailure())
+        assertEquals(0, bank.depositsOf("1002123456789").size)
+    }
+
+    @Test
+    fun `폴링 번호를 못 받아도 회선을 끊지 않는다 - 다음 폴링에서 다시`() {
+        val bank = MockBankServer().start().closeLater()
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        val flaky = TranNoSource { if (calls.incrementAndGet() == 1) throw BankNotSentException("not yet") else calls.get().toLong() }
+        val client = client(bank.boundPort, poll = Duration.ofMillis(200), tranNo = flaky).start()
+        waitUntil { client.isConnected }
+
+        waitUntil { bank.pollCount >= 2 }
+
+        assertTrue(client.isConnected)
+        assertEquals(1, bank.sessionsOpened)   // 끊고 다시 붙지 않았다
     }
 
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }

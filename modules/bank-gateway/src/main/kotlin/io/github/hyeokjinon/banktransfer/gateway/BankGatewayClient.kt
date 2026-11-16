@@ -11,6 +11,7 @@ import io.github.hyeokjinon.banktransfer.protocol.NameInquiryResponse
 import io.github.hyeokjinon.banktransfer.protocol.PollRequest
 import io.github.hyeokjinon.banktransfer.protocol.PollResponse
 import io.github.hyeokjinon.banktransfer.protocol.ProtocolException
+import io.github.hyeokjinon.banktransfer.protocol.ResponseCodes
 import io.github.hyeokjinon.banktransfer.protocol.TransferRequest
 import io.github.hyeokjinon.banktransfer.protocol.TransferResponse
 import io.github.hyeokjinon.banktransfer.protocol.netty.addBankCodec
@@ -38,7 +39,6 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicLong
 
 data class BankGatewayConfig(
     val host: String,
@@ -89,12 +89,13 @@ class BankGatewayClient(
     private val clock: Clock = Clock.systemDefaultZone(),
     /** 점검 시간 등으로 보내지 않을 때 (P5-1). 기본은 늘 열림. */
     private val sendGate: SendGate = SendGate.OPEN,
+    /** 전문번호 발급 (P8-3b). 기본은 이 인스턴스 안의 메모리 카운터 — K8s 에서는 게이트웨이 앱이 ConfigMap 구간 예약을 넣는다. */
+    private val tranNoSource: TranNoSource = InMemoryTranNoSource(),
 ) : BankGateway, AutoCloseable {
 
     private val log = LoggerFactory.getLogger(javaClass)
     private val group = MultiThreadIoEventLoopGroup(1, NioIoHandler.newFactory())
     private val pending = ConcurrentHashMap<Long, CompletableFuture<BankMessage>>()
-    private val tranNoSequence = AtomicLong(0)
     private val reconnectAttempts = AtomicInteger(0)
 
     @Volatile private var channel: Channel? = null
@@ -132,20 +133,38 @@ class BankGatewayClient(
     }
 
     override fun inquireName(bankCode: String, accountNo: String): CompletableFuture<NameInquiryResponse> =
-        send(NameInquiryRequest(newHeader(BizType.NAME_INQUIRY), bankCode, accountNo)).thenApply { it.expect<NameInquiryResponse>() }
+        request { NameInquiryRequest(newHeader(BizType.NAME_INQUIRY), bankCode, accountNo) }.thenApply { it.expect<NameInquiryResponse>() }
 
     override fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String, reference: String): CompletableFuture<TransferResponse> =
-        send(TransferRequest(newHeader(BizType.TRANSFER), bankCode, accountNo, amount, memo, reference)).thenApply { it.expect<TransferResponse>() }
+        request { TransferRequest(newHeader(BizType.TRANSFER), bankCode, accountNo, amount, memo, reference) }.thenApply { it.expect<TransferResponse>() }
 
     /** 결과조회 (v0.2). 결과를 모르는 이체를 이용기관 거래번호로 묻는다 — 이체를 다시 보내지 않는다. */
     override fun inquire(reference: String): CompletableFuture<InquiryResponse> =
-        send(InquiryRequest(newHeader(BizType.INQUIRY), reference)).thenApply { it.expect<InquiryResponse>() }
+        request { InquiryRequest(newHeader(BizType.INQUIRY), reference) }.thenApply { it.expect<InquiryResponse>() }
+
+    /**
+     * 보낼 수 없으면 번호를 쓰기 전에 끝낸다 (구간 예약 번호를 헛되이 쓰지 않게).
+     * 번호 발급 실패(BankNotSentException)도 동기로 던지지 않고 future 에 담는다 — 호출자는 실패를 한 경로로만 받는다.
+     */
+    private fun request(build: () -> BankMessage): CompletableFuture<BankMessage> {
+        notSendableReason()?.let { return CompletableFuture.failedFuture(BankNotSentException(it)) }
+        val message = try {
+            build()
+        } catch (e: BankNotSentException) {
+            return CompletableFuture.failedFuture(e)
+        }
+        return send(message)
+    }
+
+    private fun notSendableReason(): String? =
+        sendGate.closedReason() ?: if (channel?.isActive == true) null else "bank channel is not connected"
 
     /**
      * 요청을 보내고 즉시 future 를 돌려준다.
      * 실패는 future 안에 담긴다: 연결 없음 -> BankNotSentException (안 보냄),
      * 쓰기 실패 · 보낸 뒤 연결 끊김 -> BankUnavailableException (보냈을 수 있음), 시간 초과 -> BankTimeoutException.
      * 보내기 문이 닫혀 있으면(점검 시간, P5-1) 연결이 있어도 쓰지 않고 BankNotSentException 이다. 폴링은 send 를 거치지 않아 점검 중에도 회선은 유지된다.
+     * 응답코드 `3001`(전문번호 중복, v0.4)은 은행이 처리하지 않았다는 뜻이라 BankNotSentException 이다 (P8-3b 결정 15).
      */
     fun send(request: BankMessage): CompletableFuture<BankMessage> {
         sendGate.closedReason()?.let { return CompletableFuture.failedFuture(BankNotSentException(it)) }
@@ -166,7 +185,11 @@ class BankGatewayClient(
             .handle { response, error ->
                 pending.remove(tranNo, future)
                 when (val cause = error?.unwrap()) {
-                    null -> response
+                    null -> if (response.header.responseCode == ResponseCodes.DUPLICATE_TRAN_NO) {
+                        throw BankNotSentException("bank rejected duplicate tranNo $tranNo (${ResponseCodes.DUPLICATE_TRAN_NO}) — not processed")
+                    } else {
+                        response
+                    }
                     is TimeoutException -> throw BankTimeoutException(tranNo, config.responseTimeout)
                     else -> throw cause
                 }
@@ -183,8 +206,8 @@ class BankGatewayClient(
     internal fun newHeader(bizType: BizType, messageClass: MessageClass = MessageClass.REQUEST) =
         Header(messageClass, bizType, nextTranNo(), LocalDateTime.now(clock))
 
-    /** 8자리 전문번호. 다 쓰면 1부터 다시 쓴다(은행과 합의해야 하는 부분). */
-    private fun nextTranNo(): Long = tranNoSequence.updateAndGet { if (it >= Header.MAX_TRAN_NO) 1 else it + 1 }
+    /** 8자리 전문번호 (규격 v0.4: 기관 · 일자별 유일). 발급 규칙은 [TranNoSource] 가 정한다. */
+    private fun nextTranNo(): Long = tranNoSource.next()
 
     private fun connect() {
         if (!running) return
@@ -232,7 +255,16 @@ class BankGatewayClient(
         override fun userEventTriggered(ctx: ChannelHandlerContext, evt: Any) {
             if (evt !is IdleStateEvent) return super.userEventTriggered(ctx, evt)
             when (evt.state()) {
-                IdleState.WRITER_IDLE -> ctx.writeAndFlush(PollRequest(newHeader(BizType.POLL, MessageClass.ADMIN_REQUEST)))
+                IdleState.WRITER_IDLE -> {
+                    // 번호를 못 받으면(구간 예약 전 · API 서버 단절) 이번 폴링만 건너뛴다 — 예외가 exceptionCaught 로 가면 회선을 끊는다
+                    val header = try {
+                        newHeader(BizType.POLL, MessageClass.ADMIN_REQUEST)
+                    } catch (e: BankNotSentException) {
+                        log.warn("poll skipped: {}", e.message)
+                        return
+                    }
+                    ctx.writeAndFlush(PollRequest(header))
+                }
                 IdleState.READER_IDLE -> {
                     log.warn("no data from bank for {}, closing channel", config.readerIdleTimeout)
                     ctx.close()
