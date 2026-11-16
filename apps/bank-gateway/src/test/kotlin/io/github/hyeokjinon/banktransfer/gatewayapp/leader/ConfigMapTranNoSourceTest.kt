@@ -134,6 +134,33 @@ class ConfigMapTranNoSourceTest {
         assertTrue(data()["reservedTo"] == "${Header.MAX_TRAN_NO - 5}")
     }
 
+    private fun store(date: String?, reservedTo: String?) {
+        val b = ConfigMapBuilder().withNewMetadata().withName(name).endMetadata()
+        date?.let { b.addToData("date", it) }
+        reservedTo?.let { b.addToData("reservedTo", it) }
+        k8s.client.configMaps().inNamespace(ns).resource(b.build()).create()
+    }
+
+    @Test
+    fun `저장된 날짜가 더 새로우면 예약하지 않고 기록도 그대로 둔다 - 시계가 늦은 예약자`() {
+        store("20261117", "1000")
+
+        assertFailsWith<BankNotSentException> { source().reserve("20261116") }
+        assertEquals(mapOf("date" to "20261117", "reservedTo" to "1000"), data())
+    }
+
+    @Test
+    fun `깨진 기록은 덮지 않고 보내지 않는다`() {
+        store("20261116", "abc")
+        assertFailsWith<BankNotSentException> { source().reserve("20261116") }
+        assertEquals(mapOf("date" to "20261116", "reservedTo" to "abc"), data())
+
+        k8s.client.configMaps().inNamespace(ns).withName(name).delete()
+        store("20261116", null)
+        assertFailsWith<BankNotSentException> { source().reserve("20261116") }
+        assertEquals(mapOf("date" to "20261116"), data())
+    }
+
     private class MutableClock(var now: Instant) : Clock() {
         override fun getZone(): ZoneId = ZoneId.of("UTC")
         override fun withZone(zone: ZoneId): Clock = this

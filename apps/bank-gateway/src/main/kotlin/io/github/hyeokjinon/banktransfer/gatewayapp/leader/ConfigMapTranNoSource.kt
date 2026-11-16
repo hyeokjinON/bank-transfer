@@ -22,6 +22,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * - [next] 는 막히지 않는다 (Netty 이벤트 루프 · WebFlux 스레드에서 부른다). 구간이 없으면 백그라운드 예약을 걸고 BankNotSentException.
  * - 구간에 [prefetchRemaining] 개 미만이 남으면 다음 구간을 미리 예약한다. 쓰지 못한 번호는 건너뛴다 (유일성만 요구 — 추정).
  * - 날짜(KST)가 바뀌면 새 날짜 구간을 1부터 (점검 시간 23:50 ~ 00:10 안이라 송신은 원래 막혀 있다 — 결정 10).
+ * - 저장된 날짜가 더 새로우면 예약하지 않는다 (시계가 늦은 예약자가 날짜를 되돌려 번호를 다시 내는 것을 막는다).
+ * - 저장된 기록이 깨졌으면 덮지 않고 BankNotSentException (운영자가 고친다).
  */
 class ConfigMapTranNoSource(
     private val k8s: KubernetesClient,
@@ -108,7 +110,15 @@ class ConfigMapTranNoSource(
                     return@repeat   // 다른 예약자가 먼저 만들었다 — 다시 읽는다
                 }
             }
-            val reservedTo = if (existing.data?.get(DATE) == date) existing.data.getValue(RESERVED_TO).toLong() else 0L
+            val storedDate = existing.data?.get(DATE)
+            val storedTo = existing.data?.get(RESERVED_TO)?.toLongOrNull()
+            // 깨진 기록은 덮지 않는다 — 덮으면 번호를 다시 낼 수 있다. 운영자가 고친다.
+            if (storedDate == null || !DATE_FORMAT.matches(storedDate) || storedTo == null || storedTo < 0) {
+                throw BankNotSentException("tran no record is corrupted (date=$storedDate, reservedTo=${existing.data?.get(RESERVED_TO)}) — operator must fix $name")
+            }
+            // yyyyMMdd 는 문자열 순서 = 날짜 순서. 저장된 날짜가 더 새로우면 시계가 늦은 예약자 — 되돌리지 않는다.
+            if (storedDate > date) throw BankNotSentException("stored date $storedDate is newer than requested $date — not reserving")
+            val reservedTo = if (storedDate == date) storedTo else 0L
             val start = reservedTo + 1
             val last = start + blockSize - 1
             if (last > Header.MAX_TRAN_NO) throw BankNotSentException("tran no exhausted for $date (reservedTo=$reservedTo)")
@@ -132,6 +142,7 @@ class ConfigMapTranNoSource(
     companion object {
         private val KST: ZoneId = ZoneId.of("Asia/Seoul")
         private const val DATE = "date"
+        private val DATE_FORMAT = Regex("[0-9]{8}")
         private const val RESERVED_TO = "reservedTo"
         private const val CONFLICT = 409
     }
