@@ -1,4 +1,4 @@
-# api 만 (스펙 결정 11). drain 이 api 를 한 번에 둘 다 내리지 못하게. 1대짜리(게이트웨이 · 모의 은행 · 인프라)에 걸면 drain 이 끝나지 않는다
+# api · 게이트웨이 (2대짜리만). drain 이 두 대를 한 번에 내리지 못하게. 1대짜리(모의 은행 · 인프라)에 걸면 drain 이 끝나지 않는다
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -7,3 +7,13 @@ spec:
   minAvailable: 1
   selector:
     matchLabels: {app: api}
+---
+# 게이트웨이 2대 (P8-3b 결정 19): drain 이 리더 · 대기자를 한 번에 내리지 못하게
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: bank-gateway
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: bank-gateway}

@@ -1,0 +1,30 @@
+# H0 대조 (P8-3b 스펙 §9): 이전 구성 — 게이트웨이 1대 · Recreate · 선출 끔 (메모리 전문번호). 모의 은행 제약은 켠 채로 둔다.
+# 끝나면 apply_overlay local <태그> 로 되돌린다. kubectl apply 는 지운 리소스를 치우지 않으니 PDB 는 손으로: kubectl -n bank-transfer delete pdb bank-gateway
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../local
+patches:
+  - target: {kind: Deployment, name: bank-gateway}
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: bank-gateway}
+      spec:
+        replicas: 1
+        strategy: {type: Recreate, rollingUpdate: null}
+        template:
+          spec:
+            containers:
+              - name: bank-gateway
+                env:
+                  - {name: BANK_GATEWAY_LEADERELECTION_ENABLED, value: "false"}
+  - target: {kind: Service, name: bank-gateway}
+    patch: |-
+      - op: remove
+        path: /spec/selector/bank-transfer~1gateway-role
+  - patch: |-
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata: {name: bank-gateway}
+      $patch: delete

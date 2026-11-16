@@ -33,6 +33,8 @@ image_tag() {
 # 지금 배포된 태그: api 는 R1 이 -r<시각> 태그로 바꾼다, 게이트웨이는 up.sh · apply_overlay 의 태그 그대로
 api_tag() { k get deploy api -o jsonpath='{.spec.template.spec.containers[0].image}' | sed 's/.*://'; }
 deployed_tag() { k get deploy bank-gateway -o jsonpath='{.spec.template.spec.containers[0].image}' | sed 's/.*://'; }
+# 리더 라벨이 붙은 게이트웨이 Pod 이름 (P8-3b). 없으면 빈 줄 — 선출을 끈 H0 대조 등
+gw_leader() { k get pods -l app=bank-gateway,bank-transfer/gateway-role=leader -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true; }
 
 # overlay 를 태그와 함께 적용: build/k8s/<overlay>/kustomization.yaml 이 images 만 덮는다 (저장소 파일은 그대로)
 apply_overlay() {   # $1 = overlay (local | ci | experiment-*), $2 = 태그
