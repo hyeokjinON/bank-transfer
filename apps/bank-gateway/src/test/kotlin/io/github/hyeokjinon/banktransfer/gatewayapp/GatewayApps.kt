@@ -1,5 +1,7 @@
 package io.github.hyeokjinon.banktransfer.gatewayapp
 
+import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
+import io.github.hyeokjinon.banktransfer.gatewayapp.leader.BankConnectionOwner
 import org.springframework.boot.WebApplicationType
 import org.springframework.boot.builder.SpringApplicationBuilder
 import org.springframework.boot.test.context.TestConfiguration
@@ -37,3 +39,7 @@ object GatewayApps {
 }
 
 fun ConfigurableApplicationContext.port(): Int = environment.getProperty("local.server.port")!!.toInt()
+
+/** 지금 리더의 은행 클라이언트 (P8-3b — 클라이언트는 빈이 아니라 Owner 가 임기마다 만든다). */
+fun ConfigurableApplicationContext.bankClient(): BankGatewayClient =
+    getBean(BankConnectionOwner::class.java).current() ?: error("this gateway is not the bank connection leader")

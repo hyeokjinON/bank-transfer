@@ -1,0 +1,41 @@
+# 게이트웨이 선출 권한 (P8-3b 결정 20). 최소 권한: Lease · ConfigMap 은 이름 한정.
+# Pod get · patch 는 namespace 범위 — 자기 Pod 에 리더 라벨을 붙이고 떼는데, Pod 이름을 미리 알 수 없어 이름 한정이 안 된다 (스펙 §16 의 대가)
+# create 는 resourceNames 로 제한할 수 없어(이름이 요청 본문에 있다) 따로 둔다 — 처음 예약자 · 처음 선출이 만든다
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bank-gateway
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bank-gateway
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [bank-gateway-leader]
+    verbs: [get, update, patch]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [bank-gateway-tran-no]
+    verbs: [get, update]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bank-gateway
+subjects:
+  - {kind: ServiceAccount, name: bank-gateway}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bank-gateway

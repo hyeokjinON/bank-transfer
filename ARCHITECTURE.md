@@ -101,7 +101,23 @@ flowchart LR
 게이트웨이는 워커(role=app) 중 한 대에 뜬다 — 그림의 위치는 예시.
 - 노드 배치: 인프라 · 모의 은행 · CoreDNS · Envoy Gateway 컨트롤러 · Envoy 프록시 = 제어 노드(워커 장애 실험에서 같이 죽지 않게), api · 게이트웨이 = 워커. api 는 `topologySpreadConstraints` 로 워커에 하나씩. PV 는 제어 노드에 묶인다.
 - NetworkPolicy 는 namespace 전체 ingress 기본 거부 + 위 화살표(허용 목록)만. 허용 목록 밖 Pod 는 게이트웨이 · MySQL 에 못 붙는다 (N0). 프로브 3종은 Pod 별로 다르다: api readiness = Spring 기본, **게이트웨이 readiness 에만 `bankConnection`** (은행 장애 = Service 에서 빠짐, 재시작 아님).
-- 게이트웨이 1대 = 단일 장애점은 그대로다. `Recreate` 는 배포 때만 연결 주인을 하나로 지키고 퇴거(drain)에는 못 지킨다 → P8-3b.
+- (P8-3a 시점) 게이트웨이 1대 = 단일 장애점이었다. `Recreate` 는 배포 때만 연결 주인을 하나로 지키고 퇴거(drain)에는 못 지켰다 → 아래 P8-3b.
+
+### 게이트웨이 이중화 (P8-3b, 제안)
+> 제안 — [ADR-0018](docs/adr/0018-gateway-ha-leader-election.md) (머지 뒤 채택, 이 "(제안)" 표시는 정리 PR 에서 뗀다). 위 그림의 게이트웨이 1대가 2대 active-standby 가 된다. 이유 · 실험 숫자는 ADR 과 [측정 결과](docs/perf/p8-3b-gateway-ha.md), 운영은 [OPERATION §16](OPERATION.md#16-게이트웨이-이중화-p8-3b).
+
+```mermaid
+flowchart LR
+    A["api ×2"] --> S["Service bank-gateway<br/>selector: gateway-role=leader"]
+    S --> L["게이트웨이 리더<br/>라벨 gateway-role=leader · Ready"]
+    SB["게이트웨이 대기<br/>라벨 없음 · Ready · 은행 연결 없음"]
+    L -- "TCP 세션 1개" --> M["모의 은행<br/>--single-session · --unique-tran-no"]
+    L <-. "갱신 15s 만료 · 10s 기한" .-> LS[("Lease<br/>bank-gateway-leader")]
+    SB <-. "획득 시도 2s" .-> LS
+    L -- "구간 1,000개 예약<br/>(resourceVersion CAS)" --> CM[("ConfigMap<br/>bank-gateway-tran-no")]
+```
+- 리더 선출 (fabric8 `LeaderElector`, 로컬 워치독이 갱신 기한 + 0.25초 안에 자기 차단) → 리더 라벨 (접속 뒤 붙이고, 교대 때 끊은 뒤 뗀다) → 전문번호 구간 예약(선출과 독립 — 두 대가 겹쳐도 번호가 안 겹친다). 정상 교대: 새 요청 거절 → 처리 중 전문 비우기 → 연결 끊기 → 라벨 떼기 → Lease 반납 (SIGTERM 종료 훅). 선출은 K8s 에서만 켜진다 (기본 꺼짐).
+- 두 복제본이 한 노드에 있으면 이중화가 아니다 (OPERATION §16-3).
 
 ## 2. 모듈
 
@@ -465,3 +481,4 @@ flowchart TB
 | [0015](docs/adr/0015-bank-gateway-service.md) | 은행 게이트웨이를 별도 서비스(동기 HTTP)로 분리, 실패 분류 · 재시도 끔 · 송신 취소 안 함은 그대로, 기본은 `direct` 유지 (P8-2 에서 `http` 로 변경 — ADR-0016) |
 | [0016](docs/adr/0016-app-images-compose.md) | 루트 Dockerfile 하나 · 타깃 3 · nginx 앞 api 2대(보낸 POST 는 다시 보내지 않음), 하루 배치만 ShedLock, `mode` 기본 `http`, 파티션 3 유지 |
 | [0017](docs/adr/0017-kubernetes-kind.md) | 같은 구성을 kind(Kubernetes)로 — Envoy Gateway 입구(재시도 없음), preStop 10s · 프로브 3종, 게이트웨이 readiness 에만 은행 연결, NetworkPolicy 기본 거부, 인프라 · 모의 은행은 제어 노드, 연결 주인 하나는 P8-3b |
+| [0018](docs/adr/0018-gateway-ha-leader-election.md) | 게이트웨이 2대 active-standby — K8s Lease 리더 선출, 리더 라벨 + 둘 다 Ready, 전문번호 ConfigMap 구간 예약, 정상 교대 순서(종료 훅), 규격 v0.4 `3001` (제안) |

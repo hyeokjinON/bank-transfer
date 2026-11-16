@@ -38,6 +38,7 @@ object ResponseCodes {
     const val OK = "0000"
     const val ACCOUNT_NOT_FOUND = "1001"
     const val ORIGINAL_NOT_FOUND = "2001"   // 결과조회: 원거래 없음
+    const val DUPLICATE_TRAN_NO = "3001"    // v0.4: 같은 기관 · 같은 날(KST) 이미 쓴 전문번호 — 은행이 처리하지 않았다
     const val SYSTEM_ERROR = "9999"
 }
 

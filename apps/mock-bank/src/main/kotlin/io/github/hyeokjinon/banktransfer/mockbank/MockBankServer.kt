@@ -23,6 +23,9 @@ import io.netty.channel.SimpleChannelInboundHandler
 import io.netty.channel.nio.NioIoHandler
 import io.netty.channel.socket.SocketChannel
 import io.netty.channel.socket.nio.NioServerSocketChannel
+import io.netty.handler.timeout.IdleState
+import io.netty.handler.timeout.IdleStateEvent
+import io.netty.handler.timeout.IdleStateHandler
 import org.slf4j.LoggerFactory
 import java.net.InetSocketAddress
 import java.nio.file.Path
@@ -49,6 +52,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * - responseDelay (P6-1): 모든 응답을 이만큼 늦춘다 (띄운 뒤에도 바꿀 수 있다). 그동안 "동시에 응답을 기다리는 요청 수" 의 최댓값을 센다 — 테스트는 [peakPendingResponses], 측정은 로그
  * - bankFiles (P5-1): 처리한 이체를 일자별 거래 기록에 남기고, 기동할 때 처리한 거래번호를 되살리고, 매일 00:05(KST)에 전날 대사 파일을 만든다 ([BankJournal]).
  *   null(테스트 기본값)이면 지금처럼 메모리만 쓴다
+ * - 실무 제약 (P8-3b, 기본 꺼짐): singleSession(세션 하나 — 둘째 연결은 받자마자 끊는다), sessionIdleTimeout(받은 전문이 없으면 끊는다),
+ *   uniqueTranNo(같은 KST 날짜에 쓴 전문번호면 처리하지 않고 3001). 연결을 받고 닫을 때마다 `sessions=<지금> max=<최대>` 를 남긴다 — 실험 도구가 읽는다
  */
 class MockBankServer(
     private val port: Int = 0,
@@ -59,6 +64,9 @@ class MockBankServer(
     /** 일자별 거래 기록 · 대사 파일 디렉터리 (P5-1). null 이면 기록하지 않는다. */
     bankFiles: Path? = null,
     private val clock: Clock = Clock.systemUTC(),
+    private val singleSession: Boolean = false,
+    private val sessionIdleTimeout: Duration? = null,
+    private val uniqueTranNo: Boolean = false,
 ) : AutoCloseable {
 
     private val log = LoggerFactory.getLogger(javaClass)
@@ -72,6 +80,14 @@ class MockBankServer(
     private val deposits = ConcurrentHashMap<String, ConcurrentLinkedQueue<TransferRequest>>()
     private val processedReferences: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val pollCounter = AtomicInteger()
+
+    /** 지금 붙어 있는 세션 수 · 최댓값 · 받아들인 총수 (P8-3b — "은행에 붙는 것은 언제나 하나" 의 은행 쪽 증거). */
+    private val sessions = AtomicInteger()
+    private val peakSessionCount = AtomicInteger()
+    private val openedSessions = AtomicInteger()
+
+    /** KST 날짜별로 이미 쓴 전문번호 (uniqueTranNo). 오늘 것만 남긴다. */
+    private val seenTranNos = ConcurrentHashMap<LocalDate, MutableSet<Long>>()
 
     /** 응답 지연 (P6-1: 측정 · 테스트가 바꾼다). 범위 검사는 실행 인자(MockBankOptions)가 한다. */
     @Volatile
@@ -99,13 +115,21 @@ class MockBankServer(
         .option(ChannelOption.SO_REUSEADDR, true)
         .childHandler(object : ChannelInitializer<SocketChannel>() {
             override fun initChannel(ch: SocketChannel) {
+                if (!admit(ch)) return
                 clients.add(ch)
+                sessionIdleTimeout?.let { ch.pipeline().addLast("idle", IdleStateHandler(it.toMillis(), 0, 0, TimeUnit.MILLISECONDS)) }
                 ch.pipeline().addBankCodec().addLast(BankHandler())
             }
         })
 
     val boundPort: Int get() = listenPort
     val pollCount: Int get() = pollCounter.get()
+
+    /** 받아들인 세션 총수 (끊긴 것 포함). */
+    val sessionsOpened: Int get() = openedSessions.get()
+
+    /** 동시에 붙어 있던 세션 수의 최댓값. */
+    fun peakSessions(): Int = peakSessionCount.get()
 
     fun start(): MockBankServer {
         journal?.let {
@@ -147,6 +171,20 @@ class MockBankServer(
     /** 최댓값을 지금 기다리는 수로 되돌린다 (공유 테스트 은행에서 한 테스트의 값만 보려고). */
     fun resetPeakPendingResponses() = peakPending.set(pendingResponses.get())
 
+    /** 세션을 받을지 정한다. singleSession 이면 둘째부터 받자마자 끊는다 (실무: 기관당 세션 수 제한). */
+    private fun admit(ch: SocketChannel): Boolean {
+        val now = sessions.incrementAndGet()
+        if (singleSession && now > 1) {
+            log.info("session rejected sessions={} max={}", sessions.decrementAndGet(), peakSessionCount.get())
+            ch.close()
+            return false
+        }
+        openedSessions.incrementAndGet()
+        log.info("session opened sessions={} max={}", now, peakSessionCount.accumulateAndGet(now) { a, b -> maxOf(a, b) })
+        ch.closeFuture().addListener { log.info("session closed sessions={} max={}", sessions.decrementAndGet(), peakSessionCount.get()) }
+        return true
+    }
+
     private fun scheduleDailyClose() {
         val executor = closer ?: return
         executor.schedule({
@@ -173,34 +211,59 @@ class MockBankServer(
         workers.shutdownGracefully(0, 1, TimeUnit.SECONDS).awaitUninterruptibly(3, TimeUnit.SECONDS)
     }
 
-    internal fun respond(message: BankMessage): BankMessage? = when (message) {
-        is PollRequest -> {
-            pollCounter.incrementAndGet()
-            PollResponse(message.header.toResponse())
+    internal fun respond(message: BankMessage): BankMessage? {
+        if (uniqueTranNo && message.header.messageClass.isRequest && !firstUseToday(message.header.tranNo)) {
+            log.info("duplicate tran no {} biz={} — not processed ({})", message.header.tranNo, message.header.bizType, ResponseCodes.DUPLICATE_TRAN_NO)
+            return duplicateReply(message)
         }
-        is NameInquiryRequest -> when {
-            message.accountNo in silentAccounts -> null
-            else -> {
-                val name = accounts[message.accountNo]
-                val code = if (name == null) ResponseCodes.ACCOUNT_NOT_FOUND else ResponseCodes.OK
-                NameInquiryResponse(message.header.toResponse(code), message.bankCode, message.accountNo, name.orEmpty())
+        return when (message) {
+            is PollRequest -> {
+                pollCounter.incrementAndGet()
+                PollResponse(message.header.toResponse())
             }
-        }
-        is TransferRequest -> when {
-            message.accountNo in silentAccounts -> null
-            message.accountNo !in accounts -> message.reply(ResponseCodes.ACCOUNT_NOT_FOUND)
-            else -> {
-                deposit(message)
-                // 처리는 했는데 응답이 사라진 상황 (결과조회로만 확정할 수 있다)
-                if (message.accountNo in silentAfterProcessingAccounts && message.amount > 1) null else message.reply(ResponseCodes.OK)
+            is NameInquiryRequest -> when {
+                message.accountNo in silentAccounts -> null
+                else -> {
+                    val name = accounts[message.accountNo]
+                    val code = if (name == null) ResponseCodes.ACCOUNT_NOT_FOUND else ResponseCodes.OK
+                    NameInquiryResponse(message.header.toResponse(code), message.bankCode, message.accountNo, name.orEmpty())
+                }
             }
+            is TransferRequest -> when {
+                message.accountNo in silentAccounts -> null
+                message.accountNo !in accounts -> message.reply(ResponseCodes.ACCOUNT_NOT_FOUND)
+                else -> {
+                    deposit(message)
+                    // 처리는 했는데 응답이 사라진 상황 (결과조회로만 확정할 수 있다)
+                    if (message.accountNo in silentAfterProcessingAccounts && message.amount > 1) null else message.reply(ResponseCodes.OK)
+                }
+            }
+            is InquiryRequest -> {
+                val result = if (message.reference in processedReferences) ResponseCodes.OK else ResponseCodes.ORIGINAL_NOT_FOUND
+                log.info("[결과조회] {} -> {}", message.reference, result)
+                InquiryResponse(message.header.toResponse(), message.reference, result)
+            }
+            is PollResponse, is NameInquiryResponse, is TransferResponse, is InquiryResponse -> null
         }
-        is InquiryRequest -> {
-            val result = if (message.reference in processedReferences) ResponseCodes.OK else ResponseCodes.ORIGINAL_NOT_FOUND
-            log.info("[결과조회] {} -> {}", message.reference, result)
-            InquiryResponse(message.header.toResponse(), message.reference, result)
+    }
+
+    /** 오늘(KST) 처음 쓰는 번호인가. 지난 날짜는 지운다 (메모리를 하루치로). */
+    private fun firstUseToday(tranNo: Long): Boolean {
+        val today = LocalDate.ofInstant(clock.instant(), KST)
+        seenTranNos.keys.removeIf { it != today }
+        return seenTranNos.computeIfAbsent(today) { ConcurrentHashMap.newKeySet() }.add(tranNo)
+    }
+
+    /** 중복 번호 응답: 처리하지 않고 공통부 응답코드 3001 (결과조회 처리결과 칸도 3001 — 처리 여부를 답한 게 아니다). */
+    private fun duplicateReply(message: BankMessage): BankMessage? {
+        val dup = ResponseCodes.DUPLICATE_TRAN_NO
+        return when (message) {
+            is PollRequest -> PollResponse(message.header.toResponse(dup))
+            is NameInquiryRequest -> NameInquiryResponse(message.header.toResponse(dup), message.bankCode, message.accountNo, "")
+            is TransferRequest -> message.reply(dup)
+            is InquiryRequest -> InquiryResponse(message.header.toResponse(dup), message.reference, dup)
+            is PollResponse, is NameInquiryResponse, is TransferResponse, is InquiryResponse -> null
         }
-        is PollResponse, is NameInquiryResponse, is TransferResponse, is InquiryResponse -> null
     }
 
     private fun deposit(message: TransferRequest) {
@@ -236,6 +299,16 @@ class MockBankServer(
             if (now > peakPending.getAndAccumulate(now) { a, b -> maxOf(a, b) }) log.info("mock bank peak pending responses: {}", now)
         }
 
+        override fun userEventTriggered(ctx: ChannelHandlerContext, evt: Any) {
+            if (evt is IdleStateEvent && evt.state() == IdleState.READER_IDLE) {
+                // 상대가 FIN 없이 사라진 세션(노드째 정지)을 정리한다 — 실무 은행의 세션 정리 시간 흉내 (P8-3b H4)
+                log.info("session evicted idle after {}ms without messages", sessionIdleTimeout?.toMillis())
+                ctx.close()
+            } else {
+                super.userEventTriggered(ctx, evt)
+            }
+        }
+
         override fun exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable) {
             log.warn("closing client channel: {}", cause.message)
             ctx.close()
@@ -263,12 +336,21 @@ fun main(args: Array<String>) {
         println("Recon file for $day: ${BankJournal(options.bankFiles).closeDay(day).toAbsolutePath()}")
         return
     }
-    val server = MockBankServer(options.port, responseDelay = options.responseDelay, bankFiles = options.bankFiles).start()
+    val server = MockBankServer(
+        options.port,
+        responseDelay = options.responseDelay,
+        bankFiles = options.bankFiles,
+        singleSession = options.singleSession,
+        sessionIdleTimeout = options.sessionIdleTimeout,
+        uniqueTranNo = options.uniqueTranNo,
+    ).start()
     // 정상 종료(Ctrl+C) 때 동시 대기 최댓값을 남긴다 (측정용). 강제 종료면 남지 않는다 — 최댓값이 바뀔 때마다 남기는 줄이 대신한다
     Runtime.getRuntime().addShutdownHook(Thread { server.close() })
     println(
         "Mock bank FEP started on port ${options.port}. Accounts: ${MockBankServer.DEFAULT_ACCOUNTS}. " +
-            "Bank files: ${options.bankFiles.toAbsolutePath()}. Response delay: ${options.responseDelay.toMillis()}ms",
+            "Bank files: ${options.bankFiles.toAbsolutePath()}. Response delay: ${options.responseDelay.toMillis()}ms. " +
+            "Single session: ${options.singleSession}, session idle timeout: ${options.sessionIdleTimeout?.seconds?.let { "${it}s" } ?: "off"}, " +
+            "unique tran no: ${options.uniqueTranNo}",
     )
     Thread.currentThread().join()
 }

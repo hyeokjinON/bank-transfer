@@ -40,10 +40,14 @@ spec:
         - name: mock-bank
           image: bank-transfer/mock-bank:dev
           imagePullPolicy: IfNotPresent
+          # 실무 제약 재현 (P8-3b): 세션 하나 · 유휴 세션 60초(폴링 30초의 2배) 정리 · 전문번호 일자별 유일.
+          # args 가 이미지 CMD 를 덮으므로 포트 · 기록 디렉터리를 다시 적는다
+          args: ["9090", "--bank-files=/data/bank-files", "--single-session", "--session-idle-timeout=60s", "--unique-tran-no"]
           ports:
             - {name: tcp, containerPort: 9090}
-          readinessProbe:
-            tcpSocket: {port: tcp}
+          readinessProbe:   # 연결하지 않고 LISTEN 만 본다 — tcpSocket 은 연결을 열어 --single-session 의 세션 한 자리를 차지 · 거부 로그를 남긴다 (P8-3b)
+            exec:
+              command: ["sh", "-c", "grep -qiE '^ *[0-9]+: [0-9A-F]+:2382 [0-9A-F]+:0000 0A' /proc/net/tcp /proc/net/tcp6"]   # 9090 = 0x2382, 0A = LISTEN
             periodSeconds: 5
             failureThreshold: 2
           resources:

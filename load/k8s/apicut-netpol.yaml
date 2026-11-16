@@ -1,0 +1,21 @@
+# H5 (P8-3b 스펙 §9): 실험 라벨이 붙은 게이트웨이 Pod 의 나가는 연결을 모의 은행 · DNS 로만 허용 → API 서버(Lease 갱신)만 끊긴다.
+# 리더 라벨로 고르지 않는다 — 새 리더에게도 걸려 연쇄 차단이 된다. run.sh gwcut 이 옛 리더에게만 bank-transfer/experiment=apicut 을 붙인다
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: experiment-apicut
+spec:
+  podSelector:
+    matchLabels: {bank-transfer/experiment: apicut}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector: {matchLabels: {app: mock-bank}}
+      ports:
+        - {port: 9090, protocol: TCP}
+    - to:
+        - namespaceSelector: {}
+          podSelector: {matchLabels: {k8s-app: kube-dns}}
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}

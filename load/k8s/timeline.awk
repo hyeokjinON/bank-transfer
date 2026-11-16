@@ -10,26 +10,33 @@ $1 == "P" {
   }
   if ($3 == "bank-gateway") {
     if ($6 == "True") gwReady[t] = 1
+    if ($6 == "True" && $8 == "leader") gwLead[t] = 1
     if (!($4 in r0)) r0[$4] = $7
     r1[$4] = $7
   }
 }
 $1 == "N" && $3 == node && $4 != "True" && ($2 + 0) >= ta && nodeDown == "" { nodeDown = $2 + 0 }
+$1 == "L" && $3 != "-" && ($2 + 0) >= ta {   # holder 가 빈 표본(-, 인계 중 · kubectl 일시 실패)은 세지 않는다 — 실제 holder 만
+  if (lastHolder != "" && $3 != lastHolder) changes++
+  lastHolder = $3
+}
 function sec(x) { return sprintf("%.1f", (x - ref) / 1000) }
 function allnull() {
   print "api_ready_min=null"; print "api_recovered_s=null"; print "gw_not_ready_s=null"; print "gw_restarts=null"
   print "node_notready_s=null"; print "pod_notready_s=null"; print "replacement_ready_s=null"
+  print "gw_leaderless_s=null"; print "leader_changes=null"
 }
 END {
   if (n == 0) { allnull(); exit }
   ref = (ta + 0 == 0 ? ts[1] : ta + 0)   # steady(ta=0) 는 첫 표본 시각을 기준으로
-  min = ""; lastBad = ""; gwNot = 0; podNot = ""; repl = ""
+  min = ""; lastBad = ""; gwNot = 0; gwNoLead = 0; podNot = ""; repl = ""
   for (i = 1; i <= n; i++) {
     t = ts[i]; if (t < ta) continue
     c = apiReady[t] + 0
     if (min == "" || c < min) min = c
     if (c < 2) lastBad = t
     if (!(t in gwReady) && i < n) gwNot += ts[i + 1] - t
+    if (!(t in gwLead) && i < n) gwNoLead += ts[i + 1] - t
     if (podNot == "" && apiOnNodeNot[t] > 0) podNot = t
   }
   rec = ""
@@ -44,4 +51,6 @@ END {
   print "node_notready_s=" (nodeDown == "" ? "null" : sec(nodeDown))
   print "pod_notready_s=" (node == "-" || podNot == "" ? "null" : sec(podNot))
   print "replacement_ready_s=" (repl == "" ? "null" : repl)
+  print "gw_leaderless_s=" sprintf("%.1f", gwNoLead / 1000)   # Ready 이면서 리더 라벨인 게이트웨이가 없던 시간 (선출 끈 H0 은 전 구간 — gw_not_ready_s 를 본다)
+  print "leader_changes=" (changes + 0)
 }

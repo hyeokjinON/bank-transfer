@@ -73,7 +73,7 @@ class GatewayContractTest {
         HttpBankGateway.create(combo.client, settings(HttpGatewaySettings(baseUrl = baseUrl, responseTimeout = Duration.ofSeconds(2))))
             .also { closeables += it }
 
-    private fun appBank(combo: Combo): BankGatewayClient = app(combo.server).getBean(BankGatewayClient::class.java)
+    private fun appBank(combo: Combo): BankGatewayClient = app(combo.server).bankClient()
 
     private fun awaitConnected(combo: Combo) = await.atMost(Duration.ofSeconds(10)) untilAsserted { assert(appBank(combo).isConnected) }
 
@@ -104,7 +104,7 @@ class GatewayContractTest {
     fun `3 - 은행 연결이 없으면 안 보냄`(combo: Combo) {
         val isolated = MockBankServer().start().also { closeables += it }
         val ctx = GatewayApps.start(combo.server, isolated.boundPort).also { closeables += it }
-        val gw = ctx.getBean(BankGatewayClient::class.java)
+        val gw = ctx.bankClient()
         await.atMost(Duration.ofSeconds(10)) untilAsserted { assert(gw.isConnected) }
         isolated.pause()
         await.atMost(Duration.ofSeconds(10)) untilAsserted { assert(!gw.isConnected) }

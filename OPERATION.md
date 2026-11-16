@@ -642,6 +642,7 @@ docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app r
 ```
 - 한 대씩, 앞의 것이 healthy 가 된 뒤에 다음. 내려가는 동안 nginx 가 다른 한 대로 보낸다 (E3: 첫 시도 5xx 0).
 - **graceful**: 앱은 `server.shutdown=graceful` 로 처리 중인 요청을 끝내고 Kafka 리스너를 정리한 뒤 내려간다. `spring.lifecycle.timeout-per-shutdown-phase: 20s` 는 **종료 단계 하나당** 상한이고 Compose `stop_grace_period` 는 30s 다 — "20s < 30s" 는 단계 하나씩 봤을 때 성립한다 (단계들이 모두 상한까지 쓰는 최악에는 합이 30s 를 넘어 Docker 가 SIGKILL 할 수 있다).
+- **게이트웨이 종료 순서 (P8-3b)**: Compose · IntelliJ (선출 꺼짐) 종료 순서가 바뀜: SIGTERM 에 웹 graceful 전에 새 요청 503 BANK_NOT_SENT → 처리 중 전문 최대 5초 비우기 → 끊기 (예산 5 + 20 < 30초 `stop_grace_period`).
 - **설정을 바꿔 `up -d` 로 컨테이너를 다시 만들면 `docker compose -f infra/docker-compose.yml --env-file infra/.env --profile app restart nginx` 도 한다** — nginx 는 기동 때 upstream 이름(api-1 · api-2)을 한 번만 풀어서, 컨테이너 IP 가 바뀌면 옛 IP 로 보내 502 가 난다. (`load/compose/run.sh` 는 재시작 · 강제 종료 회차 뒤마다 nginx 를 재시작해 이름을 다시 풀게 한다.)
 
 ### 14-4. 컨테이너가 죽었을 때
@@ -676,6 +677,8 @@ bash load/compose/run.sh cleanup       # 끝나면 반드시 — load-p82-u001 ~
 - 결과: `docs/perf/raw/p8-2/<동작>-<회차>.json` (요약) · `.k6.json` · `.nginx-errors.txt` · `.rebalance.txt`, 작업 파일은 `build/load-p82/<동작>-<회차>/`. 먼저 앱을 띄우고 IntelliJ 의 API 는 끈다 (14-1).
 
 ## 15. Kubernetes 실행 (P8-3a)
+> 게이트웨이는 P8-3b 부터 2대 active-standby 다 (§16, 제안) — 아래 §15 의 "게이트웨이 1대 · `Recreate`" 설명은 P8-3a 시점이며 이전 구성(H0)이다.
+
 kind 클러스터(제어 1 + 워커 2): PC `127.0.0.1:8000` → 제어 노드 NodePort 30080 → Envoy → Service `api` → api Pod ×2(워커) → bank-gateway(워커) → mock-bank(제어 노드), 인프라(MySQL · Kafka · Redis)는 제어 노드. 이유 · 숫자는 [ADR-0017](docs/adr/0017-kubernetes-kind.md) · [측정 결과](docs/perf/p8-3a-k8s.md), 파일 · 막히는 곳은 [infra/k8s/README.md](infra/k8s/README.md). 모든 명령은 저장소 루트의 Git Bash 에서. 아래 `kubectl` 은 `--context kind-bank-transfer` 를 줄여 적었다 (여러 클러스터를 쓰면 붙인다).
 
 ### 15-1. 띄우기 · 확인 · 내리기
@@ -766,3 +769,92 @@ bash load/k8s/run.sh cleanup               # 끝나면 반드시 — load-p82-u0
 - 정확성 확인(접수된 키 = 출금 행, 전부 `COMPLETED`, 은행 거래 기록 = 출금 행(같은 거래번호 두 번 0), 잔고 = 원장 합)을 통과하지 못하면 요약이 `.json.invalid` 로 남는다. 시간 지표는 kubectl 표본(1 ~ 2초 간격)이라 ±1.5초.
 - 결과: `docs/perf/raw/p8-3a/<동작>-<회차>.json` (요약) · `.k6.json` · `.timeline.txt` · `.rebalance.txt`, 작업 파일은 `build/load-p83a/<동작>-<회차>/`. 실험 전에 api 두 Pod 가 서로 다른 워커에 Ready 여야 한다 (도구가 사전 확인하고 종료 중 Pod 는 세지 않는다).
 - 클러스터 DB 에 쓰는 행은 `load-p82-u001 ~ u020` · `load-p83a-smoke-<시각>` 뿐이다 (스모크는 끝에서 지운다).
+
+## 16. 게이트웨이 이중화 (P8-3b)
+> 제안 단계 ([ADR-0018](docs/adr/0018-gateway-ha-leader-election.md) — 머지 뒤 채택). 이유 · 숫자는 ADR 과 [측정 결과](docs/perf/p8-3b-gateway-ha.md), 규격은 [protocol.md](docs/protocol.md) v0.4.
+
+게이트웨이가 2대(리더 1 · 대기 1)다. **은행에 붙는 것은 리더뿐**이다. 리더는 K8s Lease `bank-gateway-leader` 로 정해지고, 리더가 자기 Pod 에 라벨 `bank-transfer/gateway-role=leader` 를 붙이면 Service `bank-gateway` 가 그 Pod 로만 보낸다. 대기자도 Ready 다 (롤링 · `rollout status` 가 동작하게). 전문번호는 ConfigMap `bank-gateway-tran-no` 에서 1,000개씩 구간을 예약해 쓰므로 선출과 무관하게 겹치지 않는다. 선출은 **K8s 매니페스트에서만** 켜진다 (`bank.gateway.leader-election.enabled` 기본 false — IntelliJ · Compose 는 그대로 1대가 항상 리더). 모든 명령은 저장소 루트의 Git Bash 에서, `kubectl` 은 `--context kind-bank-transfer` 를 줄여 적었다.
+
+### 16-1. 지금 리더 보기
+```bash
+kubectl -n bank-transfer get lease bank-gateway-leader -o jsonpath='{.spec.holderIdentity}'; echo   # Lease 보유자 = 리더 Pod 이름
+kubectl -n bank-transfer get pods -l app=bank-gateway -L bank-transfer/gateway-role -o wide        # 리더 라벨이 붙은 Pod 정확히 1개 + 어느 노드인지
+kubectl -n bank-transfer get endpointslice -l kubernetes.io/service-name=bank-gateway               # Service 대상 = 리더 Pod 하나
+kubectl -n bank-transfer exec <게이트웨이 Pod 이름> -- wget -qO- http://127.0.0.1:8082/actuator/health/bankConnection   # role: leader | standby
+kubectl -n bank-transfer logs <게이트웨이 Pod 이름> | grep 'leader election'
+```
+- **대기자 헬스**: `/actuator/health/bankConnection` 이 `UP` 이고 `role` 이 `standby` 이면 정상 대기자다 (은행 연결 없음, Ready). 리더는 `role: leader` 이고 은행 연결이 끊기면 `DOWN`(`reason: bank channel not connected` — P8-3a B1 그대로, 이때 라벨 Pod 는 Service 에서 빠진다).
+- **로그 문구**: `became leader` (획득), 정상 교대는 `leader election: released leadership`, 비정상(갱신 실패 · 워치독 자기 차단 포함)은 `leader election: lost leadership`. 워치독이 끊었다면 같은 직전에 자기 차단 줄이 있다. 정상 교대는 시작할 때 `leader election: stepping down` 도 남긴다. WARN `leader election: lease release not observed within 2s — standby will wait for expiry` 는 Lease 반납이 확인되지 않았다는 뜻이다 → 대기자는 만료(15초)까지 기다린다.
+- 스모크 [9] (`bash infra/k8s/smoke.sh`)가 위 셋(Ready 2/2 · 리더 라벨 1개 = Lease 보유자 · 엔드포인트 = 그 Pod)과 모의 은행 동시 세션 1 을 한 번에 확인한다.
+
+### 16-2. 전문번호 예약 보기 — 손으로 고치지 않는다
+```bash
+kubectl -n bank-transfer get configmap bank-gateway-tran-no -o yaml     # data.date (KST yyyyMMdd) · data.reservedTo (여기까지 예약됨)
+kubectl -n bank-transfer logs deploy/mock-bank | grep -c 'duplicate tran no'   # 3001 (중복) 수 — 늘면 아래 16-4
+```
+- `reservedTo` 는 "이 번호까지 누군가 예약했다" 는 뜻이다. **줄이면 이미 쓴 번호가 다시 나가 은행이 `3001` 로 거절한다.** 지금 값 · 날짜를 보기만 한다 (`kubectl edit` · `patch` · `delete` 금지 — 지우면 처음 예약자가 1부터 다시 만든다).
+- 구간은 1,000개씩 예약하고 남는 번호는 건너뛴다 (재시작하면 구간 하나가 통째로 비는 것이 정상). 날짜가 바뀌면 점검 시간(23:50 ~ 00:10) 뒤 첫 송신이 새 날짜 구간을 1부터 예약한다.
+- **저장된 날짜가 오늘보다 새로우면(시계가 늦은 Pod) 예약하지 않고, 기록이 깨졌으면 덮어쓰지 않고, 둘 다 송신을 멈춘다** (`503 BANK_NOT_SENT` — fail-closed). 16-4 로.
+
+### 16-3. 두 Pod 가 서로 다른 노드에 있어야 한다
+**두 복제본이 한 노드에 있으면 이중화가 아니다** (H4′ 변형 — 두 대가 한 노드에서 노드가 죽으면 새 리더 **353.4초**). `ScheduleAnyway` 분산은 노드 정지 동안 한 워커로 몰린 Pod 를 노드가 돌아와도 다시 퍼뜨리지 않는다.
+```bash
+kubectl -n bank-transfer get pods -l app=bank-gateway -o wide          # NODE 열이 서로 달라야 한다
+kubectl -n bank-transfer rollout restart deploy/bank-gateway           # 한 노드에 몰렸으면 — 롤링으로 다시 퍼진다 (이중화 → 이중화는 안전, H2)
+```
+- 노드 drain · 복구 뒤에는 꼭 본다. 실험 도구는 두 대가 한 노드면 시작하지 않는다 (사전 확인).
+- 운영이라면 (이번 단계에 넣지 않았다): 필수 pod anti-affinity 또는 `DoNotSchedule` 분산 (단 워커 하나가 죽으면 두 번째 복제본을 못 띄운다), descheduler 로 재분산, 노드 도달 불가 `tolerationSeconds` 단축 (P8-3a D2' 88초 — 짧은 네트워크 끊김에도 Pod 를 옮기는 대가).
+
+### 16-4. 장애 대응 표
+| 보이는 것 | 뜻 · 확인 | 조치 |
+|---|---|---|
+| 리더 라벨 Pod 가 **둘** | API 서버와 단절된 옛 리더가 라벨을 못 뗐다. **은행 연결은 여전히 1개** (라벨이 아니라 연결이 기준), 옛 리더로 간 요청은 `503 BANK_NOT_SENT` 로 재시도된다 | 기다린다 — 단절이 풀리면 옛 리더가 정리한다. `get lease` 의 보유자가 진짜 리더 |
+| 리더 라벨 Pod **없음**, Lease 보유자도 없음 | 선출이 안 돈다 | `kubectl -n bank-transfer logs <Pod> \| grep -i 'leader election'`, `kubectl -n bank-transfer auth can-i update lease/bank-gateway-leader --as=system:serviceaccount:bank-transfer:bank-gateway` (RBAC `rbac-gateway.yaml`), API 서버 도달 여부. 대기자가 Ready 가 아니면 `describe pod` |
+| Lease 보유자는 있는데 라벨 Pod 없음 | 새 리더가 접속 · 번호 예약 중이거나(접속 뒤 라벨) 못 하는 중 | 몇 초 기다린 뒤 로그: 은행 연결 · 번호 예약 오류, Pod patch 권한(RBAC `rbac-gateway.yaml`) |
+| 모의 은행 `3001`(`duplicate tran no`) 증가, 출금이 `BANK_NOT_SENT` 로 재시도 | 전문번호가 겹쳤다 — 번호 저장소(ConfigMap)가 되돌려졌거나 기록 삭제 | 16-2 로 `date` · `reservedTo` 확인. **`reservedTo` 를 은행에서 이미 쓴 최대 번호보다 크게 올리는 방향으로만** 고친다 (줄이지 않는다). 기록이 없으면 처음 예약자가 1부터 만든다 — 같은 날이면 겹친다 |
+| 게이트웨이 로그에 번호 예약 실패 · 저장된 날짜가 더 새롭다 · 기록이 깨졌다, `503 BANK_NOT_SENT` 지속 | fail-closed — 번호 저장소를 믿을 수 없어 송신을 멈춘 것 | 아래 "깨진 번호 기록 고치기" |
+| Lease 가 **15초 넘게** 안 넘어간다 | 옛 리더 노드가 죽었고 만료 대기 중(정상 15초) / 대기자가 안 뜨는 중 / 두 대가 한 노드 (16-3) | `kubectl get nodes`, `get pods -o wide`. 노드째 죽었으면 정상 — 15초 뒤 획득 (H4′ 14.6초). 길게 가면 대기자 Pod 상태 · 한 노드 몰림 |
+| 리더가 은행에 못 붙고 readiness DOWN | 은행 장애 (P8-3a B1 — §15-5) | 은행 복구를 기다린다. 재시작은 백오프만 초기화하고 처리 중 요청을 끊는다 |
+| 롤링이 끝나지 않는다 (새 Pod 가 NotReady) | 옛 구성(선출 끔) Pod 가 은행 세션을 쥐고 있다 — 첫 전환 교착 | 16-5 (scale 0 → 적용) |
+
+**깨진 번호 기록 고치기** (송신이 멈췄을 때): ① 먼저 모의 은행(또는 은행)에서 **오늘 이미 쓴 가장 큰 전문번호**를 확인한다. ② ConfigMap 의 `date` 를 오늘(KST `yyyyMMdd`)로, `reservedTo` 를 ①보다 **충분히 크게** 둔다 — 날짜 · `reservedTo` 는 **앞으로만** 고친다, 줄이지 않는다. ③ 고친 뒤 새 게이트웨이가 알아서 다음 예약을 한다 (필요하면 `rollout restart deploy/bank-gateway`). 은행 쪽 최대 번호를 알 수 없으면 임의로 고치지 말고 은행 쪽과 확인한다. 송신이 멈춰 있는 동안 출금은 접수만 되고 "안 보냄 → 재시도 → DLT → 제한 재발행" 으로 흐른다 (§15-5, 돈은 정확).
+
+### 16-5. 도입 · 되돌리기 절차
+**이전 구성(게이트웨이 1대 · 선출 끔) → 이중화 첫 적용은 롤링으로 하지 않는다.** 옛 Pod 는 선출에 참여하지 않고 은행 세션을 쥔 채 놓지 않아, 새 Pod 가 리더가 되어도 은행이 거부해 NotReady 가 되고 `maxUnavailable 0` 롤링이 영원히 진행되지 않는다 (교착). 옛 Pod 를 먼저 내린다 — 그동안 게이트웨이가 없어 출금은 "안 보냄 → 재시도", 1원인증은 503 (점검 시간 23:50 ~ 00:10 을 피한다).
+```bash
+# 이전 구성 → 이중화 (처음 한 번)
+kubectl -n bank-transfer scale deploy/bank-gateway --replicas=0        # 옛 Pod 가 세션을 놓게
+bash -c '. infra/k8s/lib.sh; apply_overlay local "$(deployed_tag)"'    # 또는 bash infra/k8s/up.sh — replicas 2 · RollingUpdate · RBAC 적용 (새 태그가 필요하면 up.sh)
+kubectl -n bank-transfer rollout status deploy/bank-gateway
+bash infra/k8s/smoke.sh                                                  # [9] 리더 라벨 1개 = Lease 보유자
+```
+- 이중화 → 이중화(코드 · 이미지 교체)는 보통 롤링이다 (H2: 세션 최대 1 · 거부 0 · 중복 0, 은행 공백 1.1 ~ 3.4초). 새 Pod 가 대기자로 Ready 가 된 뒤(약 12초) 옛 리더가 내려간다.
+- **H0 대조 overlay(`experiment-gateway-single`)로 갈 때와 돌아올 때**:
+```bash
+# 이중화 → H0 (게이트웨이 1대 · Recreate · 선출 끔)
+kubectl -n bank-transfer delete pdb bank-gateway                        # PDB 를 지운다 — apply 는 지워진 리소스를 치우지 않는다. 1대짜리에 minAvailable 1 이면 drain 이 안 끝난다
+bash -c '. infra/k8s/lib.sh; apply_overlay experiment-gateway-single "$(deployed_tag)"'
+# H0 → 이중화 (되돌리기) — 위 첫 전환과 같다
+kubectl -n bank-transfer scale deploy/bank-gateway --replicas=0
+bash -c '. infra/k8s/lib.sh; apply_overlay local "$(deployed_tag)"'     # PDB · RBAC 가 다시 만들어진다
+```
+- Compose · IntelliJ 는 선출이 꺼져 있어 이 절차와 무관하다 (게이트웨이 1대 = 항상 리더).
+- 이번 단계의 `docker stop <노드>` 는 노드 안 Pod 에 SIGTERM 이라 **정상 교대**와 같다. 노드가 갑자기 사라지는 상황은 `docker kill` (아래 `NODE_KILL=1`).
+
+### 16-6. 실험 재현 (`load/k8s/run.sh`, `PHASE=p8-3b`)
+같은 부하(출금 20건/s)로 동작 하나를 하고 판정한다 (사용법 · 환경변수는 §15-7). 먼저 `bash infra/k8s/up.sh` · 게이트웨이 2대가 서로 다른 워커에 Ready (도구가 사전 확인하고, 한 노드면 시작하지 않는다 — 16-3). 결과는 `docs/perf/raw/p8-3b/<동작>-<회차>.json`. 숫자는 [측정 결과](docs/perf/p8-3b-gateway-ha.md).
+| 실험 | 명령 | 볼 것 |
+|---|---|---|
+| H0 이전 구성 대조 | 16-5 로 `experiment-gateway-single` 적용 → `PHASE=p8-3b bash load/k8s/run.sh drain 1` → 끝나면 되돌리기 | 세션 거부 7 · 번호 중복 591 (깨지는 것이 목적 — 판정은 돈 정확성) |
+| H1 리더 노드 drain | `PHASE=p8-3b bash load/k8s/run.sh drain 1` (기본 대상 = 리더 워커) | 세션 최대 1 · 거부 0 · 중복 0 · 결과 모름 0, 은행 공백 |
+| H2 게이트웨이 롤링 | `PHASE=p8-3b bash load/k8s/run.sh gwroll 1` | 위와 같음 (이미지 태그를 바꿔 롤링) |
+| H3 리더 강제 삭제 | `PHASE=p8-3b bash load/k8s/run.sh gwkill 1` | `--force --grace-period=0` (측정: 두 회차 모두 옛 리더 로그에 `stepping down` — `--force` 도 SIGTERM 을 보내 정상 교대 (P8-3a R2 와 같다)) |
+| H4 리더 노드 정지 | `PHASE=p8-3b bash load/k8s/run.sh gwnode 1` | `docker stop` = SIGTERM 이라 정상 교대처럼 (노드 장애가 아니다) |
+| H4′ 리더 노드 SIGKILL | `NODE_KILL=1 PHASE=p8-3b bash load/k8s/run.sh gwnode 1` | `docker kill` — 새 리더 약 15초 (Lease 만료) |
+| H5 API 서버 단절 | `PHASE=p8-3b bash load/k8s/run.sh gwcut 1` (`CUT_S` 기본 40초) | **kind 에서는 재현되지 않는다** (kindnet 이 API 서버 egress 를 안 막는다) → `GatewayLeaderElectionTest` 로 대체 |
+```bash
+bash load/k8s/run.sh cleanup      # 끝나면 반드시 — 측정 사용자 행만 지운다 (§15-7)
+```
+- 새 도구 요소: `PHASE=p8-3b`(결과 폴더), 동작 `gwroll` · `gwkill` · `gwnode` · `gwcut`, `NODE_KILL=1`(노드를 SIGKILL), 게이트웨이 분산 사전 확인, 요약 JSON 의 `bank_sessions_*` · `bank_dup_tran_no` · `unknown_results` · `gw_acquired_s` · 은행 공백(모의 은행 로그의 `session closed` → 다음 `session opened`). 은행 공백이 가장 정확한 "은행에 붙은 게이트웨이가 없던 시간" 이다 — 표본 기반 `gw_leaderless_s` 는 노드 손실에 쓰지 않는다 (죽은 노드의 Pod 는 노드가 NotReady 가 될 때까지 Ready · 라벨 그대로).
+- 모의 은행 제약 3개(`--single-session` · `--session-idle-timeout=60s` · `--unique-tran-no`)는 K8s 매니페스트에서만 켠다. 모의 은행 readiness 는 `tcpSocket` 이 아니라 `/proc/net/tcp` LISTEN 을 보는 exec 프로브다 — TCP 프로브가 세션 하나를 먹어서 게이트웨이를 거부시켰다 (측정: 세션 거부 13).
+- 한계: kind 한 호스트(노드 간 시계 차 없음, 노드 손실 때 TCP 끊김이 바로 전달) · 모의 은행 제약은 흉내 (실무 은행의 세션 정책 · 번호 규칙은 기관마다 다름 — 추정).
