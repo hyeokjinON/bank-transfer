@@ -1,6 +1,6 @@
 # ADR-0019: 게이트웨이 두 복제본 필수 분산 — `DoNotSchedule` 토폴로지 분산
 
-- 상태: 제안 (2026-11-16) — 머지 뒤 정리 PR 에서 `채택`
+- 상태: 채택 (2026-11-17, [#33](https://github.com/hyeokjinON/bank-transfer/pull/33) 머지 `0aee59d` — 제안 2026-11-16)
 - 관련: [ADR-0018](0018-gateway-ha-leader-election.md) (게이트웨이 이중화 — "위험 · 다음" 의 "복제본 2개가 한 노드에 있으면 이중화가 아니다" 가 이 결정의 출발점) · [ADR-0017](0017-kubernetes-kind.md) (kind · api 분산 `matchLabelKeys`) · [측정 결과](../perf/p8-3c-gateway-spread.md) · OPERATION §16-3
 
 ## 맥락

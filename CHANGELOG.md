@@ -9,9 +9,9 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
-## [P8-3c] 게이트웨이 필수 분산 — (제안, PR #(PR 생성 뒤))
+## [P8-3c] 게이트웨이 필수 분산 — 2026-11-17 ([#33](https://github.com/hyeokjinON/bank-transfer/pull/33), 머지 후 정리 PR)
 ### Changed
-- 게이트웨이 `topologySpreadConstraints`: `ScheduleAnyway` → **`DoNotSchedule`** + `nodeTaintsPolicy: Ignore` · `nodeAffinityPolicy: Honor` 명시 (`matchLabelKeys [pod-template-hash]` 유지). 두 게이트웨이는 한 워커에 놓일 수 없다 — 워커가 빠지면 대체 Pod 는 Pending, 돌아오면 그 워커에 뜬다 ([ADR-0019](docs/adr/0019-gateway-required-spread.md), 제안).
+- 게이트웨이 `topologySpreadConstraints`: `ScheduleAnyway` → **`DoNotSchedule`** + `nodeTaintsPolicy: Ignore` · `nodeAffinityPolicy: Honor` 명시 (`matchLabelKeys [pod-template-hash]` 유지). 두 게이트웨이는 한 워커에 놓일 수 없다 — 워커가 빠지면 대체 Pod 는 Pending, 돌아오면 그 워커에 뜬다 ([ADR-0019](docs/adr/0019-gateway-required-spread.md), 채택).
 - 스모크 [9]: "두 게이트웨이가 서로 다른 워커" 확인 추가.
 - 실험 도구: `PHASE=p8-3c`, 요약 JSON `gw_pending_s` · `gw_colocated_s` · `gw_nodes_end`, drain · 노드 동작 뒤 게이트웨이 Ready 2/2 까지 표본을 남김.
 - OPERATION §16-3 (필수 분산 · Pending 이 정상), §16-4 표 한 줄.
@@ -21,7 +21,12 @@
 ### 측정 요약 (이 PC · kind 3노드 기준 — 운영 수치가 아니다, 돈은 전 회차 정확)
 - S1 롤링: 멈추지 않음, 끝난 뒤 두 워커 · 몰림 0. S2 리더 워커 drain: 대체 Pod **Pending 42초 → uncordon 뒤 원래 워커**. S3 대기자 워커 SIGKILL: **Pending 70.5초 → 복구 뒤 원래 워커**, 리더 교대 없음. S4 이어서 리더 워커 SIGKILL: 새 리더 **14.4초** (P8-3b 의 같은 순서 353.4초), 대체 Pod 71.8초 Pending → 원래 워커. 전 회차 몰림 0초 · 세션 거부 · 번호 중복 · 결과 모름 0.
 ### CI · 사람 확인
-- PR 생성 뒤 채운다.
+- CI (#33): `build` 8m50s · `infra-smoke` 47s · `app-smoke` 1m44s · `k8s-smoke` 3m53s 통과 (스모크 [9] "두 게이트웨이가 서로 다른 워커" 포함).
+- Postman 직접 확인 (머지 전, kind · 이미지 `dev-aba0c2f`, 2026-11-17, 사용자) — 6항목 통과: 모드 확인(두 워커 · 리더 1) · 1원인증 `VERIFIED` · 출금 202 → `COMPLETED` · 같은 키 200 같은 id · 리더 워커(worker2) drain → 리더 교대 3초 · 은행 공백 3.4초 · 대체 Pod **Pending** (워커 `Ready,SchedulingDisabled`) · 그동안 출금 `COMPLETED` · 사유 `1 node(s) didn't match pod topology spread constraints, 1 node(s) had untolerated taint(s), 1 node(s) were unschedulable` · uncordon 즉시 **같은 worker2** 에 배치(Pending 10분 21초 = 사람 확인 시간), 5초 뒤 Ready. `session rejected` 0 · `duplicate tran no` 0.
+### 정리 PR
+- ADR-0019 채택, README P8-3c `[x]`, ARCHITECTURE 기준 줄 · "(제안)" 뗌, HANDOVER 완료.
+- OPERATION §16-3 · §16-4: Pending 사유 확인을 `describe | tail` 에서 `get events --field-selector involvedObject.name=<Pod>,reason=FailedScheduling` 로 (사람 확인에서 `tail` 로 사유가 안 보였다), drain 과 노드 장애의 사유 문구 차이.
+- 테스트 흔들림 수정 (이 PR 의 CI `build` 에서 발견): `GatewayFailoverTest` 가 구간 10개를 다 쓴 순간 다음 구간 미리 예약(백그라운드 API 서버 왕복)이 아직이면 게이트웨이는 설계대로 "안 보냄" 으로 답하는데, 테스트가 이를 실패로 봤다. 운영의 api 재시도처럼 그 경우만 다시 보내게 고침 (안 보냄 = 은행에 안 감이라 입금 건수 판정은 그대로). 코드 변경 없음.
 
 ## [P8-3b] 게이트웨이 이중화 — 2026-11-16 ([#31](https://github.com/hyeokjinON/bank-transfer/pull/31), 머지 후 정리 #32)
 ### Added
