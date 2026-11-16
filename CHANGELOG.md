@@ -26,6 +26,7 @@
 ### 정리 PR
 - ADR-0019 채택, README P8-3c `[x]`, ARCHITECTURE 기준 줄 · "(제안)" 뗌, HANDOVER 완료.
 - OPERATION §16-3 · §16-4: Pending 사유 확인을 `describe | tail` 에서 `get events --field-selector involvedObject.name=<Pod>,reason=FailedScheduling` 로 (사람 확인에서 `tail` 로 사유가 안 보였다), drain 과 노드 장애의 사유 문구 차이.
+- 테스트 흔들림 수정 (이 PR 의 CI `build` 에서 발견): `GatewayFailoverTest` 가 구간 10개를 다 쓴 순간 다음 구간 미리 예약(백그라운드 API 서버 왕복)이 아직이면 게이트웨이는 설계대로 "안 보냄" 으로 답하는데, 테스트가 이를 실패로 봤다. 운영의 api 재시도처럼 그 경우만 다시 보내게 고침 (안 보냄 = 은행에 안 감이라 입금 건수 판정은 그대로). 코드 변경 없음.
 
 ## [P8-3b] 게이트웨이 이중화 — 2026-11-16 ([#31](https://github.com/hyeokjinON/bank-transfer/pull/31), 머지 후 정리 #32)
 ### Added
