@@ -4,12 +4,16 @@
 #   podkill api Pod 하나 강제 삭제 (R2)                    tagtrap  같은 태그로 다시 apply → 롤링 안 일어남 (R3, 부하 없음)
 #   bank    모의 은행 replicas 0 → BANK_DOWN_S 뒤 1 (B1 · B2 — 게이트웨이 liveness 설정은 지금 배포된 값)
 #   drain   워커 drain → 부하 끝나면 uncordon (D1)          node     워커 노드 컨테이너 docker stop → NODE_DOWN_S 뒤 start (D2 · D2')
+#   (P8-3b, 리더 = 게이트웨이 리더 라벨 Pod · 선출을 끈 H0 은 첫 게이트웨이)
+#   gwroll  게이트웨이 이미지 새 태그로 롤링 (H2)           gwkill  리더 Pod 강제 삭제 (H3)
+#   gwnode  리더 워커 노드 docker stop → NODE_DOWN_S 뒤 start (H4)   gwcut  리더의 API 서버 연결만 CUT_S 초 차단 — 자기 차단 (H5)
+#   drain 의 기본 대상 = 리더 워커 (H0 · H1)
 #   cleanup 측정 사용자 행 지우기 (끝나면 반드시)
 # 확인 (P8-2 load/compose/run.sh 와 같은 기준): 접수된 키 = 출금 행, 전부 COMPLETED, 은행 거래 기록 = 출금 행(같은 거래번호 두 번 0), 잔고 = 원장 합.
 #   통과 못 하면 요약을 .json.invalid 로. 시간 지표는 timeline.sh(1 ~ 2초 간격) → timeline.awk.
 # 사용 (Git Bash · Linux): bash load/k8s/run.sh <동작> <회차>      먼저: bash infra/k8s/up.sh
-# 환경변수: RATE(20) DURATION(60s, rolling 은 150s) ACTION_AT(20) SETTLE(300) BANK_DOWN_S(60) NODE_DOWN_S(420) NODE(drain · node 대상) OVERLAY(tagtrap, local)
-# 결과: docs/perf/raw/p8-3a/<동작>-<회차>.json · .k6.json · .timeline.txt · .rebalance.txt, 작업 파일 build/load-p83a/<동작>-<회차>/
+# 환경변수: RATE(20) DURATION(60s, rolling 은 150s) ACTION_AT(20) SETTLE(300) BANK_DOWN_S(60) NODE_DOWN_S(420) NODE(drain · node 대상) OVERLAY(tagtrap, local) PHASE(p8-3a | p8-3b, 기본 p8-3a) CUT_S(40, gwcut)
+# 결과: docs/perf/raw/<PHASE>/<동작>-<회차>.json · .k6.json · .timeline.txt · .rebalance.txt, 작업 파일 build/load-<PHASE>/<동작>-<회차>/
 set -euo pipefail
 . "$(dirname "$0")/../../infra/k8s/lib.sh"
 RUN=setup
@@ -45,12 +49,14 @@ if [ "${1:-}" = cleanup ]; then
   exit 0
 fi
 
-ACTION=${1:?동작: steady | rolling | podkill | tagtrap | bank | drain | node | cleanup}
+ACTION=${1:?동작: steady | rolling | podkill | tagtrap | bank | drain | node | gwroll | gwkill | gwnode | gwcut | cleanup}
 ROUND=${2:?회차: 1, 2 …}
-case "$ACTION" in steady|rolling|podkill|tagtrap|bank|drain|node) ;; *) die "모르는 동작: $ACTION" ;; esac
+case "$ACTION" in steady|rolling|podkill|tagtrap|bank|drain|node|gwroll|gwkill|gwnode|gwcut) ;; *) die "모르는 동작: $ACTION" ;; esac
 [[ "$ROUND" =~ ^[0-9]{1,2}$ ]] || die "회차는 숫자 1 ~ 2자리: $ROUND"
+PHASE=${PHASE:-p8-3a}   # 결과 폴더 — P8-3b 실험은 PHASE=p8-3b
+[[ "$PHASE" =~ ^p8-3[ab]$ ]] || die "PHASE 는 p8-3a | p8-3b: $PHASE"
 RUN="$ACTION-$ROUND"
-OUT_DIR=docs/perf/raw/p8-3a; OUT="$OUT_DIR/$RUN.json"; WORK="build/load-p83a/$RUN"
+OUT_DIR=docs/perf/raw/$PHASE; OUT="$OUT_DIR/$RUN.json"; WORK="build/load-$PHASE/$RUN"
 rm -rf "$WORK"; mkdir -p "$OUT_DIR" "$WORK"; rm -f "$OUT" "$OUT.invalid" "$OUT.tmp" "$OUT_DIR/$RUN.k6.json"
 
 # --- R3: 같은 태그로 다시 apply (부하 없음) ---
@@ -68,10 +74,12 @@ if [ "$ACTION" = tagtrap ]; then
   echo "[$RUN] 통과 — 같은 태그는 롤링을 일으키지 않는다"; cat "$OUT"; exit 0
 fi
 
-DEF_DURATION=60s; [ "$ACTION" = rolling ] && DEF_DURATION=150s   # 롤링은 서로 이어진 두 번의 교체(새 Pod 준비 → 옛 Pod preStop · 종료)라 부하가 더 길어야 R1 비교가 의미 있다
+DEF_DURATION=60s; [ "$ACTION" = rolling ] && DEF_DURATION=150s
+[ "$ACTION" = gwroll ] && DEF_DURATION=150s; [ "$ACTION" = gwcut ] && DEF_DURATION=90s   # 롤링은 서로 이어진 두 번의 교체(새 Pod 준비 → 옛 Pod preStop · 종료)라 부하가 더 길어야 R1 비교가 의미 있다
 RATE=${RATE:-20}; DURATION=${DURATION:-$DEF_DURATION}; ACTION_AT=${ACTION_AT:-20}; SETTLE=${SETTLE:-300}
 BANK_DOWN_S=${BANK_DOWN_S:-60}; NODE_DOWN_S=${NODE_DOWN_S:-420}
-for v in RATE ACTION_AT SETTLE BANK_DOWN_S NODE_DOWN_S; do [[ "${!v}" =~ ^[1-9][0-9]*$ ]] || die "$v 는 양의 정수: ${!v}"; done
+CUT_S=${CUT_S:-40}
+for v in RATE ACTION_AT SETTLE BANK_DOWN_S NODE_DOWN_S CUT_S; do [[ "${!v}" =~ ^[1-9][0-9]*$ ]] || die "$v 는 양의 정수: ${!v}"; done
 [[ "$DURATION" =~ ^([1-9][0-9]*)s$ ]] || die "DURATION 은 <숫자>s: $DURATION"
 DURATION_S=${BASH_REMATCH[1]}
 if [ "$ACTION" != steady ] && [ "$ACTION_AT" -ge "$DURATION_S" ]; then die "ACTION_AT($ACTION_AT) < DURATION(${DURATION_S}s) 이어야 한다"; fi
@@ -87,10 +95,16 @@ k get pods -o wide > "$WORK/pods-before.txt"
 LIVE_API=$(live_pods api) || die "api Pod 목록을 못 읽었다"
 LIVE_GW=$(live_pods bank-gateway) || die "bank-gateway Pod 목록을 못 읽었다"
 [ "$(printf '%s\n' "$LIVE_API" | awk 'NF {print $2}' | sort -u | grep -c . || true)" = 2 ]   || die "살아 있는 api Pod 두 대가 서로 다른 워커에 있지 않다 — kubectl -n bank-transfer rollout restart deploy/api 후 다시"
-GW_NODE=$(printf '%s\n' "$LIVE_GW" | awk 'NF {print $2; exit}')
+GW_LEADER=$(gw_leader)   # 리더 라벨 Pod (P8-3b). 선출을 끈 H0 은 비어 있다 → 첫 게이트웨이
+if [ -n "$GW_LEADER" ]; then
+  GW_NODE=$(printf '%s\n' "$LIVE_GW" | awk -v p="$GW_LEADER" '$1 == p {print $2; exit}')
+else
+  GW_LEADER=$(printf '%s\n' "$LIVE_GW" | awk 'NF {print $1; exit}')
+  GW_NODE=$(printf '%s\n' "$LIVE_GW" | awk 'NF {print $2; exit}')
+fi
 [ -n "$GW_NODE" ] || die "살아 있는 bank-gateway Pod 가 없다"
 case "$ACTION" in
-  drain) NODE=${NODE:-$GW_NODE} ;;   # 기본: 게이트웨이가 있는 워커 — 1대짜리가 옮겨 가는 동안까지 본다
+  drain|gwnode) NODE=${NODE:-$GW_NODE} ;;   # 기본: 리더(1대짜리면 그 게이트웨이)가 있는 워커
   node)  NODE=${NODE:-$(printf '%s\n' "$LIVE_API" | awk 'NF {print $2}' | { grep -vx "$GW_NODE" || true; } | head -1)} ;;   # 기본: 게이트웨이가 없는 api 워커 — api 복구만 본다
   *)     NODE=- ;;
 esac
@@ -106,6 +120,12 @@ if [ "$ACTION" = rolling ]; then   # 같은 이미지에 새 태그 → kind 노
   d tag "bank-transfer/api:$CUR" "bank-transfer/api:$NEW"
   kindc load docker-image "bank-transfer/api:$NEW" --name "$CLUSTER_NAME" >/dev/null
 fi
+if [ "$ACTION" = gwroll ]; then   # 게이트웨이 같은 이미지 새 태그 (부하 중 kind load 하지 않게 미리)
+  CUR=$(deployed_tag); NEW="${CUR%-r*}-r$(date +%s)"
+  d image inspect "bank-transfer/bank-gateway:$CUR" >/dev/null 2>&1 || die "PC 에 bank-transfer/bank-gateway:$CUR 가 없다 — up.sh 로 만든 태그여야 한다"
+  d tag "bank-transfer/bank-gateway:$CUR" "bank-transfer/bank-gateway:$NEW"
+  kindc load docker-image "bank-transfer/bank-gateway:$NEW" --name "$CLUSTER_NAME" >/dev/null
+fi
 
 # --- 2. 시드 ---
 sql < load/compose/cleanup.sql
@@ -118,13 +138,17 @@ SAMPLER=$!
 # 삭제 · 축출된 Pod 의 로그는 나중에 못 읽는다 — 시작 때 있던 api Pod 의 로그를 따라간다 (끝난 뒤 --since-time 조회와 합친다)
 MSYS_NO_PATHCONV=1 kubectl --context "$CTX" -n "$NAMESPACE" logs -f -l app=api --prefix --timestamps --tail=0 --max-log-requests=10 > "$WORK/api-follow.log" 2>&1 &
 FOLLOW=$!
-K6_NAME="p83a-k6-$RUN"
-RESTORE=   # 동작이 시작돼 되돌려야 할 것 (drain | node | bank) — 정상 흐름에서 되돌리면 비운다
+MSYS_NO_PATHCONV=1 kubectl --context "$CTX" -n "$NAMESPACE" logs -f -l app=bank-gateway --prefix --timestamps --tail=0 --max-log-requests=10 > "$WORK/gateway-follow.log" 2>&1 &
+GW_FOLLOW=$!
+K6_NAME="k6-$PHASE-$RUN"
+RESTORE=   # 동작이 시작돼 되돌려야 할 것 (drain | node | bank | gwcut) — 정상 흐름에서 되돌리면 비운다
 stop_bg() {
-  kill "$SAMPLER" "$FOLLOW" 2>/dev/null || true; d rm -f "$K6_NAME" >/dev/null 2>&1 || true
+  kill "$SAMPLER" "$FOLLOW" "$GW_FOLLOW" 2>/dev/null || true; d rm -f "$K6_NAME" >/dev/null 2>&1 || true
   case "$RESTORE" in
     drain) ka uncordon "$NODE" >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — 노드 $NODE uncordon" >&2 ;;
     node)  d start "$NODE" >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — 노드 $NODE docker start (Ready 는 직접 확인)" >&2 ;;
+    gwcut) k delete -f load/k8s/apicut-netpol.yaml --ignore-not-found >/dev/null 2>&1 || true
+           [ -n "${VICTIM:-}" ] && k label pod "$VICTIM" bank-transfer/experiment- >/dev/null 2>&1 || true ;;
     bank)  k scale deploy/mock-bank --replicas=1 >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — mock-bank replicas 1 로 복구" >&2 ;;
   esac
 }
@@ -159,7 +183,7 @@ d rm -f "$K6_NAME" >/dev/null 2>&1 || true
 echo "[$RUN] k6 ${RATE}건/s × $DURATION → $CLUSTER_NAME-control-plane:30080, 동작 $ACTION @ ${ACTION_AT}s (대상 $NODE)"
 d run --rm --name "$K6_NAME" --network kind \
   -v "$(host_path load):/scripts:ro" -v "$(host_path docs/perf/raw):/out" \
-  -e BASE_URL="http://$CLUSTER_NAME-control-plane:30080" -e RUN="$RUN" -e RATE="$RATE" -e DURATION="$DURATION" -e OUT_SUBDIR=p8-3a \
+  -e BASE_URL="http://$CLUSTER_NAME-control-plane:30080" -e RUN="$RUN" -e RATE="$RATE" -e DURATION="$DURATION" -e OUT_SUBDIR="$PHASE" \
   "$K6_IMAGE" run --quiet /scripts/compose/withdraw.js > "$WORK/k6.out" 2>&1 &
 K6_PID=$!
 TA_MS0=$(date +%s%3N)   # k6 시작 — 부하 끝 = TA_MS0 + DURATION_S 초
@@ -183,6 +207,17 @@ if [ "$ACTION" != steady ]; then
     drain)   RESTORE=drain; ka drain "$NODE" --ignore-daemonsets --delete-emptydir-data --timeout=240s > "$WORK/drain.txt" 2>&1 \
                || echo "[$RUN] 주의: drain 이 240초 안에 안 끝났다 — $WORK/drain.txt" >&2 ;;
     node)    RESTORE=node; d stop "$NODE" >/dev/null ;;
+    gwroll)  k set image deploy/bank-gateway "bank-gateway=bank-transfer/bank-gateway:$NEW" >/dev/null
+             k rollout status deploy/bank-gateway --timeout=300s > "$WORK/rollout.txt" 2>&1 || echo "[$RUN] 주의: 게이트웨이 롤링이 300초 안에 안 끝났다" >&2 ;;
+    gwkill)  VICTIM=$GW_LEADER
+             k delete pod "$VICTIM" --grace-period=0 --force > "$WORK/delete.txt" 2>&1 ;;
+    gwnode)  RESTORE=node; VICTIM=$GW_LEADER; d stop "$NODE" >/dev/null ;;
+    gwcut)   RESTORE=gwcut; VICTIM=$GW_LEADER
+             k label pod "$VICTIM" bank-transfer/experiment=apicut --overwrite >/dev/null
+             k apply -f load/k8s/apicut-netpol.yaml >/dev/null
+             sleep "$CUT_S"
+             k delete -f load/k8s/apicut-netpol.yaml --ignore-not-found >/dev/null
+             k label pod "$VICTIM" bank-transfer/experiment- >/dev/null 2>&1 || true; RESTORE= ;;
   esac
   TE_MS=$(date +%s%3N); T_ACTION_END="\"$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)\""
   if [ "$TE_MS" -le $(( TA_MS0 + DURATION_S * 1000 )) ]; then WITHIN=true; else
@@ -193,7 +228,7 @@ wait "$K6_PID" || die "k6 가 실패했다 — $WORK/k6.out"
 [ -f "$OUT_DIR/$RUN.k6.json" ] || die "k6 요약이 없다 — $WORK/k6.out"
 case "$ACTION" in
   drain) ka uncordon "$NODE" >/dev/null; RESTORE= ;;
-  node)  rest=$(( NODE_DOWN_S - ($(date +%s%3N) - TA_MS) / 1000 )); [ "$rest" -gt 0 ] && { echo "[$RUN] 노드 $NODE 정지 유지 ${rest}초"; sleep "$rest"; }
+  node|gwnode)  rest=$(( NODE_DOWN_S - ($(date +%s%3N) - TA_MS) / 1000 )); [ "$rest" -gt 0 ] && { echo "[$RUN] 노드 $NODE 정지 유지 ${rest}초"; sleep "$rest"; }
          d start "$NODE" >/dev/null; RESTORE=
          ka wait "node/$NODE" --for=condition=Ready --timeout=300s >/dev/null || die "노드 $NODE 가 돌아오지 않는다 — down.sh → up.sh (스펙 §13)" ;;
 esac
@@ -205,7 +240,7 @@ for SETTLE_S in $(seq "$SETTLE"); do
   [ "$P" = 0 ] && break
   sleep 1
 done
-kill "$SAMPLER" "$FOLLOW" 2>/dev/null || true
+kill "$SAMPLER" "$FOLLOW" "$GW_FOLLOW" 2>/dev/null || true
 
 # --- 5. 정확성 ---
 declare -A C
@@ -221,6 +256,21 @@ JOURNAL_DUP=$({ grep -xF -f "$WORK/refs.txt" "$WORK/journal-refs.txt" || true; }
 # --- 6. 로그 · 시간 지표 ---
 k logs -l app=api --prefix --timestamps --tail=-1 --since-time="$T0" > "$WORK/api.log" 2>&1 || true
 k logs -l app=bank-gateway --prefix --timestamps --tail=-1 --since-time="$T0" > "$WORK/gateway.log" 2>&1 || true
+k logs deploy/mock-bank --timestamps --tail=-1 --since-time="$T0" > "$WORK/mock-bank.log" 2>&1 || true
+BANK_SESS_MAX=$({ grep -ao 'sessions=[0-9]*' "$WORK/mock-bank.log" || true; } | cut -d= -f2 | sort -n | tail -1)
+BANK_REJECTED=$({ grep -a 'session rejected' "$WORK/mock-bank.log" || true; } | wc -l | tr -d ' ')
+BANK_EVICTED=$({ grep -a 'session evicted idle' "$WORK/mock-bank.log" || true; } | wc -l | tr -d ' ')
+BANK_DUP=$({ grep -a 'duplicate tran no' "$WORK/mock-bank.log" || true; } | wc -l | tr -d ' ')
+UNKNOWN=$(sql <<<"SELECT COUNT(*) FROM transfer WHERE $USERS AND inquiry_attempts > 0" | tr -d '\r')   # 결과 모름 → 결과조회를 거친 건
+# 게이트웨이 로그의 선출 사건 (동작 시각 뒤 처음) — 삭제된 Pod 로그는 follow 파일에 있다
+log_ms() {   # $1 = 패턴: 동작 시각 이후 처음 나온 줄의 epoch ms (없으면 빈 값)
+  cat "$WORK/gateway.log" "$WORK/gateway-follow.log" 2>/dev/null | grep -a "$1" | awk '{print $2}' \
+    | while read -r ts; do date -d "$ts" +%s%3N 2>/dev/null; done | awk -v ta="$TA_MS" '$1 >= ta' | sort -n | head -1
+}
+since_ta() { if [ -n "${1:-}" ] && [ "$TA_MS" != 0 ]; then awk -v a="$1" -v b="$TA_MS" 'BEGIN { printf "%.1f", (a - b) / 1000 }'; else echo null; fi; }
+# gw_lost_s 는 비정상 상실 · 자기 차단('lost leadership')만 잡는다 — 정상 인계(stepping down · released)는 null 이 맞다 (의도)
+GW_LOST_S=$(since_ta "$(log_ms 'leader election: lost leadership')")
+GW_ACQ_S=$(since_ta "$(log_ms 'leader election: became leader')")
 ka -n envoy-gateway-system logs -l gateway.envoyproxy.io/owning-gateway-name=bank-transfer --all-containers --tail=-1 --since-time="$T0" > "$WORK/envoy.log" 2>&1 || true
 cat "$WORK/api.log" "$WORK/api-follow.log" | { grep -aE "partitions (assigned|revoked)|Adding newly assigned partitions|Revoke previously assigned partitions" || true; } | sort -u | sort -k2,2 -s > "$WORK/rebalance.txt" || true
 if [ "$ACTION" != steady ] && [ ! -s "$WORK/rebalance.txt" ]; then echo "[$RUN] 주의: 리밸런스 줄이 0 — 동작이 일어났는지 api 로그로 확인" >&2; fi
@@ -240,7 +290,8 @@ cat > "$OUT.tmp" <<JSON
  "transfer_ne_withdraw":$(num "${C[transfer_ne_withdraw]:-}"),"unpublished_outbox":$(num "${C[unpublished_outbox]:-}"),
  "journal_missing":$JOURNAL_MISSING,"journal_dup":$JOURNAL_DUP,"rebalance_lines":$(wc -l < "$WORK/rebalance.txt" | tr -d ' '),
  "api_ready_min":${M[api_ready_min]:-null},"api_recovered_s":${M[api_recovered_s]:-null},"gw_not_ready_s":${M[gw_not_ready_s]:-null},"gw_restarts":${M[gw_restarts]:-null},
- "node_notready_s":${M[node_notready_s]:-null},"pod_notready_s":${M[pod_notready_s]:-null},"replacement_ready_s":${M[replacement_ready_s]:-null}}
+ "node_notready_s":${M[node_notready_s]:-null},"pod_notready_s":${M[pod_notready_s]:-null},"replacement_ready_s":${M[replacement_ready_s]:-null},
+ "gw_leader_before":$(str "$GW_LEADER"),"bank_sessions_max":$(num "$BANK_SESS_MAX"),"bank_sessions_rejected":$(num "$BANK_REJECTED"),"bank_sessions_evicted":$(num "$BANK_EVICTED"),"bank_dup_tran_no":$(num "$BANK_DUP"),"unknown_results":$(num "$UNKNOWN"),"gw_lost_s":$GW_LOST_S,"gw_acquired_s":$GW_ACQ_S,"gw_leaderless_s":${M[gw_leaderless_s]:-null},"leader_changes":${M[leader_changes]:-null}}
 JSON
 FAILS=()
 [[ "$ACCEPTED" =~ ^[1-9][0-9]*$ ]] || FAILS+=("접수된 키가 양의 정수가 아님: ${ACCEPTED:-없음}")
