@@ -1,5 +1,6 @@
 package io.github.hyeokjinon.banktransfer.api.metrics
 
+import io.github.hyeokjinon.banktransfer.api.reconcile.ReconcileProperties
 import io.github.hyeokjinon.banktransfer.api.support.ApiIntegrationTest
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus
 import org.awaitility.kotlin.await
@@ -27,6 +28,7 @@ class TransferStateReaderTest : ApiIntegrationTest() {
 
     @Autowired private lateinit var reader: TransferStateReader
     @Autowired private lateinit var jdbc: JdbcTemplate
+    @Autowired private lateinit var reconcile: ReconcileProperties
 
     private val owner = UUID.randomUUID().toString()
     private val outboxIds = mutableListOf<Long>()
@@ -60,7 +62,7 @@ class TransferStateReaderTest : ApiIntegrationTest() {
         insertTransfer(TransferStatus.RECEIVED, null, now)
         insertTransfer(TransferStatus.RECEIVED, null, now)
         insertTransfer(TransferStatus.SENDING, now, now)
-        insertTransfer(TransferStatus.UNKNOWN, now, now, inquiryAttempts = 10)
+        insertTransfer(TransferStatus.UNKNOWN, now, now, inquiryAttempts = reconcile.maxInquiries)
         insertTransfer(TransferStatus.UNKNOWN, now, now, inquiryAttempts = 0)
 
         await.atMost(Duration.ofSeconds(10)) untilAsserted {
@@ -68,7 +70,7 @@ class TransferStateReaderTest : ApiIntegrationTest() {
             for (status in TransferStateSnapshot.OPEN_STATUSES) {
                 assertEquals(count("SELECT COUNT(*) FROM transfer WHERE status = ?", status.name), s.open.getValue(status), "$status")
             }
-            assertEquals(count("SELECT COUNT(*) FROM transfer WHERE status = 'UNKNOWN' AND inquiry_attempts >= 10"), s.unknownExhausted)
+            assertEquals(count("SELECT COUNT(*) FROM transfer WHERE status = 'UNKNOWN' AND inquiry_attempts >= ?", reconcile.maxInquiries), s.unknownExhausted)
             assertTrue(s.open.getValue(TransferStatus.RECEIVED) >= 2)
             assertTrue(s.unknownExhausted >= 1)
         }

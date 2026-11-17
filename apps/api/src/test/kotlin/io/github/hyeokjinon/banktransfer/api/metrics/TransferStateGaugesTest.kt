@@ -4,6 +4,9 @@ import io.github.hyeokjinon.banktransfer.transfer.TransferStatus.RECEIVED
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus.SENDING
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus.UNKNOWN
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import java.time.Duration
+import java.util.concurrent.CountDownLatch
+import kotlin.concurrent.thread
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -17,7 +20,8 @@ class TransferStateGaugesTest {
         unknownExhausted = 1, outboxUnpublished = 7, outboxOldestSeconds = 1.5,
     )
     private var read: () -> TransferStateSnapshot = { snapshot }
-    private val gauges = TransferStateGauges(registry) { read() }
+    private var nanos = 0L
+    private val gauges = TransferStateGauges(registry, staleAfter = Duration.ofSeconds(30), nanoTime = { nanos }) { read() }
 
     private fun open(status: String) = registry.get(TransferStateGauges.OPEN).tag("status", status).gauge().value()
     private fun oldest(status: String) = registry.get(TransferStateGauges.OPEN_OLDEST).tag("status", status).gauge().value()
@@ -56,5 +60,26 @@ class TransferStateGaugesTest {
         read = { snapshot }
         gauges.refresh()
         assertEquals(1.0, open("SENDING"))
+    }
+
+    @Test
+    fun `조회가 끝나지 않으면 마지막 값을 들고 있지 않고 3 주기 뒤 NaN - 멈춘 쿼리 · 서지 않는 스케줄`() {
+        gauges.refresh()
+        assertEquals(3.0, open("RECEIVED"))
+
+        val hang = CountDownLatch(1)
+        read = { hang.await(); snapshot }
+        val stuck = thread(isDaemon = true) { gauges.refresh() }   // 끝나지 않는 조회
+        try {
+            nanos = Duration.ofSeconds(30).toNanos()
+            assertEquals(3.0, open("RECEIVED"), "30초 이내는 아직 신선")
+            nanos = Duration.ofSeconds(30).toNanos() + 1
+            assertTrue(open("RECEIVED").isNaN())
+            assertTrue(oldest("UNKNOWN").isNaN())
+            assertTrue(gauge(TransferStateGauges.OUTBOX_OLDEST).isNaN())
+        } finally {
+            hang.countDown()
+            stuck.join(5_000)
+        }
     }
 }

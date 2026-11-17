@@ -91,9 +91,18 @@ SELECT TIMESTAMPDIFF(MICROSECOND, created_at, NOW(6))
  * 상태 Gauge (P9a 스펙 §4-2). 값은 마지막 조회 결과 하나 — 조회가 실패하면 버리고 NaN 을 낸다 (0 이 아니다 — 위험 A6).
  * api 2대가 같은 값을 낸다 → 대시보드 · 규칙은 max().
  */
-class TransferStateGauges(private val registry: MeterRegistry, private val read: () -> TransferStateSnapshot) {
+class TransferStateGauges(
+    private val registry: MeterRegistry,
+    /** 조회가 멈추거나 스케줄이 서지 않아 이 시간보다 오래된 값은 NaN (위험 A6). 보통 조회 주기의 3배. */
+    private val staleAfter: Duration = Duration.ofSeconds(30),
+    /** 값의 신선도만 재는 단조 시계 (나이 계산이 아니다 — 나이는 SQL, 위험 A7). 테스트가 바꿔 끼운다. */
+    private val nanoTime: () -> Long = System::nanoTime,
+    private val read: () -> TransferStateSnapshot,
+) {
     private val log = LoggerFactory.getLogger(javaClass)
-    private val latest = AtomicReference<TransferStateSnapshot?>(null)
+    private class Reading(val snapshot: TransferStateSnapshot, val atNanos: Long)
+
+    private val latest = AtomicReference<Reading?>(null)
     private val ok: Timer = Timer.builder(DB_QUERY).description("상태 지표 DB 조회 시간").tag("result", "ok").register(registry)
     private val error: Timer = Timer.builder(DB_QUERY).description("상태 지표 DB 조회 시간").tag("result", "error").register(registry)
 
@@ -116,7 +125,8 @@ class TransferStateGauges(private val registry: MeterRegistry, private val read:
     fun refresh() {
         val sample = Timer.start(registry)
         try {
-            latest.set(read())
+            val snapshot = read()
+            latest.set(Reading(snapshot, nanoTime()))
             sample.stop(ok)
         } catch (e: Exception) {
             latest.set(null)
@@ -125,7 +135,10 @@ class TransferStateGauges(private val registry: MeterRegistry, private val read:
         }
     }
 
-    private fun value(pick: (TransferStateSnapshot) -> Double): Double = latest.get()?.let(pick) ?: Double.NaN
+    private fun value(pick: (TransferStateSnapshot) -> Double): Double {
+        val reading = latest.get() ?: return Double.NaN
+        return if (nanoTime() - reading.atNanos > staleAfter.toNanos()) Double.NaN else pick(reading.snapshot)
+    }
 
     companion object {
         const val OPEN = "banktransfer.transfer.open"
