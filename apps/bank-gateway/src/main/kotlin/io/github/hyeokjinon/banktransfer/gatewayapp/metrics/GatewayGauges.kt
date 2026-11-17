@@ -25,7 +25,14 @@ class GatewayGauges(
             .description("은행 TCP 회선이 붙어 있나 (리더가 아니면 0)").register(registry)
         Gauge.builder(GatewayMetrics.TRAN_NO_REMAINING, tranNoSource) { it.remaining()?.toDouble() ?: Double.NaN }
             .description("예약해 둔 남은 전문번호 (현재 + 미리 예약). 메모리 출처는 NaN").register(registry)
-        Gauge.builder(GatewayMetrics.BANK_MAINTENANCE, maintenance) { if (it.isActive(clock.instant())) 1.0 else 0.0 }
+        Gauge.builder(GatewayMetrics.BANK_MAINTENANCE, maintenance) {
+            // api 의 같은 이름 Gauge 와 같은 방어 — 시계 · 창 계산이 실패해도 스크랩을 깨지 않고 값을 모르면 NaN
+            try {
+                if (it.isActive(clock.instant())) 1.0 else 0.0
+            } catch (e: Exception) {
+                Double.NaN
+            }
+        }
             .description("은행 점검 시간인가 (KST 창 — 규칙이 이것으로 알림을 뺀다, 결정 D8)").register(registry)
     }
 }

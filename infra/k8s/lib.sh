@@ -97,4 +97,5 @@ prom_get() { km exec deploy/prometheus -- wget -qO- "http://127.0.0.1:9090$1"; }
 prom_query() { prom_get "/api/v1/query?query=$(urlenc "$1")${2:+&time=$2}"; }   # $2 = epoch 초 (없으면 지금)
 prom_range() { prom_get "/api/v1/query_range?query=$(urlenc "$1")&start=$2&end=$3&step=${4:-5}"; }
 # 즉시 질의 결과의 첫 값 (시계열이 없으면 빈 줄)
-prom_value() { prom_query "$1" "${2:-}" | { grep -o '"value":\[[^]]*\]' || true; } | head -1 | sed -E 's/.*,"([^"]*)"\]$/\1/'; }
+# prom_query 실패(일시적 kubectl exec 오류)는 빈 값으로 — pipefail · set -e 로 호출 스크립트가 말없이 끝나지 않게 한다 (재시도 루프 · 판정은 호출 쪽)
+prom_value() { { prom_query "$1" "${2:-}" || true; } | { grep -o '"value":\[[^]]*\]' || true; } | head -1 | sed -E 's/.*,"([^"]*)"\]$/\1/'; }

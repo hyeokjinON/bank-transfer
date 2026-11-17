@@ -34,11 +34,12 @@ groups:
           summary: 은행 회선이 30초 넘게 끊겨 있다
           runbook: OPERATION.md §17-3 BankDisconnected
 
-      # 4 재발행 3회(약 26분) 뒤엔 RECEIVED 가 남을 수 없다 · SENDING 은 30초 뒤 UNKNOWN 이어야 한다 (A2)
+      # 4 RECEIVED 는 "마지막 상태 변화 뒤 나이" (MIN(updated_at)) — 재발행(5분마다 건드림)도 멈춰 15분 넘게 아무 변화 없음 = 컨슈머 · 정리 작업 둘 다 의심.
+      #   컨슈머만 멈추면 재발행이 소진돼 TransferGaveUp 이 먼저 울린다. 정상 최대 실측 514초 (M4). SENDING 은 30초 뒤 UNKNOWN 이어야 한다 (A2)
       - alert: TransferPipelineStalled
         expr: |
           (
-            max(banktransfer_transfer_open_oldest_seconds{status="RECEIVED"}) > 1800
+            max(banktransfer_transfer_open_oldest_seconds{status="RECEIVED"}) > 900
             or
             max(banktransfer_transfer_open_oldest_seconds{status="SENDING"}) > 120
           )
@@ -47,7 +48,7 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: 출금이 단계에서 막혔다 (RECEIVED 30분 또는 SENDING 2분 넘게)
+          summary: 출금이 단계에서 막혔다 (RECEIVED 15분 또는 SENDING 2분 넘게)
           runbook: OPERATION.md §17-3 TransferPipelineStalled
 
       # 5 사용자가 다시 요청해야 하는 건 (A2)

@@ -31,6 +31,7 @@ class GatewayMetrics(registry: MeterRegistry) {
                 .register(registry)
         }
 
+    // GATEWAY_UNREACHABLE 은 api 프로세스에서만 던져져 게이트웨이에선 늘 0 이다 — 시계열 모양(모든 사유 0 으로 미리 등록)을 열거값 그대로 두려고 같이 만든다.
     private val notSent: Map<NotSentReason, Counter> = NotSentReason.entries.associateWith {
         Counter.builder(NOT_SENT).description("은행에 보내지 않은 요청 (사유별)").tag("reason", it.tag).register(registry)
     }

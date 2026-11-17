@@ -17,6 +17,7 @@
 # 환경변수: RATE(20) DURATION(60s, rolling 은 150s) ACTION_AT(20) SETTLE(300) BANK_DOWN_S(60) NODE_DOWN_S(420) NODE(drain · node 대상) OVERLAY(tagtrap, local) PHASE(p8-3a | p8-3b | p8-3c | p9a, 기본 p8-3a) CUT_S(40, gwcut) NODE_KILL(0 | 1, node · gwnode — 1 이면 docker kill) GW_DOWN_S(60, gwzero) MAINT_S(600) MAINT_PREP_S(480) MAINT_LEAD_S(60) MAINT_WATCH_S(1800) (maint)
 # 결과: docs/perf/raw/<PHASE>/<동작>-<회차>.json · .k6.json · .timeline.txt · .rebalance.txt, 작업 파일 build/load-<PHASE>/<동작>-<회차>/
 set -euo pipefail
+RESTORE=   # 셸 환경의 RESTORE 를 물려받지 않는다 (정상 종료에도 되돌리기가 돌지 않게). maint_prepare(M5)가 이 뒤에 maint 로 세운다
 . "$(dirname "$0")/../../infra/k8s/lib.sh"
 RUN=setup
 die() { echo "[$RUN] $*" >&2; exit 1; }
@@ -164,7 +165,7 @@ GW_FOLLOW=$!
 AM_POLL=
 if [ "$PHASE" = p9a ]; then p9a_am_start; fi   # Alertmanager 표본 (억제 · 침묵 증거)
 K6_NAME="k6-$PHASE-$RUN"
-RESTORE=${RESTORE:-}   # 동작이 시작돼 되돌려야 할 것 (drain | node | bank | gwcut | gwzero | maint) — 정상 흐름에서 되돌리면 비운다. maint 는 maint_prepare 가 이미 정했다 — 지우지 않는다
+RESTORE=${RESTORE:-}   # (맨 위에서 비웠다 — maint 만 maint_prepare 가 세운 값이 남는다) 동작이 시작돼 되돌려야 할 것 (drain | node | bank | gwcut | gwzero | maint) — 정상 흐름에서 되돌리면 비운다. maint 는 maint_prepare 가 이미 정했다 — 지우지 않는다
 stop_bg() {
   kill "$SAMPLER" "$FOLLOW" "$GW_FOLLOW" ${AM_POLL:+"$AM_POLL"} 2>/dev/null || true; [ -z "${AM_POLL:-}" ] || wait "$AM_POLL" 2>/dev/null || true; d rm -f "$K6_NAME" >/dev/null 2>&1 || true
   case "$RESTORE" in

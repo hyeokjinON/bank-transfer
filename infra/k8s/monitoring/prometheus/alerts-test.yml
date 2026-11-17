@@ -107,11 +107,11 @@ tests:
         alertname: GatewayNoLeader
         exp_alerts: []
 
-  # 4 RECEIVED 30분 넘게 → 1분 뒤
+  # 4 RECEIVED 15분 넘게 (마지막 변화 뒤) → 1분 뒤
   - interval: 5s
     input_series:
       - series: 'banktransfer_transfer_open_oldest_seconds{status="RECEIVED", pod="api-0"}'
-        values: '1801x30'
+        values: '901x30'
       - series: 'banktransfer_transfer_open_oldest_seconds{status="SENDING", pod="api-0"}'
         values: '0x30'
       - series: 'banktransfer_bank_maintenance{pod="api-0"}'
@@ -124,7 +124,7 @@ tests:
         alertname: TransferPipelineStalled
         exp_alerts:
           - exp_labels: {severity: critical}
-            exp_annotations: {summary: "출금이 단계에서 막혔다 (RECEIVED 30분 또는 SENDING 2분 넘게)", runbook: "OPERATION.md §17-3 TransferPipelineStalled"}
+            exp_annotations: {summary: "출금이 단계에서 막혔다 (RECEIVED 15분 또는 SENDING 2분 넘게)", runbook: "OPERATION.md §17-3 TransferPipelineStalled"}
 
   # 4 SENDING 2분 넘게 → 1분 뒤
   - interval: 5s
@@ -138,7 +138,7 @@ tests:
         alertname: TransferPipelineStalled
         exp_alerts:
           - exp_labels: {severity: critical}
-            exp_annotations: {summary: "출금이 단계에서 막혔다 (RECEIVED 30분 또는 SENDING 2분 넘게)", runbook: "OPERATION.md §17-3 TransferPipelineStalled"}
+            exp_annotations: {summary: "출금이 단계에서 막혔다 (RECEIVED 15분 또는 SENDING 2분 넘게)", runbook: "OPERATION.md §17-3 TransferPipelineStalled"}
 
   # 7 모든 Pod 가 30초 → 없음 (기준 60초 아래)
   - interval: 5s
@@ -152,11 +152,11 @@ tests:
         alertname: OutboxBacklog
         exp_alerts: []
 
-  # 4 임계값 바로 아래(RECEIVED 1799 · SENDING 119)는 for 가 지나도 울리지 않는다 — 점검 아님
+  # 4 임계값 바로 아래(RECEIVED 899 · SENDING 119)는 for 가 지나도 울리지 않는다 — 점검 아님
   - interval: 5s
     input_series:
       - series: 'banktransfer_transfer_open_oldest_seconds{status="RECEIVED", pod="api-0"}'
-        values: '1799x30'
+        values: '899x30'
       - series: 'banktransfer_transfer_open_oldest_seconds{status="SENDING", pod="api-0"}'
         values: '119x30'
       - series: 'banktransfer_bank_maintenance{pod="api-0"}'
@@ -170,7 +170,7 @@ tests:
   - interval: 5s
     input_series:
       - series: 'banktransfer_transfer_open_oldest_seconds{status="RECEIVED", pod="api-0"}'
-        values: '1801x40'
+        values: '901x40'
       - series: 'banktransfer_bank_maintenance{pod="api-0"}'
         values: '1x40'
       - series: 'http_server_requests_seconds_count{app="api", status="202", uri="/api/v1/transfers"}'
@@ -189,7 +189,7 @@ tests:
   - interval: 5s
     input_series:
       - series: 'banktransfer_transfer_open_oldest_seconds{status="RECEIVED", pod="api-0"}'
-        values: '1801x500'
+        values: '901x500'
       - series: 'banktransfer_bank_maintenance{pod="api-0"}'
         values: '1x2 0x500'
     alert_rule_test:
@@ -203,7 +203,7 @@ tests:
         alertname: TransferPipelineStalled
         exp_alerts:
           - exp_labels: {severity: critical}
-            exp_annotations: {summary: "출금이 단계에서 막혔다 (RECEIVED 30분 또는 SENDING 2분 넘게)", runbook: "OPERATION.md §17-3 TransferPipelineStalled"}
+            exp_annotations: {summary: "출금이 단계에서 막혔다 (RECEIVED 15분 또는 SENDING 2분 넘게)", runbook: "OPERATION.md §17-3 TransferPipelineStalled"}
 
   # 5 포기(E001) 증가 → 바로
   - interval: 5s

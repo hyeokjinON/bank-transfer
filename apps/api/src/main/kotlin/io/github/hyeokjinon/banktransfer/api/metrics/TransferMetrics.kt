@@ -46,6 +46,7 @@ class TransferMetrics(
         Timer.builder(TRANSFER_COMPLETED).description("접수(created_at) → 확정 시간 — 재시도 · 결과조회를 거치면 분 단위")
             .tag("status", it.name).serviceLevelObjectives(*COMPLETED_BUCKETS).register(registry)
     }
+    // 이 "포기" 는 재발행 소진(RECEIVED → FAILED E001, 알림 TransferGaveUp) — 도메인 ReconcileResult.gaveUp(결과조회 소진)과 다른 것이다.
     private val gaveUp: Counter = Counter.builder(GAVE_UP).description("재발행 한도 소진 FAILED(E001) — 사용자가 다시 요청해야 한다").register(registry)
     private val deadLetters: Map<DltKind, Counter> = DltKind.entries.associateWith {
         counter(DLT, "kind", it.name.lowercase(), "DLT 로 온 메시지 (bank_not_connected 는 정리 작업이 재발행한다)")

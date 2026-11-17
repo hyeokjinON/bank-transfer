@@ -902,7 +902,7 @@ kubectl --context kind-bank-transfer -n monitoring get secret grafana-admin -o j
 | GatewayNoLeader | 은행 연결 주인이 30초 넘게 없다 — 은행 송신 멈춤 | `kubectl -n bank-transfer get pods -l app=bank-gateway -L bank-transfer/gateway-role`, Lease holder | §16 장애 대응 표 (선출 · RBAC · 노드) |
 | GatewayMultipleLeaders | 리더 둘 | 두 Pod 의 `leader election` 로그, 모의 은행 세션 수 | 보통 API 서버 단절 직후 — 기다리면 정리 (§16). 1분 넘으면 옛 리더 Pod 삭제 |
 | BankDisconnected | 은행 회선 30초 넘게 없음 | ② 연결 패널, 게이트웨이 로그 `connect to bank failed` | 은행 · 망 확인. 출금은 RECEIVED 로 재시도 · 재발행 (돈 안전) |
-| TransferPipelineStalled | RECEIVED 30분 · SENDING 2분 넘게 | ① 2행 — 아웃박스 · lag · 은행 결과 | Kafka · 컨슈머 · 정리 작업 스케줄 확인, `database.md` 운영 쿼리로 해당 건 |
+| TransferPipelineStalled | RECEIVED 15분(마지막 상태 변화 뒤 — 재발행도 멈춤) · SENDING 2분 넘게 | ① 2행 — 아웃박스 · lag · 은행 결과 | Kafka · 컨슈머 · 정리 작업 스케줄 확인, `database.md` 운영 쿼리로 해당 건 |
 | TransferGaveUp | FAILED E001 생김 | `SELECT … WHERE bank_response_code = 'E001'` | 사용자에게 다시 요청 안내 (돈은 환불됨) |
 | TransferUnknownExhausted | 결과조회 소진 UNKNOWN | 해당 건 · 결과조회 로그 | 일마감 대사가 맞춘다 (§10). 1시간마다 다시 울린다 |
 | OutboxBacklog | 미발행 60초 넘게 | 발행기 로그 `outbox relay failed`, Kafka Pod | Kafka 복구 — 복구되면 밀린 행이 나간다 |
@@ -924,13 +924,13 @@ kubectl --context kind-bank-transfer -n monitoring get secret grafana-admin -o j
 | `banktransfer_transfer_dlt_total` | Counter `kind=bank_not_connected\|invalid_key\|other` | api |
 | `banktransfer_transfer_reconciled_total` | Counter `result=completed\|failed\|still_unknown` | api |
 | `banktransfer_outbox_published_total` | Counter `result=ok\|error` | api |
-| `banktransfer_transfer_open` · `banktransfer_transfer_open_oldest_seconds` | Gauge `status=RECEIVED\|SENDING\|UNKNOWN` (10초마다 DB 조회, 나이는 SQL) | api |
+| `banktransfer_transfer_open` · `banktransfer_transfer_open_oldest_seconds` | Gauge `status=RECEIVED\|SENDING\|UNKNOWN` (10초마다 DB 조회, 나이는 SQL). 나이는 RECEIVED = **마지막 상태 변화 뒤**(`updated_at` — 재발행도 갱신), SENDING · UNKNOWN = `sending_at` 뒤 | api |
 | `banktransfer_transfer_unknown_exhausted` | Gauge | api |
 | `banktransfer_outbox_unpublished` · `banktransfer_outbox_unpublished_oldest_seconds` | Gauge | api |
 | `banktransfer_metrics_db_query_seconds_*` | Timer `result=ok\|error` — 위 조회 자체 | api |
 | `banktransfer_bank_maintenance` | Gauge 0/1 (점검 창) | api · 게이트웨이 |
 | `banktransfer_gateway_bank_request_seconds_*` | Timer `type=transfer\|inquiry\|name`, `outcome=ok\|rejected\|not_sent\|unknown` | 게이트웨이 |
-| `banktransfer_gateway_not_sent_total` | Counter `reason=not_leader\|stepping_down\|no_tran_no\|disconnected\|duplicate_tran_no\|tran_no_store\|gateway_unreachable\|maintenance\|other` | 게이트웨이 |
+| `banktransfer_gateway_not_sent_total` | Counter `reason=not_leader\|stepping_down\|no_tran_no\|disconnected\|duplicate_tran_no\|tran_no_store\|gateway_unreachable\|maintenance\|other` (`gateway_unreachable` 은 api 쪽 사유 — 게이트웨이 지표엔 늘 0, 나오지 않는다) | 게이트웨이 |
 | `banktransfer_gateway_leader` · `banktransfer_gateway_bank_connected` | Gauge 0/1 | 게이트웨이 |
 | `banktransfer_gateway_leader_terms_total` | Counter | 게이트웨이 |
 | `banktransfer_gateway_tran_no_remaining` | Gauge (현재 + 예약 구간 남은 번호, 메모리 출처는 NaN) | 게이트웨이 |
@@ -960,6 +960,7 @@ kubectl --context kind-bank-transfer -n monitoring get secret grafana-admin -o j
 - Prometheus Targets 가 0 → RBAC: `kubectl --context kind-bank-transfer -n monitoring logs deploy/prometheus | grep forbidden`.
 - `up == 0` + `context deadline exceeded` → NetworkPolicy `metrics-from-prometheus-*` (`kubectl --context kind-bank-transfer -n bank-transfer get networkpolicy`).
 - 규칙이 0개 → ConfigMap · `bash infra/k8s/monitoring/check.sh` (`promtool check rules`).
-- Grafana 비밀번호 분실 → Secret `grafana-admin` 을 지우고 `bash infra/k8s/up.sh` 다시 (새로 만든다).
+- Grafana 비밀번호 분실 → Secret `grafana-admin` 을 지우고 `bash infra/k8s/up.sh` 다시 (새로 만든다), 이어서 `kubectl --context kind-bank-transfer -n monitoring rollout restart deploy/grafana` (Grafana 는 emptyDir 라 새 비밀번호로 다시 뜬다 — 재시작 없이는 옛 비밀번호 그대로).
+- Prometheus 는 Recreate + emptyDir — 규칙 · 설정 ConfigMap 이 바뀌면 TSDB 가 비어 점검 뒤 30분 제외 창도 사라진다. 점검 창 끝 30분 안에는 감시 설정을 바꾸지 않는다.
 - 알림이 alert-sink 에 안 온다 → ① Alertmanager 로그의 `notify` 오류 (`kubectl --context kind-bank-transfer -n monitoring logs deploy/alertmanager | grep -i notify`), ② `kubectl --context kind-bank-transfer -n monitoring get svc,pods` 에서 alert-sink Service · Pod 가 Ready 인지, ③ 웹훅 주소가 `http://alert-sink.monitoring.svc.cluster.local:8080/cgi-bin/sink` (경로 `/cgi-bin/sink`) 인지. 억제된 알림(`suppressed`)은 일부러 안 온다.
 - 옛 `nc` 방식 alert-sink 는 본문을 잃었다 — 응답은 200 인데 알림 절반이 빈 줄이었다. 지금은 busybox `httpd` + CGI 로 고쳤다 ([측정 결과 B7](docs/perf/p9a-metrics.md)).

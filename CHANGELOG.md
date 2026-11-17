@@ -18,6 +18,7 @@
 - 실험 도구: `PHASE=p9a`(감시 원자료), 동작 `gwzero` · `maint`, 요약 JSON `bank_gap_diff_s`(5초 격자) · `bank_gap_diff_raw_s`(원 표본), 카운터는 `increase()`. [측정 결과](docs/perf/p9a-metrics.md) · 원자료 `docs/perf/raw/p9a/`.
 - [ADR-0020](docs/adr/0020-observability-metrics-alerts.md) (제안), OPERATION §17, ARCHITECTURE 관측 절, 구성도 두 장 갱신 (`runtime-k8s.svg` 에 monitoring, `app-architecture.svg` 에 지표 지점 ● M).
 ### Changed
+- `TransferPipelineStalled` RECEIVED 임계값 30분 → **15분** (최종 리뷰 I1): 지표 나이는 마지막 상태 변화 뒤(`updated_at`)라 정상 최대가 514초 (M4). 대시보드 임계선 · 경계 테스트 · `TransferStateReaderTest`(updated_at 기준 고정) · 스펙 §16 · ADR-0020 · OPERATION 같이.
 - Envoy HTTPRoute 를 허용 목록으로: `/api/v1` · `/admin` · `/actuator/health` · `/actuator/info` 만 넘기고 나머지는 404 (이전에는 모든 경로를 넘겼다).
 - `BankNotSentException` 에 `reason: NotSentReason`(기본 `OTHER`, 점검 보류 `MAINTENANCE` 포함), 도메인 포트 `TransferObserver`, `finish(transferId, …)` → `finish(transfer, …)`, `DltKind` public, 스케줄 풀 4 → 5.
 - 앱 Pod 템플릿에 수집 어노테이션 (롤링 1회).

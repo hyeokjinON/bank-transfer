@@ -48,6 +48,8 @@
 | B4 | 죽은 노드 Pod 의 마지막 값이 남는가 | **남지 않는다** — 죽은 리더 Pod 의 시계열은 동작 뒤 0 ~ 4초에 끝났다 (M1a · M1b `victim_series_end_s`). 수집이 실패하면 Prometheus 가 staleness 표시를 넣어, 5분 되돌아보기(lookback)로 옛 값이 이어지지 않는다 (측정). 대신 공백 시작이 한 수집 간격쯤 늦게 보인다 (위) |
 | B7 | alert-sink 동시 수신 | **설계보다 나빴다 — 동시가 아니어도 잃었다.** 아래 |
 
+**RECEIVED 나이 실측과 임계값 (최종 리뷰 I1)**: `banktransfer_transfer_open_oldest_seconds{status="RECEIVED"}` 는 마지막 상태 변화 뒤 나이(`updated_at`)라 재발행 때마다 0 으로 돌아간다. 실험 최대 **514초** (M4 bank-4, 약 1만 2천 건 밀림) · **315초** (M2 bank-2) · **305초** (M5). 그래서 `TransferPipelineStalled` 의 RECEIVED 임계값을 30분 → **15분(900초)** 으로 낮췄다 (원자료 `raw/p9a/*.prom-open-oldest.json`).
+
 ### B7 — alert-sink 가 알림을 잃은 이유와 고친 방법
 - 원래 alert-sink 는 `{ printf 응답; sleep 1; } | nc -l -p 8080` 반복이었다. `sleep 1` 은 **연결이 올 때가 아니라 루프가 시작될 때** 흐른다. 알림이 1초 넘게 지나서 오면 nc 는 입력이 이미 끝난 상태로 연결을 받아, 응답만 쓰고 요청 본문을 읽기 전에 끝났다. Alertmanager 는 `200` 을 받았으니 다시 보내지 않는다 → **조용한 유실** (로그에 빈 줄만).
 - 증거: `bank-1.alert-sink.txt` 3건 모두 빈 줄 (BankDisconnected 울림 · 해제), `bank-4` 해제, `gwnode-1` ScrapeTargetDown 울림 · 해제, `gwzero-1` 한 건. 같은 이유로 실험 직후 스모크 [10] (시험 알림 30초 안 도착) 이 5번 실패했다 — 시험 알림의 "울림" 은 잃고 1분 뒤 "해제" 만 도착.

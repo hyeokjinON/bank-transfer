@@ -41,7 +41,7 @@ class TransferStateReaderTest : ApiIntegrationTest() {
         outboxIds.forEach { jdbc.update("DELETE FROM outbox_event WHERE id = ?", it) }
     }
 
-    private fun insertTransfer(status: TransferStatus, sendingAt: String?, updatedAt: String, inquiryAttempts: Int = 0) {
+    private fun insertTransfer(status: TransferStatus, sendingAt: String?, updatedAt: String, inquiryAttempts: Int = 0, createdAt: String = updatedAt) {
         val id = UUID.randomUUID().toString()
         jdbc.update(
             """
@@ -50,7 +50,7 @@ class TransferStateReaderTest : ApiIntegrationTest() {
             VALUES (?, ?, ?, ?, ?, '090', '5500000000000', 1, 'm', ?, ?, ?, ?, ?, 0)
             """.trimIndent(),
             id, owner, id, "M" + id.replace("-", "").take(19).uppercase(), "0".repeat(64),
-            status.name, sendingAt, inquiryAttempts, updatedAt, updatedAt,
+            status.name, sendingAt, inquiryAttempts, createdAt, updatedAt,
         )
     }
 
@@ -91,6 +91,14 @@ class TransferStateReaderTest : ApiIntegrationTest() {
         }
     }
 
+    @Test
+    fun `RECEIVED 나이는 created_at 이 아니라 updated_at 기준 - 마지막 상태 변화 뒤 나이 (I1)`() {
+        // 접수(created_at)는 최근, 마지막 변화(updated_at)는 아주 오래 — created_at 을 읽으면 이 행이 가장 오래되지 않는다.
+        insertTransfer(TransferStatus.RECEIVED, null, updatedAt = old, createdAt = "2026-11-17 12:00:00.000000")
+
+        val actual = reader.read().oldestSeconds.getValue(TransferStatus.RECEIVED)
+        assertTrue(abs(actual - oldAgeSeconds) < 5, "RECEIVED 나이 $actual, updated_at 기준 기대 약 ${oldAgeSeconds}")
+    }
     @Test
     fun `아웃박스 미발행 - 건수와 가장 오래된 나이 (가장 작은 id 로 넣어 맨 앞이 되게)`() {
         val id = -Random.nextLong(1, 1_000_000_000)

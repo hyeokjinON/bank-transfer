@@ -1,7 +1,7 @@
 # ADR-0020: 관측 — 업무 지표 · 상태 Gauge · Prometheus · Alertmanager · Grafana (kind 에만)
 
 - 상태: 제안 (2026-11-17) — 머지 뒤 정리 PR 에서 `채택`
-- 관련: [ADR-0017](0017-kubernetes-kind.md) (kind · 제어 노드 배치) · [ADR-0018](0018-gateway-ha-leader-election.md) (리더 · 은행 연결 — 지표로 보는 대상) · [ADR-0019](0019-gateway-required-spread.md) · [스펙](../superpowers/specs/2026-11-17-p9a-metrics-design.md) (끝의 "§16 실험 뒤 정정" 포함) · [측정 결과](../perf/p9a-metrics.md) · OPERATION §17
+- 관련: [ADR-0017](0017-kubernetes-kind.md) (kind · 제어 노드 배치) · [ADR-0018](0018-gateway-ha-leader-election.md) (리더 · 은행 연결 — 지표로 보는 대상) · [ADR-0019](0019-gateway-required-spread.md) · [스펙](../superpowers/specs/2026-11-17-p9a-metrics-design.md) (끝의 "§16 실험 뒤 정정" 포함) · [측정 결과](../perf/p9a-metrics.md) · [OPERATION §17](../../OPERATION.md)
 
 ## 맥락
 - P8 실험의 숫자(은행 공백 · 리더 교대 · Pending 시간)는 모두 **로그와 kubectl 표본을 손으로 맞춰** 냈다. 앱에 업무 지표가 0 개였고 Prometheus 형식 노출도 없었다.
@@ -46,11 +46,15 @@
 
 ## 위험 · 다음
 - **B5 Prometheus → 게이트웨이 송신 API 도달 (받아들인 위험)**: NetworkPolicy 가 Prometheus Pod 하나만 허용하지만, 지표 포트 8082 는 은행 송신 API 와 같은 포트라 Prometheus 가 뚫리면 송신 API 에 닿는다. 관리 포트 분리(`management.server.port`)가 근본 해결 — 범위가 커서 다음.
+  - Prometheus 는 api:8080 업무 포트(`X-User-Id` 헤더를 믿는 API · `/admin`)에도 닿는다 — 입구가 이미 같은 헤더를 그대로 넘기므로 새 권한은 아니다.
+- **RECEIVED 임계값 정정 (최종 리뷰 I1)**: `TransferPipelineStalled` 의 RECEIVED 나이는 `MIN(updated_at)` = **마지막 상태 변화 뒤 나이**다 (재발행도 갱신). 처음 30분은 접수 뒤 나이를 전제로 한 값이었고, 실측 정상 최대는 514초 (M4)라 **15분(900초)** 으로 낮췄다. 의미는 "RECEIVED 가 15분 넘게 아무 변화 없음 = 재발행도 멈춤 — 컨슈머 · 정리 작업 둘 다 의심". 컨슈머만 멈추면 재발행이 소진돼 TransferGaveUp 이 먼저 울린다.
 - **카운터는 근사치.** Kafka 최소 한 번 전달 · Pod 재시작으로 건수가 정확하지 않다. 돈의 정답은 DB (`docs/database.md` 운영 쿼리), 지표는 추세 · 장애 신호용.
 - **지표가 은행 복구를 늦게 보여 줄 수 있다.** 5초 수집 + 5초 격자로 대시보드에는 최대 약 8초 늦게 보인다. 사람이 판단할 시간 척도(알림 `for` 30초)에는 영향이 없다.
 - **노드 장애는 지표가 가장 늦게 본다**: 지표 공백 시작 +9초, ScrapeTargetDown +64 · +69초 (`for 1m`). 장애 알림이 은행 연결 알림(30초)보다 늦다.
 - 한계: kind 한 호스트 · 모의 은행 · 수집 해상도 5초 · alert-sink 는 대역 (실제 받는 곳의 재시도 · 속도 제한은 재지 않음).
 - 운영이라면 (스펙 §12): 관리 포트 분리 · Prometheus Operator(또는 관리형) · 원격 저장(Thanos 등) · 영구 볼륨 · Envoy · MySQL · Kafka 브로커 exporter · Watchdog(생존 신호) · on-call · SLO 오류 예산 알림 · 사용자/계좌별 지표.
+- 다음 후보: 컨슈머 정지를 직접 보는 lag 알림 (`max(kafka_consumer_fetch_manager_records_lag_max) > N for 5m`) — 지금 lag 는 대시보드에만 있다.
+- 다음 후보: `/admin` 이 인증 없이 PC 입구에 열려 있음 (P9a 이전부터 — 허용 목록은 이 동작을 유지했다).
 - 다음: **P9b 분산 추적**(OpenTelemetry — Observation API 는 필요한 곳만), **P9c 로그 모으기**.
 
 ## 검토한 대안
