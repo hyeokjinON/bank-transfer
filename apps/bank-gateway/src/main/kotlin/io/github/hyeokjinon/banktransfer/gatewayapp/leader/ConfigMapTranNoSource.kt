@@ -6,6 +6,8 @@ import io.fabric8.kubernetes.client.KubernetesClientException
 import io.github.hyeokjinon.banktransfer.gateway.BankNotSentException
 import io.github.hyeokjinon.banktransfer.gateway.NotSentReason
 import io.github.hyeokjinon.banktransfer.gateway.TranNoSource
+import io.github.hyeokjinon.banktransfer.gatewayapp.metrics.GatewayMetrics
+import io.github.hyeokjinon.banktransfer.gatewayapp.metrics.TranNoReserveResult
 import io.github.hyeokjinon.banktransfer.protocol.Header
 import org.slf4j.LoggerFactory
 import java.time.Clock
@@ -34,6 +36,8 @@ class ConfigMapTranNoSource(
     private val blockSize: Long = 1000,
     private val prefetchRemaining: Long = 100,
     private val maxAttempts: Int = 5,
+    /** P9a 지표 — 예약 결과 (ok · conflict · error). */
+    private val metrics: GatewayMetrics = GatewayMetrics.noop(),
 ) : TranNoSource, AutoCloseable {
 
     private class Block(val date: String, var next: Long, val last: Long)
@@ -76,6 +80,14 @@ class ConfigMapTranNoSource(
         return number
     }
 
+    /** 오늘 날짜로 예약해 둔 남은 번호 = 현재 구간 + 미리 예약한 구간 (P9a Gauge). */
+    @Synchronized
+    override fun remaining(): Long {
+        val today = today()
+        fun left(block: Block?): Long = block?.takeIf { it.date == today }?.let { (it.last - it.next + 1).coerceAtLeast(0) } ?: 0L
+        return left(current) + left(upcoming)
+    }
+
     private fun reserveAsync(date: String) {
         if (!reserving.compareAndSet(false, true)) return
         try {
@@ -95,8 +107,17 @@ class ConfigMapTranNoSource(
         }
     }
 
-    /** 구간 하나를 예약한다 (막힘 — API 서버 왕복). 다른 예약자와 겹치면 409 → 다시 읽고 반복. */
-    internal fun reserve(date: String): LongRange {
+    /** 구간 하나를 예약한다 (막힘 — API 서버 왕복). 결과를 센다 (P9a): 성공 ok, 409 로 다시 읽을 때마다 conflict, 던지면 error. */
+    internal fun reserve(date: String): LongRange =
+        try {
+            reserveWithRetry(date).also { metrics.tranNoReserved(TranNoReserveResult.OK) }
+        } catch (e: Exception) {
+            metrics.tranNoReserved(TranNoReserveResult.ERROR)
+            throw e
+        }
+
+    /** 다른 예약자와 겹치면 409 → 다시 읽고 반복. */
+    private fun reserveWithRetry(date: String): LongRange {
         val configMaps = k8s.configMaps().inNamespace(namespace)
         repeat(maxAttempts) {
             val existing = configMaps.withName(name).get()
@@ -108,6 +129,7 @@ class ConfigMapTranNoSource(
                     return 1L..blockSize
                 } catch (e: KubernetesClientException) {
                     if (e.code != CONFLICT) throw e
+                    metrics.tranNoReserved(TranNoReserveResult.CONFLICT)
                     return@repeat   // 다른 예약자가 먼저 만들었다 — 다시 읽는다
                 }
             }
@@ -132,6 +154,7 @@ class ConfigMapTranNoSource(
                 return start..last
             } catch (e: KubernetesClientException) {
                 if (e.code != CONFLICT) throw e
+                metrics.tranNoReserved(TranNoReserveResult.CONFLICT)
             }
         }
         throw BankNotSentException("tran no reservation conflicted $maxAttempts times", reason = NotSentReason.TRAN_NO_STORE)

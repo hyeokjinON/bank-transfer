@@ -4,7 +4,9 @@ import io.fabric8.kubernetes.api.model.ConfigMapBuilder
 import io.github.hyeokjinon.banktransfer.gateway.BankNotSentException
 import io.github.hyeokjinon.banktransfer.gateway.NotSentReason
 import io.github.hyeokjinon.banktransfer.gatewayapp.k8s.MockK8s
+import io.github.hyeokjinon.banktransfer.gatewayapp.metrics.GatewayMetrics
 import io.github.hyeokjinon.banktransfer.protocol.Header
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.awaitility.kotlin.await
 import org.awaitility.kotlin.untilAsserted
 import java.time.Clock
@@ -26,6 +28,7 @@ class ConfigMapTranNoSourceTest {
     private val name = "bank-gateway-tran-no"
     private val clock = MutableClock(Instant.parse("2026-11-16T01:00:00Z"))   // KST 2026-11-16 10:00
     private val sources = mutableListOf<ConfigMapTranNoSource>()
+    private val registry = SimpleMeterRegistry()
 
     @AfterTest
     fun tearDown() {
@@ -34,7 +37,7 @@ class ConfigMapTranNoSourceTest {
     }
 
     private fun source(blockSize: Long = 1000, prefetch: Long = 100, attempts: Int = 5) =
-        ConfigMapTranNoSource(k8s.client, ns, name, clock, blockSize, prefetch, attempts).also { sources += it }
+        ConfigMapTranNoSource(k8s.client, ns, name, clock, blockSize, prefetch, attempts, GatewayMetrics(registry)).also { sources += it }
 
     private fun data() = k8s.client.configMaps().inNamespace(ns).withName(name).get().data
 
@@ -166,5 +169,28 @@ class ConfigMapTranNoSourceTest {
         override fun getZone(): ZoneId = ZoneId.of("UTC")
         override fun withZone(zone: ZoneId): Clock = this
         override fun instant(): Instant = now
+    }
+
+    private fun reserves(result: String) = registry.get(GatewayMetrics.TRAN_NO_RESERVE).tag("result", result).counter().count()
+
+    @Test
+    fun `예약 결과와 남은 번호 - 현재 구간 + 미리 예약 구간`() {
+        val source = source(blockSize = 10, prefetch = 0)
+        source.prepare()
+        assertEquals(1.0, reserves("ok"))
+        assertEquals(10, source.remaining())
+
+        source.next()
+        assertEquals(9, source.remaining())
+    }
+
+    @Test
+    fun `API 서버가 없으면 예약은 error 로 센다`() {
+        k8s.stopApiServer()
+        val source = source()
+        source.prepare()   // 던지지 않는다 — 실패를 센다
+
+        assertEquals(1.0, reserves("error"))
+        assertEquals(0, source.remaining())
     }
 }

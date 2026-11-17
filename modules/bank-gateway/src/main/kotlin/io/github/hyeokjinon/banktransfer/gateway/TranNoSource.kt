@@ -14,6 +14,9 @@ fun interface TranNoSource {
 
     /** 리더 임기 시작 때 한 번 (구간을 미리 예약). 실패해도 던지지 않는다 — next() 가 다시 시도한다. */
     fun prepare() {}
+
+    /** 예약해 둔 남은 번호 (P9a 지표). 개념이 없는 출처(메모리 카운터)는 null → Gauge 는 NaN. */
+    fun remaining(): Long? = null
 }
 
 /** 메모리 카운터 (P8-3a 까지의 동작). 선출이 꺼진 환경(IntelliJ · Compose · 테스트)의 기본값. 다 쓰면 1부터. */
