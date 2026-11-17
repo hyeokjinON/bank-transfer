@@ -1,0 +1,19 @@
+# P9a Alertmanager (스펙 §6 · §7, 결정 D5). 받는 곳은 클러스터 안 alert-sink 하나 (로그 출력 — 운영이면 Slack · 텔레그램 자리).
+# 묶기 = alertname, 처음 10초 기다림 · 같은 묶음 다음 알림 1분 · 같은 알림 반복 1시간. 해제도 보낸다.
+route:
+  receiver: alert-sink
+  group_by: [alertname]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 1h
+
+receivers:
+  - name: alert-sink
+    webhook_configs:
+      - url: http://alert-sink.monitoring.svc.cluster.local:8080/
+        send_resolved: true
+
+inhibit_rules:
+  # 원인 하나 · 알림 하나 — 리더가 없으면 은행 회선도 당연히 없다
+  - source_matchers: [alertname="GatewayNoLeader"]
+    target_matchers: [alertname="BankDisconnected"]

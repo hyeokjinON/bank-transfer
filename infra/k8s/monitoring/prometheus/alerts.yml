@@ -1,0 +1,129 @@
+# P9a 알림 규칙 11개 (스펙 §7). 기다림(for)은 시스템이 스스로 회복하는 시간보다 길게. 단위 테스트: alerts-test.yml (promtool test rules)
+# 점검 제외 = 점검 중 + 끝난 뒤 30분: unless on() (max_over_time(max(banktransfer_bank_maintenance)[30m:]) == 1) — 점검 시각은 앱 설정 한 곳 (결정 D8)
+# api 2대가 같은 상태 Gauge 를 낸다 → max(). 할 일은 OPERATION.md §17-3
+groups:
+  - name: bank-transfer
+    rules:
+      # 1 정상 교대 3초 · 노드 장애 15초(Lease) 보다 길게. 게이트웨이가 0대면 시계열이 없다 → or vector(0)
+      - alert: GatewayNoLeader
+        expr: (sum(banktransfer_gateway_leader) or vector(0)) == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: 리더 게이트웨이가 30초 넘게 없다 (은행 송신 멈춤)
+          runbook: OPERATION.md §17-3 GatewayNoLeader
+
+      # 2 있어선 안 된다 — 교대 순간의 겹침만 허용
+      - alert: GatewayMultipleLeaders
+        expr: sum(banktransfer_gateway_leader) > 1
+        for: 15s
+        labels:
+          severity: critical
+        annotations:
+          summary: 리더 게이트웨이가 15초 넘게 둘 이상이다
+          runbook: OPERATION.md §17-3 GatewayMultipleLeaders
+
+      # 3 재접속(1 · 2 · 4초 …)을 여러 번 넘김 — 은행 · 망. 리더가 없으면 Alertmanager 가 억제 (원인 하나 · 알림 하나)
+      - alert: BankDisconnected
+        expr: (max(banktransfer_gateway_bank_connected) or vector(0)) == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: 은행 회선이 30초 넘게 끊겨 있다
+          runbook: OPERATION.md §17-3 BankDisconnected
+
+      # 4 재발행 3회(약 26분) 뒤엔 RECEIVED 가 남을 수 없다 · SENDING 은 30초 뒤 UNKNOWN 이어야 한다 (A2)
+      - alert: TransferPipelineStalled
+        expr: |
+          (
+            max(banktransfer_transfer_open_oldest_seconds{status="RECEIVED"}) > 1800
+            or
+            max(banktransfer_transfer_open_oldest_seconds{status="SENDING"}) > 120
+          )
+          unless on() (max_over_time(max(banktransfer_bank_maintenance)[30m:]) == 1)
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 출금이 단계에서 막혔다 (RECEIVED 30분 또는 SENDING 2분 넘게)
+          runbook: OPERATION.md §17-3 TransferPipelineStalled
+
+      # 5 사용자가 다시 요청해야 하는 건 (A2)
+      - alert: TransferGaveUp
+        expr: sum(increase(banktransfer_transfer_gave_up_total[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: 은행에 보내지 못하고 포기한 출금(FAILED E001)이 있다
+          runbook: OPERATION.md §17-3 TransferGaveUp
+
+      # 6 일마감 대사가 맞출 건 — 남아 있는 동안 1시간마다 다시 (repeat_interval, A3)
+      - alert: TransferUnknownExhausted
+        expr: max(banktransfer_transfer_unknown_exhausted) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: 결과조회를 다 써도 결과를 모르는 출금이 있다 (일마감 대사 대상)
+          runbook: OPERATION.md §17-3 TransferUnknownExhausted
+
+      # 7 발행 주기 0.5초 — 60초면 발행기 정지 · Kafka 장애
+      - alert: OutboxBacklog
+        expr: max(banktransfer_outbox_unpublished_oldest_seconds) > 60
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: 아웃박스 미발행이 60초 넘게 쌓였다
+          runbook: OPERATION.md §17-3 OutboxBacklog
+
+      # 8 DLT 한 건 = 사람 확인 한 건. 은행 연결 없음(bank_not_connected)은 5분 뒤 재발행이 이어받아 뺀다
+      - alert: TransferDeadLettered
+        expr: sum(increase(banktransfer_transfer_dlt_total{kind!="bank_not_connected"}[5m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: 자동으로 다시 처리하지 않는 DLT 메시지가 왔다
+          runbook: OPERATION.md §17-3 TransferDeadLettered
+
+      # 9 노드 장애 직후 약 50초 5xx(P8-3a D2)는 넘기지 않게 2분. 점검 503(BANK_MAINTENANCE)은 점검 제외로 뺀다. 관리 경로는 세지 않는다
+      - alert: ApiHigh5xx
+        expr: |
+          (
+            sum(rate(http_server_requests_seconds_count{app="api", status=~"5..", uri!~"/actuator.*"}[1m]))
+            /
+            sum(rate(http_server_requests_seconds_count{app="api", uri!~"/actuator.*"}[1m]))
+          ) > 0.05
+          unless on() (max_over_time(max(banktransfer_bank_maintenance)[30m:]) == 1)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: api 5xx 비율이 2분 넘게 5% 를 넘는다
+          runbook: OPERATION.md §17-3 ApiHigh5xx
+
+      # 10 지표가 없으면 다른 규칙이 거짓 정상. 한 번이라도 읽힌 Pod 만 (기동 중인 Pod 는 아직 읽힌 적이 없다 — 롤링마다 울리지 않게)
+      - alert: ScrapeTargetDown
+        expr: |
+          (up{namespace="bank-transfer"} == 0)
+            and on(pod) last_over_time(process_start_time_seconds{namespace="bank-transfer"}[15m])
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: 지표를 읽던 앱 Pod 를 1분 넘게 못 읽는다
+          runbook: OPERATION.md §17-3 ScrapeTargetDown
+
+      # 11 DB 조회 실패면 상태 Gauge 가 NaN (A6). 시계열이 아예 없어도 같다
+      - alert: MetricsMissing
+        expr: |
+          (count(banktransfer_transfer_open != banktransfer_transfer_open) > 0)
+            or on() absent(banktransfer_transfer_open)
+            or on() absent(banktransfer_outbox_unpublished)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: 상태 지표가 2분 넘게 비었다 (DB 조회 실패 · 지표 없음)
+          runbook: OPERATION.md §17-3 MetricsMissing

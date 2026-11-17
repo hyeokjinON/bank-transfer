@@ -1,0 +1,350 @@
+# P9a 알림 규칙 단위 테스트 (스펙 §9) — promtool test rules (infra/k8s/monitoring/check.sh). 시각 = 테스트 시작 기준, 표본 5초 간격 (수집 간격과 같다).
+# 규칙마다 울림 · 안 울림, 점검 제외 · 점검 뒤 30분, "시계열이 아예 없음" (게이트웨이 0대 · 지표 없음) 을 본다. 억제(inhibit)는 Alertmanager 몫 — check.sh 의 amtool.
+rule_files:
+  - alerts.yml
+evaluation_interval: 5s
+
+tests:
+  # 1 · 3 리더 0 · 연결 0 → 30초 뒤 둘 다 (Alertmanager 가 BankDisconnected 를 억제)
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_gateway_leader{pod="gw-a"}'
+        values: '0x40'
+      - series: 'banktransfer_gateway_leader{pod="gw-b"}'
+        values: '0x40'
+      - series: 'banktransfer_gateway_bank_connected{pod="gw-a"}'
+        values: '0x40'
+      - series: 'banktransfer_gateway_bank_connected{pod="gw-b"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 25s
+        alertname: GatewayNoLeader
+        exp_alerts: []
+      - eval_time: 40s
+        alertname: GatewayNoLeader
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: "리더 게이트웨이가 30초 넘게 없다 (은행 송신 멈춤)", runbook: "OPERATION.md §17-3 GatewayNoLeader"}
+      - eval_time: 40s
+        alertname: BankDisconnected
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: "은행 회선이 30초 넘게 끊겨 있다", runbook: "OPERATION.md §17-3 BankDisconnected"}
+
+  # 1 · 3 게이트웨이 0대 (M3) — 시계열이 없어도 울린다 (or vector(0))
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_bank_maintenance{pod="api-0"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 40s
+        alertname: GatewayNoLeader
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: "리더 게이트웨이가 30초 넘게 없다 (은행 송신 멈춤)", runbook: "OPERATION.md §17-3 GatewayNoLeader"}
+      - eval_time: 40s
+        alertname: BankDisconnected
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: "은행 회선이 30초 넘게 끊겨 있다", runbook: "OPERATION.md §17-3 BankDisconnected"}
+
+  # 정상: 리더 1 · 연결 1 → 아무것도
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_gateway_leader{pod="gw-a"}'
+        values: '1x40'
+      - series: 'banktransfer_gateway_leader{pod="gw-b"}'
+        values: '0x40'
+      - series: 'banktransfer_gateway_bank_connected{pod="gw-a"}'
+        values: '1x40'
+      - series: 'banktransfer_gateway_bank_connected{pod="gw-b"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 60s
+        alertname: GatewayNoLeader
+        exp_alerts: []
+      - eval_time: 60s
+        alertname: GatewayMultipleLeaders
+        exp_alerts: []
+      - eval_time: 60s
+        alertname: BankDisconnected
+        exp_alerts: []
+
+  # 2 리더 둘 → 15초 뒤
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_gateway_leader{pod="gw-a"}'
+        values: '1x20'
+      - series: 'banktransfer_gateway_leader{pod="gw-b"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 10s
+        alertname: GatewayMultipleLeaders
+        exp_alerts: []
+      - eval_time: 25s
+        alertname: GatewayMultipleLeaders
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: "리더 게이트웨이가 15초 넘게 둘 이상이다", runbook: "OPERATION.md §17-3 GatewayMultipleLeaders"}
+
+  # 3 리더는 있는데 은행만 끊김 → BankDisconnected 만
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_gateway_leader{pod="gw-a"}'
+        values: '1x40'
+      - series: 'banktransfer_gateway_bank_connected{pod="gw-a"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 25s
+        alertname: BankDisconnected
+        exp_alerts: []
+      - eval_time: 40s
+        alertname: BankDisconnected
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: "은행 회선이 30초 넘게 끊겨 있다", runbook: "OPERATION.md §17-3 BankDisconnected"}
+      - eval_time: 40s
+        alertname: GatewayNoLeader
+        exp_alerts: []
+
+  # 4 RECEIVED 30분 넘게 → 1분 뒤
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_transfer_open_oldest_seconds{status="RECEIVED", pod="api-0"}'
+        values: '1801x30'
+      - series: 'banktransfer_transfer_open_oldest_seconds{status="SENDING", pod="api-0"}'
+        values: '0x30'
+      - series: 'banktransfer_bank_maintenance{pod="api-0"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 55s
+        alertname: TransferPipelineStalled
+        exp_alerts: []
+      - eval_time: 70s
+        alertname: TransferPipelineStalled
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: "출금이 단계에서 막혔다 (RECEIVED 30분 또는 SENDING 2분 넘게)", runbook: "OPERATION.md §17-3 TransferPipelineStalled"}
+
+  # 4 SENDING 2분 넘게 → 1분 뒤
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_transfer_open_oldest_seconds{status="RECEIVED", pod="api-0"}'
+        values: '0x30'
+      - series: 'banktransfer_transfer_open_oldest_seconds{status="SENDING", pod="api-0"}'
+        values: '121x30'
+    alert_rule_test:
+      - eval_time: 70s
+        alertname: TransferPipelineStalled
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: "출금이 단계에서 막혔다 (RECEIVED 30분 또는 SENDING 2분 넘게)", runbook: "OPERATION.md §17-3 TransferPipelineStalled"}
+
+  # 4 · 9 점검 중이면 울리지 않는다
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_transfer_open_oldest_seconds{status="RECEIVED", pod="api-0"}'
+        values: '1801x40'
+      - series: 'banktransfer_bank_maintenance{pod="api-0"}'
+        values: '1x40'
+      - series: 'http_server_requests_seconds_count{app="api", status="202", uri="/api/v1/transfers"}'
+        values: '0+90x40'
+      - series: 'http_server_requests_seconds_count{app="api", status="503", uri="/api/v1/transfers"}'
+        values: '0+10x40'
+    alert_rule_test:
+      - eval_time: 150s
+        alertname: TransferPipelineStalled
+        exp_alerts: []
+      - eval_time: 150s
+        alertname: ApiHigh5xx
+        exp_alerts: []
+
+  # 4 점검이 끝난 뒤 30분까지는 빼고, 그 뒤엔 울린다 (점검 1 은 0 · 5 · 10초, 마지막 1 이 창에서 빠지는 1810초부터 + for 1분)
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_transfer_open_oldest_seconds{status="RECEIVED", pod="api-0"}'
+        values: '1801x500'
+      - series: 'banktransfer_bank_maintenance{pod="api-0"}'
+        values: '1x2 0x500'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TransferPipelineStalled
+        exp_alerts: []
+      - eval_time: 31m
+        alertname: TransferPipelineStalled
+        exp_alerts: []
+      - eval_time: 33m
+        alertname: TransferPipelineStalled
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: "출금이 단계에서 막혔다 (RECEIVED 30분 또는 SENDING 2분 넘게)", runbook: "OPERATION.md §17-3 TransferPipelineStalled"}
+
+  # 5 포기(E001) 증가 → 바로
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_transfer_gave_up_total{pod="api-0"}'
+        values: '0x10 1x10'
+    alert_rule_test:
+      - eval_time: 50s
+        alertname: TransferGaveUp
+        exp_alerts: []
+      - eval_time: 60s
+        alertname: TransferGaveUp
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: "은행에 보내지 못하고 포기한 출금(FAILED E001)이 있다", runbook: "OPERATION.md §17-3 TransferGaveUp"}
+
+  # 5 증가 없음 → 없음
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_transfer_gave_up_total{pod="api-0"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 60s
+        alertname: TransferGaveUp
+        exp_alerts: []
+
+  # 6 결과조회 소진 UNKNOWN → 바로
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_transfer_unknown_exhausted{pod="api-0"}'
+        values: '0x5 2x5'
+    alert_rule_test:
+      - eval_time: 20s
+        alertname: TransferUnknownExhausted
+        exp_alerts: []
+      - eval_time: 40s
+        alertname: TransferUnknownExhausted
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: "결과조회를 다 써도 결과를 모르는 출금이 있다 (일마감 대사 대상)", runbook: "OPERATION.md §17-3 TransferUnknownExhausted"}
+
+  # 7 아웃박스 60초 넘게 → 1분 뒤 / 30초면 없음
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_outbox_unpublished_oldest_seconds{pod="api-0"}'
+        values: '61x30'
+      - series: 'banktransfer_outbox_unpublished_oldest_seconds{pod="api-1"}'
+        values: '30x30'
+    alert_rule_test:
+      - eval_time: 55s
+        alertname: OutboxBacklog
+        exp_alerts: []
+      - eval_time: 70s
+        alertname: OutboxBacklog
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: "아웃박스 미발행이 60초 넘게 쌓였다", runbook: "OPERATION.md §17-3 OutboxBacklog"}
+
+  # 8 사람이 볼 DLT(other) → 바로
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_transfer_dlt_total{kind="other", pod="api-0"}'
+        values: '0x5 1x10'
+    alert_rule_test:
+      - eval_time: 40s
+        alertname: TransferDeadLettered
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: "자동으로 다시 처리하지 않는 DLT 메시지가 왔다", runbook: "OPERATION.md §17-3 TransferDeadLettered"}
+
+  # 8 은행 연결 없음 DLT 는 재발행이 이어받는다 → 없음
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_transfer_dlt_total{kind="bank_not_connected", pod="api-0"}'
+        values: '0x5 5x10'
+    alert_rule_test:
+      - eval_time: 40s
+        alertname: TransferDeadLettered
+        exp_alerts: []
+
+  # 9 5xx 10% → 2분 뒤
+  - interval: 5s
+    input_series:
+      - series: 'http_server_requests_seconds_count{app="api", status="202", uri="/api/v1/transfers"}'
+        values: '0+90x40'
+      - series: 'http_server_requests_seconds_count{app="api", status="503", uri="/api/v1/transfers"}'
+        values: '0+10x40'
+    alert_rule_test:
+      - eval_time: 100s
+        alertname: ApiHigh5xx
+        exp_alerts: []
+      - eval_time: 150s
+        alertname: ApiHigh5xx
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: "api 5xx 비율이 2분 넘게 5% 를 넘는다", runbook: "OPERATION.md §17-3 ApiHigh5xx"}
+
+  # 9 5xx 1% · actuator 503 은 세지 않는다 → 없음
+  - interval: 5s
+    input_series:
+      - series: 'http_server_requests_seconds_count{app="api", status="202", uri="/api/v1/transfers"}'
+        values: '0+99x40'
+      - series: 'http_server_requests_seconds_count{app="api", status="500", uri="/api/v1/transfers"}'
+        values: '0+1x40'
+      - series: 'http_server_requests_seconds_count{app="api", status="503", uri="/actuator/health/readiness"}'
+        values: '0+50x40'
+    alert_rule_test:
+      - eval_time: 150s
+        alertname: ApiHigh5xx
+        exp_alerts: []
+
+  # 10 읽히던 Pod 가 0 → 1분 뒤. 한 번도 읽힌 적 없는 Pod(기동 중)는 울리지 않는다
+  - interval: 5s
+    input_series:
+      - series: 'up{namespace="bank-transfer", pod="api-0", app="api"}'
+        values: '1x10 0x30'
+      - series: 'process_start_time_seconds{namespace="bank-transfer", pod="api-0", app="api"}'
+        values: '1700000000x10 _x30'
+      - series: 'up{namespace="bank-transfer", pod="api-1", app="api"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 100s
+        alertname: ScrapeTargetDown
+        exp_alerts: []
+      - eval_time: 130s
+        alertname: ScrapeTargetDown
+        exp_alerts:
+          - exp_labels: {severity: warning, namespace: bank-transfer, pod: api-0, app: api}
+            exp_annotations: {summary: "지표를 읽던 앱 Pod 를 1분 넘게 못 읽는다", runbook: "OPERATION.md §17-3 ScrapeTargetDown"}
+
+  # 11 상태 Gauge 가 NaN (DB 조회 실패) → 2분 뒤
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_transfer_open{status="RECEIVED", pod="api-0"}'
+        values: 'NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN'
+      - series: 'banktransfer_outbox_unpublished{pod="api-0"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 100s
+        alertname: MetricsMissing
+        exp_alerts: []
+      - eval_time: 140s
+        alertname: MetricsMissing
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: "상태 지표가 2분 넘게 비었다 (DB 조회 실패 · 지표 없음)", runbook: "OPERATION.md §17-3 MetricsMissing"}
+
+  # 11 상태 Gauge 시계열이 아예 없음 → 2분 뒤
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_bank_maintenance{pod="api-0"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 140s
+        alertname: MetricsMissing
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: "상태 지표가 2분 넘게 비었다 (DB 조회 실패 · 지표 없음)", runbook: "OPERATION.md §17-3 MetricsMissing"}
+
+  # 11 정상 값 → 없음
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_transfer_open{status="RECEIVED", pod="api-0"}'
+        values: '3x30'
+      - series: 'banktransfer_outbox_unpublished{pod="api-0"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 140s
+        alertname: MetricsMissing
+        exp_alerts: []

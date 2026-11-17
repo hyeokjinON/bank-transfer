@@ -15,6 +15,9 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v6
+      # P9a 알림 규칙 단위 테스트 · Alertmanager 설정 · 대시보드 검사 — promtool · amtool 컨테이너 (버전은 infra/k8s/versions.env). 30초 안팎
+      - name: 알림 규칙 · 대시보드 검사
+        run: bash infra/k8s/monitoring/check.sh
       # 평소 6분 안팎. 멈추면 6시간이 아니라 30분에 실패하게 하고, 20분이 지나도 돌고 있으면 JVM 스레드 덤프를 남긴다
       # (P7 머지 뒤 테스트 JVM 이 3시간 멈춘 일이 있다 — 덤프가 없어 원인 미확인. 가상 스레드까지 보이게 Thread.dump_to_file)
       - name: Build and test
