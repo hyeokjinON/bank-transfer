@@ -192,3 +192,14 @@
 8. 스모크 [10] · CI
 9. 실험 M1 ~ M5 · 결과 문서
 10. ADR · OPERATION · 구성도 · 나머지 문서
+
+## 15. 계획 단계에서 고친 점 (2026-11-17, 계획 `docs/superpowers/plans/2026-11-17-p9a-metrics.md` 끝 "계획에서 정한 것")
+- **점검 보류의 예외** (§4-1 · §4-3 정정): 컨슈머 · 정리 작업의 송신 경로는 `SendGate` 가 `BankNotSentException("bank maintenance window")` 을 낸다 (코드 확인 — `BankMaintenanceException` 은 접수 · 1원인증 API 쪽). → 사유 enum 에 `MAINTENANCE` 를 둔다. api 의 `transfer.bank.result{outcome=maintenance}` 는 "안 보냄이고 지금이 점검 창" 으로 판정 (HTTP 로는 사유가 넘어오지 않는다).
+- **`transfer.dlt` 에 `kind` 태그** (`bank_not_connected | invalid_key | other`). 은행 연결 없음 DLT 는 재발행이 이어받으므로 `TransferDeadLettered` 에서 뺀다 (안 빼면 은행 장애 실험마다 거짓 알림).
+- **도메인 포트 `TransferObserver`** (modules/transfer, 의존 없음) — 저장 메서드가 성공을 돌려준 뒤에만 부른다. 일마감 대사의 확정은 청크 트랜잭션 안이라 세지 않는다. 은행 결과 자체는 DB 기록 성공과 무관하게 센다.
+- **알림 PromQL**: `GatewayNoLeader` · `BankDisconnected` 에 `or vector(0)` (게이트웨이 0대면 시계열이 없어 안 울린다), `ScrapeTargetDown` 은 15분 안에 한 번이라도 읽힌 Pod 만, `ApiHigh5xx` 는 `/actuator` 경로 제외.
+- **업무 Timer 는 SLO 버킷 고정**, 모든 태그 조합 Counter 를 기동 때 0 으로 등록 (`increase()` 첫 증가 손실 방지).
+- **`tran_no.remaining` = 현재 구간 + 미리 예약 구간** (실제로 쓸 수 있는 번호).
+- **스모크 [10]-4 이름**: Timer 라 `banktransfer_transfer_completed_seconds_count`.
+- **M5** 는 정적 overlay 대신 `app-config` ConfigMap 을 고쳐 재시작하고 끝나면 되돌린다 ("지금" 을 정적 파일에 적을 수 없다).
+- **Prometheus 자기 수집** 추가 (시계열 수 B2 측정용). 이미지: Prometheus v3.5.0 · Alertmanager v0.28.1 · Grafana 12.0.0 · busybox 1.37.0 (구현 때 `docker manifest inspect` 로 존재 확인).
