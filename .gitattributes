@@ -11,3 +11,5 @@ Dockerfile text eol=lf
 *.yaml text eol=lf
 *.env text eol=lf
 *.awk text eol=lf
+# Grafana 대시보드 JSON (P9a) — ConfigMap 으로 싣는 파일. Windows(autocrlf) 체크아웃에서도 LF
+infra/k8s/monitoring/**/*.json text eol=lf
