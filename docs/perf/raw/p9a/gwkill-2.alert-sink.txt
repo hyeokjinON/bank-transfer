@@ -1,0 +1,8 @@
+2026-11-17T03:49:47.489900134Z POST / HTTP/1.1
+2026-11-17T03:49:47.489920294Z Host: alert-sink.monitoring.svc.cluster.local:8080
+2026-11-17T03:49:47.489923470Z User-Agent: Alertmanager/0.28.1
+2026-11-17T03:49:47.489925955Z Content-Length: 626
+2026-11-17T03:49:47.489928009Z Content-Type: application/json
+2026-11-17T03:49:47.489929812Z 
+2026-11-17T03:49:47.489932197Z {"receiver":"alert-sink","status":"resolved","alerts":[{"status":"resolved","labels":{"alertname":"SmokeTest1794887317","severity":"info"},"annotations":{"summary":"k8s smoke test alert"},"startsAt":"2026-11-17T03:49:37Z","endsAt":"2026-11-17T03:49:37Z","generatorURL":"","fingerprint":"db951e70cfea6029"}],"groupLabels":{"alertname":"SmokeTest1794887317"},"commonLabels":{"alertname":"SmokeTest1794887317","severity":"info"},"commonAnnotations":{"summary":"k8s smoke test alert"},"externalURL":"http://alertmanager-795779b979-lwdnm:9093","version":"4","groupKey":"{}:{alertname=\"SmokeTest1794887317\"}","truncatedAlerts":0}
+2026-11-17T03:49:47.490223493Z 

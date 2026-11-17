@@ -1,0 +1,17 @@
+2026-11-17T04:10:49.891491489Z POST / HTTP/1.1
+2026-11-17T04:10:49.891514724Z Host: alert-sink.monitoring.svc.cluster.local:8080
+2026-11-17T04:10:49.891517389Z User-Agent: Alertmanager/0.28.1
+2026-11-17T04:10:49.891520004Z Content-Length: 626
+2026-11-17T04:10:49.891521918Z Content-Type: application/json
+2026-11-17T04:10:49.891523672Z 
+2026-11-17T04:10:49.891526106Z {"receiver":"alert-sink","status":"resolved","alerts":[{"status":"resolved","labels":{"alertname":"SmokeTest1794888579","severity":"info"},"annotations":{"summary":"k8s smoke test alert"},"startsAt":"2026-11-17T04:10:39Z","endsAt":"2026-11-17T04:10:39Z","generatorURL":"","fingerprint":"56a8143345247042"}],"groupLabels":{"alertname":"SmokeTest1794888579"},"commonLabels":{"alertname":"SmokeTest1794888579","severity":"info"},"commonAnnotations":{"summary":"k8s smoke test alert"},"externalURL":"http://alertmanager-795779b979-lwdnm:9093","version":"4","groupKey":"{}:{alertname=\"SmokeTest1794888579\"}","truncatedAlerts":0}
+2026-11-17T04:10:49.891817653Z 
+2026-11-17T04:11:23.631731950Z POST / HTTP/1.1
+2026-11-17T04:11:23.631749895Z Host: alert-sink.monitoring.svc.cluster.local:8080
+2026-11-17T04:11:23.631752029Z User-Agent: Alertmanager/0.28.1
+2026-11-17T04:11:23.631753712Z Content-Length: 946
+2026-11-17T04:11:23.631754874Z Content-Type: application/json
+2026-11-17T04:11:23.631755906Z 
+2026-11-17T04:11:23.631759313Z {"receiver":"alert-sink","status":"firing","alerts":[{"status":"firing","labels":{"alertname":"GatewayNoLeader","severity":"critical"},"annotations":{"runbook":"OPERATION.md §17-3 GatewayNoLeader","summary":"리더 게이트웨이가 30초 넘게 없다 (은행 송신 멈춤)"},"startsAt":"2026-11-17T04:11:08.775Z","endsAt":"0001-01-01T00:00:00Z","generatorURL":"http://prometheus-786484f4bc-h7z9n:9090/graph?g0.expr=%28sum%28banktransfer_gateway_leader%29+or+vector%280%29%29+%3D%3D+0\u0026g0.tab=1","fingerprint":"70fa6390d0856e10"}],"groupLabels":{"alertname":"GatewayNoLeader"},"commonLabels":{"alertname":"GatewayNoLeader","severity":"critical"},"commonAnnotations":{"runbook":"OPERATION.md §17-3 GatewayNoLeader","summary":"리더 게이트웨이가 30초 넘게 없다 (은행 송신 멈춤)"},"externalURL":"http://alertmanager-795779b979-lwdnm:9093","version":"4","groupKey":"{}:{alertname=\"GatewayNoLeader\"}","truncatedAlerts":0}
+2026-11-17T04:11:23.632001034Z 
+2026-11-17T04:12:23.629852522Z 

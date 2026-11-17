@@ -1,0 +1,2 @@
+2026-11-17T04:03:19.184678963Z Mock bank FEP started on port 9090. Accounts: {1002123456789=홍길동, 3333012345678=김카뱅, 1101234567890=이페이, 9990000000002=무응답}. Bank files: /data/bank-files. Response delay: 0ms. Single session: true, session idle timeout: 60s, unique tran no: true
+2026-11-17T04:03:39.808503567Z 13:03:39.808 [multiThreadIoEventLoopGroup-3-1] INFO io.github.hyeokjinon.banktransfer.mockbank.MockBankServer -- session opened sessions=1 max=1

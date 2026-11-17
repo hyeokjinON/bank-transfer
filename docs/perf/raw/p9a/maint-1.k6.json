@@ -1,0 +1,15 @@
+{
+  "run": "maint-1",
+  "rate": 20,
+  "duration": "780s",
+  "iterations": 15580,
+  "first_202": 3601,
+  "first_5xx": 11979,
+  "first_502": 0,
+  "first_neterr": 0,
+  "retried_requests": 35877,
+  "accepted_keys": 3661,
+  "gave_up_keys": 11919,
+  "p95_ms": 12.150307399999997,
+  "max_ms": 262.667274
+}
