@@ -3,6 +3,7 @@ package io.github.hyeokjinon.banktransfer.gatewayapp.leader
 import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankNotSentException
+import io.github.hyeokjinon.banktransfer.gateway.NotSentReason
 import io.github.hyeokjinon.banktransfer.gateway.TranNoSource
 import io.github.hyeokjinon.banktransfer.protocol.InquiryResponse
 import io.github.hyeokjinon.banktransfer.protocol.NameInquiryResponse
@@ -79,8 +80,8 @@ class BankConnectionOwner(
     private fun <T> withClient(call: (BankGatewayClient) -> CompletableFuture<T>): CompletableFuture<T> {
         inFlight.incrementAndGet()   // 먼저 올린다 — stepDown 이 steppingDown 을 세운 뒤 이 값을 보면, 이 요청의 대기 표 등록까지 기다린다
         try {
-            if (steppingDown) return CompletableFuture.failedFuture(BankNotSentException("gateway is stepping down"))
-            val c = client ?: return CompletableFuture.failedFuture(BankNotSentException("not the bank connection leader"))
+            if (steppingDown) return CompletableFuture.failedFuture(BankNotSentException("gateway is stepping down", reason = NotSentReason.STEPPING_DOWN))
+            val c = client ?: return CompletableFuture.failedFuture(BankNotSentException("not the bank connection leader", reason = NotSentReason.NOT_LEADER))
             return call(c)   // 전문은 send 가 돌아오기 전에 대기 표에 오른다
         } finally {
             inFlight.decrementAndGet()

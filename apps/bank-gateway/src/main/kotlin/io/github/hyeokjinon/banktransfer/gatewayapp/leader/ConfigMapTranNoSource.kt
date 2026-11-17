@@ -4,6 +4,7 @@ import io.fabric8.kubernetes.api.model.ConfigMapBuilder
 import io.fabric8.kubernetes.client.KubernetesClient
 import io.fabric8.kubernetes.client.KubernetesClientException
 import io.github.hyeokjinon.banktransfer.gateway.BankNotSentException
+import io.github.hyeokjinon.banktransfer.gateway.NotSentReason
 import io.github.hyeokjinon.banktransfer.gateway.TranNoSource
 import io.github.hyeokjinon.banktransfer.protocol.Header
 import org.slf4j.LoggerFactory
@@ -67,7 +68,7 @@ class ConfigMapTranNoSource(
             upcoming = null
             if (block == null) {
                 reserveAsync(today)
-                throw BankNotSentException("no tran no block reserved for $today yet")
+                throw BankNotSentException("no tran no block reserved for $today yet", reason = NotSentReason.NO_TRAN_NO)
             }
         }
         val number = block.next++
@@ -114,14 +115,17 @@ class ConfigMapTranNoSource(
             val storedTo = existing.data?.get(RESERVED_TO)?.toLongOrNull()
             // 깨진 기록은 덮지 않는다 — 덮으면 번호를 다시 낼 수 있다. 운영자가 고친다.
             if (storedDate == null || !DATE_FORMAT.matches(storedDate) || storedTo == null || storedTo < 0) {
-                throw BankNotSentException("tran no record is corrupted (date=$storedDate, reservedTo=${existing.data?.get(RESERVED_TO)}) — operator must fix $name")
+                throw BankNotSentException(
+                    "tran no record is corrupted (date=$storedDate, reservedTo=${existing.data?.get(RESERVED_TO)}) — operator must fix $name",
+                    reason = NotSentReason.TRAN_NO_STORE,
+                )
             }
             // yyyyMMdd 는 문자열 순서 = 날짜 순서. 저장된 날짜가 더 새로우면 시계가 늦은 예약자 — 되돌리지 않는다.
-            if (storedDate > date) throw BankNotSentException("stored date $storedDate is newer than requested $date — not reserving")
+            if (storedDate > date) throw BankNotSentException("stored date $storedDate is newer than requested $date — not reserving", reason = NotSentReason.TRAN_NO_STORE)
             val reservedTo = if (storedDate == date) storedTo else 0L
             val start = reservedTo + 1
             val last = start + blockSize - 1
-            if (last > Header.MAX_TRAN_NO) throw BankNotSentException("tran no exhausted for $date (reservedTo=$reservedTo)")
+            if (last > Header.MAX_TRAN_NO) throw BankNotSentException("tran no exhausted for $date (reservedTo=$reservedTo)", reason = NotSentReason.TRAN_NO_STORE)
             existing.data = mapOf(DATE to date, RESERVED_TO to "$last")   // resourceVersion 은 읽은 값 그대로 — 그 사이 바뀌었으면 409
             try {
                 configMaps.resource(existing).update()
@@ -130,7 +134,7 @@ class ConfigMapTranNoSource(
                 if (e.code != CONFLICT) throw e
             }
         }
-        throw BankNotSentException("tran no reservation conflicted $maxAttempts times")
+        throw BankNotSentException("tran no reservation conflicted $maxAttempts times", reason = NotSentReason.TRAN_NO_STORE)
     }
 
     private fun today(): String = LocalDate.ofInstant(clock.instant(), KST).format(DateTimeFormatter.BASIC_ISO_DATE)

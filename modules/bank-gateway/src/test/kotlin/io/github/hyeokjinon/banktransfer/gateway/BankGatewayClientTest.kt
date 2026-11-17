@@ -95,7 +95,8 @@ class BankGatewayClientTest {
 
         val failure = client.inquireName("090", "1").awaitFailure()
         assertIs<BankUnavailableException>(failure)
-        assertIs<BankNotSentException>(failure)   // 은행에 가지 않았다 → 다시 보내도 안전
+        val notSent = assertIs<BankNotSentException>(failure)   // 은행에 가지 않았다 → 다시 보내도 안전
+        assertEquals(NotSentReason.DISCONNECTED, notSent.reason)
     }
 
     @Test
@@ -206,7 +207,7 @@ class BankGatewayClientTest {
 
         val error = client.transfer("090", "1002123456789", 1_000, "점검", "T261028MAINTENANCE01").awaitFailure()
 
-        assertIs<BankNotSentException>(error)
+        assertEquals(NotSentReason.MAINTENANCE, assertIs<BankNotSentException>(error).reason)
         assertEquals("bank maintenance window", error.message)
         assertFalse(bank.hasProcessed("T261028MAINTENANCE01"))
         val polls = bank.pollCount
@@ -269,19 +270,19 @@ class BankGatewayClientTest {
         assertEquals(ResponseCodes.OK, first.transfer("090", "1002123456789", 1_000, "m", "T261116DUPCLIENT001").get(3, TimeUnit.SECONDS).header.responseCode)
         val error = second.transfer("090", "1002123456789", 1_000, "m", "T261116DUPCLIENT002").awaitFailure()
 
-        assertIs<BankNotSentException>(error)
+        assertEquals(NotSentReason.DUPLICATE_TRAN_NO, assertIs<BankNotSentException>(error).reason)
         assertEquals(1, bank.depositsOf("1002123456789").size)
     }
 
     @Test
     fun `번호를 못 받으면 보내지 않고 future 가 BankNotSentException (동기로 던지지 않는다)`() {
         val bank = MockBankServer().start().closeLater()
-        val client = client(bank.boundPort, tranNo = { throw BankNotSentException("no tran no block") }).start()
+        val client = client(bank.boundPort, tranNo = { throw BankNotSentException("no tran no block", reason = NotSentReason.NO_TRAN_NO) }).start()
         waitUntil { client.isConnected }
 
         val future = client.transfer("090", "1002123456789", 1_000, "m", "T261116NOTRANNO0001")
 
-        assertIs<BankNotSentException>(future.awaitFailure())
+        assertEquals(NotSentReason.NO_TRAN_NO, assertIs<BankNotSentException>(future.awaitFailure()).reason)   // 공급원이 붙인 사유 그대로
         assertEquals(0, bank.depositsOf("1002123456789").size)
     }
 
@@ -294,6 +295,7 @@ class BankGatewayClientTest {
         val error = client.transfer("090", "1002123456789", 1_000, "m", "T261116BADTRANNO001").awaitFailure()
 
         assertIs<BankNotSentException>(error)
+        assertEquals(NotSentReason.TRAN_NO_STORE, (error as BankNotSentException).reason)
         assertTrue(error.message!!.contains("tran no source failed: boom"))
         assertEquals(0, bank.depositsOf("1002123456789").size)
     }

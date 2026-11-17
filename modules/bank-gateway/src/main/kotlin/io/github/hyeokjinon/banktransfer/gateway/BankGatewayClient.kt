@@ -60,8 +60,50 @@ class BankTimeoutException(val tranNo: Long, val timeout: Duration) :
 /** 은행과 통신할 수 없다. 보낸 뒤에 끊긴 경우도 포함한다 — 그때는 은행이 요청을 받았을 수 있다. */
 open class BankUnavailableException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
-/** 전문을 소켓에 쓰기 전에 실패했다 (연결 없음). 은행에 "확실히" 가지 않았으므로 다시 보내도 안전하다. */
-class BankNotSentException(message: String, cause: Throwable? = null) : BankUnavailableException(message, cause)
+/**
+ * 전문을 소켓에 쓰기 전에 실패했다 (연결 없음). 은행에 "확실히" 가지 않았으므로 다시 보내도 안전하다.
+ * [reason] = 왜 안 보냈나 (P9a 지표 `gateway.not_sent{reason}` — 메시지 문자열로 가르지 않는다, 스펙 위험 A5).
+ */
+class BankNotSentException(
+    message: String,
+    cause: Throwable? = null,
+    val reason: NotSentReason = NotSentReason.OTHER,
+) : BankUnavailableException(message, cause)
+
+/**
+ * "안 보냄" 의 사유 (P9a 스펙 §4-3). 던지는 곳마다 하나를 넣는다. 라벨 값은 소문자 [tag].
+ * 점검 시간 보류는 [MAINTENANCE] — 컨슈머 · 정리 작업의 은행 호출은 SendGate 가 막아 이 예외로 끝난다
+ * (웹 접수의 점검 503 은 BankMaintenanceException 으로 따로다 — BankMaintenanceGuard).
+ */
+enum class NotSentReason {
+    /** 리더가 아니다 (P8-3b — 대기자 · 임기 사이). */
+    NOT_LEADER,
+
+    /** 정상 교대 중 — 새 요청 거절 단계. */
+    STEPPING_DOWN,
+
+    /** 전문번호 구간을 아직 예약하지 못했다 (임기 시작 직후 · 예약 실패 · API 서버 단절). */
+    NO_TRAN_NO,
+
+    /** 은행 회선이 없다. */
+    DISCONNECTED,
+
+    /** 은행이 3001 (전문번호 중복 — 처리 안 함, v0.4). */
+    DUPLICATE_TRAN_NO,
+
+    /** 전문번호 저장소 문제 — 깨진 기록 · 날짜 역전 · 하루 한도 소진 · 예약 충돌 반복 · 공급원의 예기치 못한 예외. */
+    TRAN_NO_STORE,
+
+    /** 호출자 쪽: 게이트웨이 앱에 연결하지 못했다 (modules/bank-gateway-http). */
+    GATEWAY_UNREACHABLE,
+
+    /** 점검 시간 — SendGate 가 닫혀 있다 (P5-1). */
+    MAINTENANCE,
+
+    OTHER;
+
+    val tag: String get() = name.lowercase()
+}
 
 /**
  * 지금 은행에 보내도 되는지 (P5-1, 점검 시간). 닫혀 있으면 이유를 돌려준다 — 그 요청은 "연결 없음" 과 같이 [BankNotSentException] 으로 끝난다:
@@ -147,19 +189,22 @@ class BankGatewayClient(
      * 번호 발급 실패(BankNotSentException)도 동기로 던지지 않고 future 에 담는다 — 호출자는 실패를 한 경로로만 받는다.
      */
     private fun request(build: () -> BankMessage): CompletableFuture<BankMessage> {
-        notSendableReason()?.let { return CompletableFuture.failedFuture(BankNotSentException(it)) }
+        notSendable()?.let { return CompletableFuture.failedFuture(it) }
         val message = try {
             build()
         } catch (e: BankNotSentException) {
-            return CompletableFuture.failedFuture(e)
+            return CompletableFuture.failedFuture(e)   // 번호 공급원이 붙인 사유 그대로 (NO_TRAN_NO · TRAN_NO_STORE)
         } catch (e: RuntimeException) {   // 번호 공급원의 예기치 못한 실패 — 아직 아무것도 쓰지 않았으므로 "안 보냄" 이 맞다
-            return CompletableFuture.failedFuture(BankNotSentException("tran no source failed: ${e.message}", e))
+            return CompletableFuture.failedFuture(BankNotSentException("tran no source failed: ${e.message}", e, NotSentReason.TRAN_NO_STORE))
         }
         return send(message)
     }
 
-    private fun notSendableReason(): String? =
-        sendGate.closedReason() ?: if (channel?.isActive == true) null else "bank channel is not connected"
+    /** 지금 보낼 수 없으면 사유를 담은 예외. 점검(보내기 문)을 먼저 본다 — 점검 중 끊김은 점검으로 센다. */
+    private fun notSendable(): BankNotSentException? {
+        sendGate.closedReason()?.let { return BankNotSentException(it, reason = NotSentReason.MAINTENANCE) }
+        return if (channel?.isActive == true) null else BankNotSentException("bank channel is not connected", reason = NotSentReason.DISCONNECTED)
+    }
 
     /**
      * 요청을 보내고 즉시 future 를 돌려준다.
@@ -169,10 +214,10 @@ class BankGatewayClient(
      * 응답코드 `3001`(전문번호 중복, v0.4)은 은행이 처리하지 않았다는 뜻이라 BankNotSentException 이다 (P8-3b 결정 15).
      */
     fun send(request: BankMessage): CompletableFuture<BankMessage> {
-        sendGate.closedReason()?.let { return CompletableFuture.failedFuture(BankNotSentException(it)) }
+        sendGate.closedReason()?.let { return CompletableFuture.failedFuture(BankNotSentException(it, reason = NotSentReason.MAINTENANCE)) }
         val ch = channel
         if (ch == null || !ch.isActive) {
-            return CompletableFuture.failedFuture(BankNotSentException("bank channel is not connected"))
+            return CompletableFuture.failedFuture(BankNotSentException("bank channel is not connected", reason = NotSentReason.DISCONNECTED))
         }
         val tranNo = request.header.tranNo
         val future = CompletableFuture<BankMessage>()
@@ -188,7 +233,10 @@ class BankGatewayClient(
                 pending.remove(tranNo, future)
                 when (val cause = error?.unwrap()) {
                     null -> if (response.header.responseCode == ResponseCodes.DUPLICATE_TRAN_NO) {
-                        throw BankNotSentException("bank rejected duplicate tranNo $tranNo (${ResponseCodes.DUPLICATE_TRAN_NO}) — not processed")
+                        throw BankNotSentException(
+                            "bank rejected duplicate tranNo $tranNo (${ResponseCodes.DUPLICATE_TRAN_NO}) — not processed",
+                            reason = NotSentReason.DUPLICATE_TRAN_NO,
+                        )
                     } else {
                         response
                     }
