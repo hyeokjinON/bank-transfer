@@ -43,22 +43,32 @@ for t in api bank-gateway mock-bank; do
   kindc load docker-image "bank-transfer/$t:$TAG" --name "$CLUSTER_NAME"
 done
 
-echo "[5/7] Secret db-credentials (infra/.env — 저장소에 비밀을 커밋하지 않는다)"
+echo "[5/7] Secret db-credentials · grafana-admin (비밀은 저장소에 커밋하지 않는다)"
 ENV_FILE=infra/.env
 [ -f "$ENV_FILE" ] || ENV_FILE=infra/.env.example
 mkdir -p build/k8s
 SECRET_ENV=$(mktemp build/k8s/db-credentials.XXXXXX)
-trap 'rm -f "$SECRET_ENV"' EXIT
+trap 'rm -f "$SECRET_ENV" "${GF_PW:-}"' EXIT
 grep -E '^(MYSQL_DATABASE|MYSQL_USER|MYSQL_PASSWORD|MYSQL_ROOT_PASSWORD)=' "$ENV_FILE" | tr -d '\r' > "$SECRET_ENV"
 [ "$(wc -l < "$SECRET_ENV" | tr -d ' ')" = 4 ] || { echo "$ENV_FILE 에 MYSQL_DATABASE · MYSQL_USER · MYSQL_PASSWORD · MYSQL_ROOT_PASSWORD 가 모두 있어야 한다" >&2; exit 1; }
 k create secret generic db-credentials --from-env-file="$SECRET_ENV" --dry-run=client -o yaml | ka apply -f - >/dev/null
 rm -f "$SECRET_ENV"
+# P9a Grafana 관리자 비밀번호: 처음 한 번 임의로 만들어 Secret 에만 둔다 (출력 · 커밋하지 않는다). 다시 불러도 바꾸지 않는다
+if ! ka -n monitoring get secret grafana-admin >/dev/null 2>&1; then
+  GF_PW=$(mktemp build/k8s/grafana-admin.XXXXXX)
+  head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24 > "$GF_PW"
+  ka -n monitoring create secret generic grafana-admin --from-file=password="$GF_PW" >/dev/null
+  rm -f "$GF_PW"
+fi
 
 echo "[6/7] 매니페스트 (overlays/$OVERLAY)"
 apply_overlay "$OVERLAY" "$TAG"
 
 echo "[7/7] 준비 대기"
 wait_ready
+wait_monitoring
 k wait gateways.gateway.networking.k8s.io/bank-transfer --for=condition=Programmed --timeout=180s
 ka -n envoy-gateway-system wait pod -l "gateway.envoyproxy.io/owning-gateway-name=bank-transfer" --for=condition=Ready --timeout=180s
 echo "올라왔다 (태그 $TAG) — 확인: bash infra/k8s/smoke.sh · 입구 http://127.0.0.1:8000"
+echo "관측 (P9a, OPERATION §17): kubectl --context $CTX -n monitoring port-forward svc/grafana 3000:3000 → http://127.0.0.1:3000 (익명 보기)"
+echo "  Prometheus svc/prometheus 9090:9090 · Alertmanager svc/alertmanager 9093:9093 · Grafana 관리자 비밀번호: kubectl --context $CTX -n monitoring get secret grafana-admin -o jsonpath='{.data.password}' | base64 -d"

@@ -24,6 +24,10 @@ spec:
   template:
     metadata:
       labels: {app: api}
+      annotations:   # P9a: Prometheus 가 이 Pod 를 직접 수집 (5초). 입구(Envoy)로는 404 — HTTPRoute 허용 목록. 처음 넣을 때 롤링 1회 (위험 B8)
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /actuator/prometheus
     spec:
       enableServiceLinks: false   # redis Service 가 REDIS_PORT=tcp://… 를 넣으면 redis 주소가 깨진다 (${REDIS_PORT:6379})
       terminationGracePeriodSeconds: 45   # preStop 10 + graceful 단계 20 + 여유 (스펙 §6-2). 넘으면 SIGKILL

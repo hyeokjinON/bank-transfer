@@ -105,3 +105,24 @@ spec:
       ports:
         - {protocol: TCP, port: 9092}
         - {protocol: TCP, port: 9093}
+---
+# api · bank-gateway ← Prometheus (monitoring) 만 — 지표 수집 (P9a). 게이트웨이 8082 는 송신 API 와 같은 포트라 Prometheus 도 송신 API 에 닿는다:
+# 받아들인 위험 (B5, ADR-0020) — Prometheus Pod 하나만 허용하고, 관리 포트 분리는 다음
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: metrics-from-prometheus
+spec:
+  podSelector:
+    matchExpressions:
+      - {key: app, operator: In, values: [api, bank-gateway]}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: monitoring}
+          podSelector:
+            matchLabels: {app: prometheus}
+      ports:
+        - {protocol: TCP, port: 8080}
+        - {protocol: TCP, port: 8082}

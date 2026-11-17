@@ -1,0 +1,62 @@
+# P9a Prometheus (스펙 §6, 결정 D4) — Operator 없이 Deployment 1 + 설정 ConfigMap. 보관 2일 · emptyDir (Pod 가 바뀌면 지표도 사라진다 — 실험 · 학습용).
+# 제어 노드 고정: 워커를 죽이는 실험에서 관측 쪽은 살아 있다. 권한은 bank-transfer namespace 의 Pod 읽기만 (base/rbac-prometheus.yaml).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  labels: {app: prometheus}
+spec:
+  selector: {app: prometheus}
+  ports:
+    - {name: http, port: 9090}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+spec:
+  replicas: 1
+  strategy: {type: Recreate}   # 한 대 · emptyDir — 겹칠 이유가 없다
+  selector:
+    matchLabels: {app: prometheus}
+  template:
+    metadata:
+      labels: {app: prometheus}
+    spec:
+      serviceAccountName: prometheus
+      nodeSelector: {bank-transfer/role: infra}
+      tolerations:
+        - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+      securityContext: {runAsUser: 65534, runAsGroup: 65534, runAsNonRoot: true, fsGroup: 65534}
+      containers:
+        - name: prometheus
+          image: prom/prometheus   # 태그 = versions.env PROMETHEUS_VERSION (apply_overlay)
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=2d
+          ports:
+            - {name: http, containerPort: 9090}
+          readinessProbe:
+            httpGet: {path: /-/ready, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /-/healthy, port: http}
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests: {memory: 256Mi, cpu: 100m}
+            limits: {memory: 512Mi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/prometheus}
+            - {name: data, mountPath: /prometheus}
+      volumes:
+        - name: config
+          configMap: {name: prometheus-config}
+        - name: data
+          emptyDir: {sizeLimit: 2Gi}

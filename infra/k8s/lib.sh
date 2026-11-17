@@ -50,6 +50,10 @@ images:
   - {name: bank-transfer/api, newTag: "$2"}
   - {name: bank-transfer/bank-gateway, newTag: "$2"}
   - {name: bank-transfer/mock-bank, newTag: "$2"}
+  - {name: prom/prometheus, newTag: "$PROMETHEUS_VERSION"}
+  - {name: prom/alertmanager, newTag: "$ALERTMANAGER_VERSION"}
+  - {name: grafana/grafana, newTag: "$GRAFANA_VERSION"}
+  - {name: busybox, newTag: "$BUSYBOX_VERSION"}
 YAML
   ka apply -k "$dir"
 }
@@ -75,3 +79,22 @@ np_probe() {   # $1 = 호스트, $2 = 포트
   k run "np-probe-$RANDOM" --image="$CURL_IMAGE" --restart=Never --rm -i --quiet --command -- \
     sh -c "curl -s -o /dev/null --connect-timeout 3 -m 4 -w '%{time_connect}' telnet://$1:$2; echo \" \$?\"" </dev/null 2>/dev/null | tr -d '\r' | tail -1
 }
+
+# --- P9a 관측 (monitoring namespace) ---
+km() { MSYS_NO_PATHCONV=1 kubectl --context "$CTX" -n monitoring "$@"; }
+wait_monitoring() { local dpl; for dpl in prometheus alertmanager alert-sink grafana; do km rollout status "deploy/$dpl" --timeout=300s; done; }
+# PromQL 을 URL 에 넣는다 (PromQL 은 ASCII — jq · python 없이)
+urlenc() {
+  local s=$1 out= c i
+  for ((i = 0; i < ${#s}; i++)); do
+    c=${s:i:1}
+    case "$c" in [a-zA-Z0-9.~_-]) out+=$c ;; *) out+=$(printf '%%%02X' "'$c") ;; esac
+  done
+  printf '%s' "$out"
+}
+# Prometheus HTTP API — Prometheus Pod 안의 busybox wget 으로 (PC 포트를 열지 않는다)
+prom_get() { km exec deploy/prometheus -- wget -qO- "http://127.0.0.1:9090$1"; }
+prom_query() { prom_get "/api/v1/query?query=$(urlenc "$1")${2:+&time=$2}"; }   # $2 = epoch 초 (없으면 지금)
+prom_range() { prom_get "/api/v1/query_range?query=$(urlenc "$1")&start=$2&end=$3&step=${4:-5}"; }
+# 즉시 질의 결과의 첫 값 (시계열이 없으면 빈 줄)
+prom_value() { prom_query "$1" "${2:-}" | { grep -o '"value":\[[^]]*\]' || true; } | head -1 | sed -E 's/.*,"([^"]*)"\]$/\1/'; }

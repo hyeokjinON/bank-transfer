@@ -44,6 +44,8 @@ spec:
 ---
 # 재시도를 넣지 않는다 (retry 필드 · BackendTrafficPolicy 금지) — 이미 보낸 POST 를 다시 보내지 않는다.
 # 출금은 멱등키로도 막히지만 1원인증 요청에는 키가 없다 (P8-2 nginx non_idempotent 금지와 같은 규칙)
+# P9a 허용 목록 (결정 D6): 이 경로만 api 로 넘기고 나머지는 Envoy 404 — /actuator/prometheus 같은 관리 경로를 PC 입구에 내지 않는다.
+# 관리 포트를 따로 두는 것(management.server.port)은 다음 (스펙 §12)
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -52,6 +54,11 @@ spec:
   parentRefs:
     - name: bank-transfer
   rules:
-    - backendRefs:
+    - matches:
+        - path: {type: PathPrefix, value: /api/v1}
+        - path: {type: PathPrefix, value: /admin}
+        - path: {type: Exact, value: /actuator/health}
+        - path: {type: Exact, value: /actuator/info}
+      backendRefs:
         - name: api
           port: 8080
