@@ -26,9 +26,11 @@ import java.util.UUID
 class TransferRequestedListener(
     /** 사람이 봐야 하는 경고를 알린다 (P5-1). 기본은 아무것도 하지 않는다 — 테스트 · 조립 전 기본값. 앞에 두어 `TransferRequestedListener { … }` 가 그대로 컴파일된다. */
     alerts: AlertNotifier = AlertNotifier { },
+    /** DLT 지표 (P9a). 기본은 아무것도 하지 않는다. */
+    onDeadLetter: (DltKind) -> Unit = {},
     private val process: (UUID) -> ProcessResult,
 ) {
-    private val handling = TransferRequestedHandling(alerts, LoggerFactory.getLogger(javaClass))
+    private val handling = TransferRequestedHandling(alerts, LoggerFactory.getLogger(javaClass), onDeadLetter)
 
     @RetryableTopic(
         attempts = TransferListenerSettings.ATTEMPTS,

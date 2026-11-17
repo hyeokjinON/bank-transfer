@@ -244,4 +244,17 @@ class TransferRequestedListenerTest {
             "Method [public void io.github.hyeokjinon.banktransfer.api.messaging.TransferRequestedListener.on(" +
             "org.apache.kafka.clients.consumer.ConsumerRecord,org.springframework.kafka.support.Acknowledgment)]\n" +
             "Bean [io.github.hyeokjinon.banktransfer.api.messaging.TransferRequestedListener@1a2b3c]; " + rootCause
+
+    @Test
+    fun `DLT - 이유마다 onDeadLetter 를 한 번씩 부른다 (P9a 지표 transfer_dlt kind)`() {
+        val kinds = mutableListOf<DltKind>()
+        val listener = TransferRequestedListener(onDeadLetter = { kinds += it }) { ProcessResult.COMPLETED }
+        val id = UUID.randomUUID().toString()
+
+        listener.onDlt(dltRecord(id, RetryLaterException::class.java.name), CountingAck())
+        listener.onDlt(dltRecord("not-a-uuid", InvalidTransferKeyException::class.java.name), CountingAck())
+        listener.onDlt(dltRecord(id, "org.springframework.dao.DataAccessResourceFailureException", realDltMessage("db down")), CountingAck())
+
+        assertEquals(listOf(DltKind.BANK_NOT_CONNECTED, DltKind.INVALID_KEY, DltKind.OTHER), kinds)
+    }
 }

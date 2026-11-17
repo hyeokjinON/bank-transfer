@@ -1,5 +1,6 @@
 package io.github.hyeokjinon.banktransfer.api.messaging
 
+import io.github.hyeokjinon.banktransfer.api.metrics.TransferMetrics
 import org.slf4j.LoggerFactory
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.jdbc.core.JdbcTemplate
@@ -68,16 +69,17 @@ SELECT id, aggregate_id, JSON_SET(payload, '$.eventId', id) AS message
     }
 }
 
-/** 스케줄 실행은 따로 둔다: 테스트는 이 빈을 끄고 OutboxRelay.publishPending() 을 직접 부른다. */
-class OutboxRelayScheduler(private val relay: OutboxRelay) {
+/** 스케줄 실행은 따로 둔다: 테스트는 이 빈을 끄고 OutboxRelay.publishPending() 을 직접 부른다. [publish] = relay::publishPending. */
+class OutboxRelayScheduler(private val publish: () -> Int, private val metrics: TransferMetrics) {
     private val log = LoggerFactory.getLogger(javaClass)
 
     @Scheduled(fixedDelayString = "\${transfer.outbox.relay.interval-ms:500}")
     fun run() {
         try {
-            relay.publishPending()
+            metrics.outboxPublished(publish())   // 돌아왔다 = 발행기 트랜잭션이 커밋됐다 (P9a - 커밋 뒤에만 센다)
         } catch (e: Exception) {
             // 브로커 장애 등. 트랜잭션은 롤백됐고 published_at 도 그대로라 다음 주기에 다시 보낸다.
+            metrics.outboxFailed()
             log.warn("outbox relay failed, retrying next round: {}", e.message)
         }
     }

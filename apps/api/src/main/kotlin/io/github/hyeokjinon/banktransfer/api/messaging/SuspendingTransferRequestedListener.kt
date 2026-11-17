@@ -48,8 +48,10 @@ class SuspendingTransferRequestedListener(
     /** DB · 알림처럼 스레드를 막는 호출을 돌릴 곳. 기본 Dispatchers.IO, 테스트는 이름 붙인 스레드로 바꿔 어디서 돌았는지 본다. */
     private val db: CoroutineDispatcher = Dispatchers.IO,
     alerts: AlertNotifier = AlertNotifier { },
+    /** DLT 지표 (P9a). */
+    onDeadLetter: (DltKind) -> Unit = {},
 ) {
-    private val handling = TransferRequestedHandling(alerts, LoggerFactory.getLogger(javaClass))
+    private val handling = TransferRequestedHandling(alerts, LoggerFactory.getLogger(javaClass), onDeadLetter)
 
     @RetryableTopic(
         attempts = TransferListenerSettings.ATTEMPTS,

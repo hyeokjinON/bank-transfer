@@ -1,8 +1,10 @@
 package io.github.hyeokjinon.banktransfer.api.messaging
 
 import io.github.hyeokjinon.banktransfer.api.alert.AlertNotifier
+import io.github.hyeokjinon.banktransfer.api.metrics.TransferMetrics
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
+import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceWindow
 import io.github.hyeokjinon.banktransfer.transfer.BankTransferPort
 import io.github.hyeokjinon.banktransfer.transfer.TransferProcessor
 import io.github.hyeokjinon.banktransfer.transfer.TransferStore
@@ -10,7 +12,11 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.ApplicationContext
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import java.lang.reflect.Proxy
+import java.time.Clock
+import java.time.LocalTime
+import java.time.ZoneId
 import java.util.function.Supplier
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -33,6 +39,9 @@ class ConsumerConfigurationTest {
         .withBean(TransferProcessor::class.java, Supplier { TransferProcessor(unusedStore, BankTransferPort { _, _, _, _, _ -> error("not used") }) })
         .withBean(BankGatewayClient::class.java, Supplier { BankGatewayClient(BankGatewayConfig(host = "localhost", port = 1)) })
         .withBean(AlertNotifier::class.java, Supplier { AlertNotifier { } })
+        .withBean(TransferMetrics::class.java, Supplier {
+            TransferMetrics(SimpleMeterRegistry(), BankMaintenanceWindow(LocalTime.of(23, 50), LocalTime.of(0, 10), ZoneId.of("Asia/Seoul")), Clock.systemUTC())
+        })
 
     private fun ApplicationContext.listenerCounts() =
         getBeanNamesForType(TransferRequestedListener::class.java).size to getBeanNamesForType(SuspendingTransferRequestedListener::class.java).size
