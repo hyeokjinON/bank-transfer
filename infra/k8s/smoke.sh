@@ -212,11 +212,12 @@ RULES=$(prom_get /api/v1/rules | { grep -o '"type":"alerting"' || true; } | wc -
 [ "$RULES" = 11 ] || fail "적재된 알림 규칙이 ${RULES}개 (11 이어야 — kubectl -n monitoring logs deploy/prometheus)"
 # 롤아웃 직후엔 ScrapeTargetDown · MetricsMissing 이 잠깐 떴다 사라질 수 있다 — 최대 60초 기다린 뒤에도 울리면 실패 (시험 알림은 아래에서 넣으므로 여기엔 없다)
 for _ in $(seq 30); do
-  FIRING=$(prom_value 'count(ALERTS{alertstate="firing",alertname!~"SmokeTest.*"})')
-  [ -z "$FIRING" ] && break
+  FIRING=$(prom_value 'count(ALERTS{alertstate="firing",alertname!~"SmokeTest.*"}) or vector(0)')   # 0 = 울림 없음, 빈 값 = 질의 실패
+  [ "$FIRING" = 0 ] && break
   sleep 2
 done
-[ -z "$FIRING" ] || fail "울리는 알림이 있다 ($FIRING개): $(prom_query 'ALERTS{alertstate="firing",alertname!~"SmokeTest.*"}' | { grep -o '"alertname":"[^"]*"' || true; } | sort -u | tr '\n' ' ') (OPERATION §17-3)"
+[ -n "$FIRING" ] || fail "울리는 알림 질의 실패 (kubectl -n monitoring logs deploy/prometheus)"
+[ "$FIRING" = 0 ] || fail "울리는 알림이 있다 ($FIRING개): $(prom_query 'ALERTS{alertstate="firing",alertname!~"SmokeTest.*"}' | { grep -o '"alertname":"[^"]*"' || true; } | sort -u | tr '\n' ' ') (OPERATION §17-3)"
 
 for uid in bt-transfer-flow bt-gateway-jvm; do
   km exec deploy/prometheus -- wget -qO- "http://grafana.monitoring.svc.cluster.local:3000/api/dashboards/uid/$uid" | grep -q "\"uid\":\"$uid\"" \
