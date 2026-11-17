@@ -1,0 +1,23 @@
+$kind: http-request
+name: 8-1 충전 10만 원 → 200
+method: POST
+url: '{{k8sUrl}}/api/v1/wallet/deposits'
+order: 1000
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: X-User-Id
+    value: '{{userId}}'
+body:
+  type: json
+  content: |-
+    {
+      "amount": 100000
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("200 충전 (잔고 " + (pm.response.json().balance) + ")", () => {
+        pm.response.to.have.status(200);
+      });

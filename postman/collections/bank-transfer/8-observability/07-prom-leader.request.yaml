@@ -1,0 +1,17 @@
+$kind: http-request
+name: '8-7 Prometheus 게이트웨이 리더 수 → 1'
+method: GET
+url: '{{promUrl}}/api/v1/query?query=sum(banktransfer_gateway_leader)'
+order: 7000
+queryParams:
+  - key: query
+    value: 'sum(banktransfer_gateway_leader)'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // port-forward(9090) 창이 꺼져 있으면 연결 오류 — 폴더 설명의 명령을 다시 실행
+      const r = pm.response.json();
+      const v = r.data.result.length ? r.data.result[0].value[1] : "(시계열 없음)";
+      pm.test("Prometheus 응답 success — 값 " + v, () => pm.expect(r.status).to.eql("success"));
+      pm.test("값 = 1", () => pm.expect(v).to.eql("1"));

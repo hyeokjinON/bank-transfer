@@ -1,0 +1,14 @@
+$kind: http-request
+name: 8-9 Prometheus 지금 울리는 알림 → 평소 없음 · 은행 끊고 약 1분 뒤 BankDisconnected
+method: GET
+url: '{{promUrl}}/api/v1/alerts'
+order: 9000
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // state: pending = 조건은 맞고 for(30초 등) 대기 중, firing = 울림 → Alertmanager → alert-sink 로 간다
+      const alerts = pm.response.json().data.alerts;
+      const list = alerts.map(a => a.labels.alertname + "(" + a.state + ")");
+      console.log(list.length ? list.join(", ") : "울리는 알림 없음");
+      pm.test("알림: " + (list.length ? list.join(", ") : "없음"), () => pm.response.to.have.status(200));

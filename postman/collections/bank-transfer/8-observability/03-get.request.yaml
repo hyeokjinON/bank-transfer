@@ -1,0 +1,15 @@
+$kind: http-request
+name: 8-3 그 출금 조회 → COMPLETED (몇 초 뒤 · 은행 끊김 중이면 RECEIVED)
+method: GET
+url: '{{k8sUrl}}/api/v1/transfers/{{p9aTransferId}}'
+order: 3000
+headers:
+  - key: X-User-Id
+    value: '{{userId}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      const s = pm.response.json().status;
+      pm.test("200 (지금 상태 " + s + ")", () => pm.response.to.have.status(200));
+      pm.test("COMPLETED — 아니면 몇 초 뒤 다시 Send", () => pm.expect(s).to.eql("COMPLETED"));

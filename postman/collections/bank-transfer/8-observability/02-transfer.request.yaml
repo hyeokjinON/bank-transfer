@@ -1,0 +1,31 @@
+$kind: http-request
+name: 8-2 출금 3만 원 → 202 RECEIVED (id 저장)
+method: POST
+url: '{{k8sUrl}}/api/v1/transfers'
+order: 2000
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: X-User-Id
+    value: '{{userId}}'
+  - key: Idempotency-Key
+    value: '{{$guid}}'
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "{{accountNo}}",
+      "amount": 30000,
+      "memo": "P9a"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // 422 ACCOUNT_NOT_VERIFIED 면 kind DB 에 user-1 의 인증이 없다 — 폴더 설명 참고
+      pm.test("202 RECEIVED", () => {
+        pm.response.to.have.status(202);
+        pm.expect(pm.response.json().status).to.eql("RECEIVED");
+      });
+      if (pm.response.code === 202) pm.collectionVariables.set("p9aTransferId", pm.response.json().id);

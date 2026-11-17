@@ -1,0 +1,13 @@
+$kind: http-request
+name: 8-5 입구로 /actuator/health → 200 UP
+method: GET
+url: '{{k8sUrl}}/actuator/health'
+order: 5000
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("200 UP", () => {
+        pm.response.to.have.status(200);
+        pm.expect(pm.response.json().status).to.eql("UP");
+      });
