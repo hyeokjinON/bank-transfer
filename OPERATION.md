@@ -873,3 +873,93 @@ bash load/k8s/run.sh cleanup      # 끝나면 반드시 — 측정 사용자 행
 - 새 도구 요소: `PHASE=p8-3b`(결과 폴더), 동작 `gwroll` · `gwkill` · `gwnode` · `gwcut`, `NODE_KILL=1`(노드를 SIGKILL), 게이트웨이 분산 사전 확인, 요약 JSON 의 `bank_sessions_*` · `bank_dup_tran_no` · `unknown_results` · `gw_acquired_s` · 은행 공백(모의 은행 로그의 `session closed` → 다음 `session opened`). 은행 공백이 가장 정확한 "은행에 붙은 게이트웨이가 없던 시간" 이다 — 표본 기반 `gw_leaderless_s` 는 노드 손실에 쓰지 않는다 (죽은 노드의 Pod 는 노드가 NotReady 가 될 때까지 Ready · 라벨 그대로).
 - 모의 은행 제약 3개(`--single-session` · `--session-idle-timeout=60s` · `--unique-tran-no`)는 K8s 매니페스트에서만 켠다. 모의 은행 readiness 는 `tcpSocket` 이 아니라 `/proc/net/tcp` LISTEN 을 보는 exec 프로브다 — TCP 프로브가 세션 하나를 먹어서 게이트웨이를 거부시켰다 (측정: 세션 거부 13).
 - 한계: kind 한 호스트(노드 간 시계 차 없음, 노드 손실 때 TCP 끊김이 바로 전달) · 모의 은행 제약은 흉내 (실무 은행의 세션 정책 · 번호 규칙은 기관마다 다름 — 추정).
+
+## 17. 관측 — 지표 · 대시보드 · 알림 (P9a)
+> [ADR-0020](docs/adr/0020-observability-metrics-alerts.md) (제안, 2026-11-17). 설계 [스펙](docs/superpowers/specs/2026-11-17-p9a-metrics-design.md), 실험 숫자 [측정 결과](docs/perf/p9a-metrics.md). kind(K8s) 에만 있다 — Compose · IntelliJ 실행에는 수집기가 없다. 관측 4개(Prometheus · Alertmanager · alert-sink · Grafana)는 `monitoring` namespace 의 제어 노드에서 돈다 (`bash infra/k8s/up.sh` 가 같이 올린다).
+
+### 17-1. 열기
+```bash
+kubectl --context kind-bank-transfer -n monitoring port-forward svc/grafana 3000:3000        # http://127.0.0.1:3000 (익명 보기)
+kubectl --context kind-bank-transfer -n monitoring port-forward svc/prometheus 9090:9090     # Targets · Alerts · Graph
+kubectl --context kind-bank-transfer -n monitoring port-forward svc/alertmanager 9093:9093   # 울리는 알림 · 억제 · 침묵
+kubectl --context kind-bank-transfer -n monitoring logs deploy/alert-sink --timestamps        # 받은 알림 (운영이면 Slack 자리)
+kubectl --context kind-bank-transfer -n monitoring get secret grafana-admin -o jsonpath='{.data.password}' | base64 -d   # 관리자 비밀번호 (화면에만)
+```
+입구(`127.0.0.1:8000`)로는 `/actuator/prometheus` 가 404 — 지표는 Prometheus 만 Pod 에서 직접 읽는다 (입구는 `/api/v1` · `/admin` · `/actuator/health` · `/actuator/info` 만 넘긴다).
+
+### 17-2. 대시보드 읽는 순서
+대시보드 두 장: `bank-transfer ① 출금 흐름` · `bank-transfer ② 게이트웨이 · 은행 · JVM` (기본 15분 · 새로고침 5초).
+- ① 1행(돈이 흐르나) → 2행을 왼쪽부터 오른쪽(아웃박스 → Kafka → 은행 → 정리 — **처음 막힌 칸이 원인 쪽**) → 3행(사용자가 느끼는 시간).
+- 은행 칸이 이상하면 ② 1 · 2행(리더 · 연결 · 안 보냄 사유), 자원이 의심되면 ② 3행.
+- **카운터는 근사치, 돈의 정답은 DB** (`docs/database.md` 운영 쿼리). Pod 재시작 · Kafka 최소 한 번 전달로 건수가 어긋난다 (측정: 노드 kill 뒤 단순 차이 −420, `increase()` 로도 약 1% 어긋남).
+- **복구는 대시보드에 늦게 보일 수 있다**: 수집 5초 + 그래프 격자 5초라 은행 연결 복구가 실제보다 최대 약 8초 늦게 보인다 (Prometheus 원 표본으로는 2.4 ~ 4.5초 안). 5초보다 짧은 끊김은 아예 안 보인다. 몇 초 차이로 원인을 단정하지 않는다.
+
+### 17-3. 알림별 할 일
+알림이 가는 곳은 alert-sink 로그뿐이다 (운영이면 Slack · 텔레그램 자리). 울림 · 해제(`resolved`) 둘 다 온다. 도착은 계산값 약 50초 (수집 5 + 평가 5 + `for` 30 + 묶기 10) — 측정 47 ~ 50초.
+
+| 알림 | 뜻 | 먼저 볼 것 | 할 일 |
+|---|---|---|---|
+| GatewayNoLeader | 은행 연결 주인이 30초 넘게 없다 — 은행 송신 멈춤 | `kubectl -n bank-transfer get pods -l app=bank-gateway -L bank-transfer/gateway-role`, Lease holder | §16 장애 대응 표 (선출 · RBAC · 노드) |
+| GatewayMultipleLeaders | 리더 둘 | 두 Pod 의 `leader election` 로그, 모의 은행 세션 수 | 보통 API 서버 단절 직후 — 기다리면 정리 (§16). 1분 넘으면 옛 리더 Pod 삭제 |
+| BankDisconnected | 은행 회선 30초 넘게 없음 | ② 연결 패널, 게이트웨이 로그 `connect to bank failed` | 은행 · 망 확인. 출금은 RECEIVED 로 재시도 · 재발행 (돈 안전) |
+| TransferPipelineStalled | RECEIVED 30분 · SENDING 2분 넘게 | ① 2행 — 아웃박스 · lag · 은행 결과 | Kafka · 컨슈머 · 정리 작업 스케줄 확인, `database.md` 운영 쿼리로 해당 건 |
+| TransferGaveUp | FAILED E001 생김 | `SELECT … WHERE bank_response_code = 'E001'` | 사용자에게 다시 요청 안내 (돈은 환불됨) |
+| TransferUnknownExhausted | 결과조회 소진 UNKNOWN | 해당 건 · 결과조회 로그 | 일마감 대사가 맞춘다 (§10). 1시간마다 다시 울린다 |
+| OutboxBacklog | 미발행 60초 넘게 | 발행기 로그 `outbox relay failed`, Kafka Pod | Kafka 복구 — 복구되면 밀린 행이 나간다 |
+| TransferDeadLettered | 사람 확인 DLT (other · invalid_key) | api 로그 `moved to DLT` | §6 DLT 처리 |
+| ApiHigh5xx | 5xx 5% 넘게 2분 | ① HTTP 5xx 경로별, api 로그 | 경로 · 코드별 원인 (WALLET_BUSY · DB) |
+| ScrapeTargetDown | 읽던 앱 Pod 를 못 읽음 | Prometheus Targets, Pod 상태 · 노드 | 노드 장애면 §15. 다른 규칙이 거짓 정상일 수 있다 |
+| MetricsMissing | 상태 Gauge 가 NaN · 없음 | ② 조회 실패 패널, api 로그 `state metrics query failed` | DB 연결 확인. 이 동안 "쌓임" 알림이 눈을 감는다 |
+
+- **억제**: `GatewayNoLeader` 가 울리는 동안 `BankDisconnected` 는 Alertmanager 가 억제한다 (원인 하나 · 알림 하나). Prometheus 화면(Alerts)에는 둘 다 보이고 alert-sink 에는 하나만 온다 — 억제 여부는 Alertmanager 화면 (`suppressed`).
+- 노드 장애는 지표가 가장 늦게 본다: ScrapeTargetDown 은 장애 뒤 약 1분 남짓 (`for 1m`, 측정 +64 · +69초).
+
+### 17-4. 지표 이름 (Prometheus 이름)
+| 이름 | 종류 · 태그 | 앱 |
+|---|---|---|
+| `banktransfer_transfer_accepted_total` | Counter `result=created\|replayed` | api |
+| `banktransfer_transfer_bank_result_total` | Counter `outcome=ok\|rejected\|not_sent\|unknown\|maintenance` | api |
+| `banktransfer_transfer_completed_seconds_{count,sum,bucket,max}` | Timer `status=COMPLETED\|FAILED` (접수 → 확정) | api |
+| `banktransfer_transfer_gave_up_total` · `banktransfer_transfer_republished_total` | Counter | api |
+| `banktransfer_transfer_dlt_total` | Counter `kind=bank_not_connected\|invalid_key\|other` | api |
+| `banktransfer_transfer_reconciled_total` | Counter `result=completed\|failed\|still_unknown` | api |
+| `banktransfer_outbox_published_total` | Counter `result=ok\|error` | api |
+| `banktransfer_transfer_open` · `banktransfer_transfer_open_oldest_seconds` | Gauge `status=RECEIVED\|SENDING\|UNKNOWN` (10초마다 DB 조회, 나이는 SQL) | api |
+| `banktransfer_transfer_unknown_exhausted` | Gauge | api |
+| `banktransfer_outbox_unpublished` · `banktransfer_outbox_unpublished_oldest_seconds` | Gauge | api |
+| `banktransfer_metrics_db_query_seconds_*` | Timer `result=ok\|error` — 위 조회 자체 | api |
+| `banktransfer_bank_maintenance` | Gauge 0/1 (점검 창) | api · 게이트웨이 |
+| `banktransfer_gateway_bank_request_seconds_*` | Timer `type=transfer\|inquiry\|name`, `outcome=ok\|rejected\|not_sent\|unknown` | 게이트웨이 |
+| `banktransfer_gateway_not_sent_total` | Counter `reason=not_leader\|stepping_down\|no_tran_no\|disconnected\|duplicate_tran_no\|tran_no_store\|gateway_unreachable\|maintenance\|other` | 게이트웨이 |
+| `banktransfer_gateway_leader` · `banktransfer_gateway_bank_connected` | Gauge 0/1 | 게이트웨이 |
+| `banktransfer_gateway_leader_terms_total` | Counter | 게이트웨이 |
+| `banktransfer_gateway_tran_no_remaining` | Gauge (현재 + 예약 구간 남은 번호, 메모리 출처는 NaN) | 게이트웨이 |
+| `banktransfer_gateway_tran_no_reserve_total` | Counter `result=ok\|conflict\|error` | 게이트웨이 |
+
+공통 라벨 `application` `pod` `node` `app` `namespace`. 라벨에 사용자 id · 계좌 · 참조번호 · 금액은 없다. 기본 지표(JVM · `http_server_requests_seconds_*` · Hikari · Tomcat · Kafka 컨슈머 lag)도 같이 나온다. 상태 Gauge 는 api 2대가 같은 값을 내므로 `max()` 로 본다.
+
+### 17-5. 점검 시간과 알림
+점검 창은 앱 설정 한 곳(`app-config` 의 `BANK_MAINTENANCE_*`)이고, 규칙은 `banktransfer_bank_maintenance` 로 **점검 중 + 끝난 뒤 30분** 동안 TransferPipelineStalled · ApiHigh5xx 를 뺀다 (결정 D8). 점검 중 은행 결과는 `outcome=maintenance`, 안 보냄 사유는 `reason=maintenance`. 측정: 점검 창을 "지금" 으로 한 M5 에서 울린 알림 0건.
+
+### 17-6. 실험 재현 (`load/k8s/run.sh`, `PHASE=p9a`)
+같은 부하(출금 20건/s)로 동작 하나를 하고 판정한다 (사용법 · 환경변수는 §15-7). 먼저 `bash infra/k8s/up.sh`. 결과는 `docs/perf/raw/p9a/<동작>-<회차>.json`(판정) · `.p9a.json`(지표 요약) · `.prom-*.json` · `.alert-sink.txt` · `.alertmanager.txt` · `.mock-bank-sessions.txt`. 숫자는 [측정 결과](docs/perf/p9a-metrics.md).
+| 실험 | 명령 | 볼 것 (요약 JSON) |
+|---|---|---|
+| M1a 리더 Pod 삭제 | `PHASE=p9a bash load/k8s/run.sh gwkill 1` | 지표에 공백이 안 보임 (공백 < 수집 5초) |
+| M1b 리더 노드 SIGKILL | `NODE_KILL=1 PHASE=p9a bash load/k8s/run.sh gwnode 1` | `bank_gap_diff_s` · `bank_gap_diff_raw_s`, 리더 0 구간, 죽은 Pod 시계열 끝 |
+| M2 모의 은행 0대 120초 | `BANK_DOWN_S=120 PHASE=p9a bash load/k8s/run.sh bank 1` | BankDisconnected 도착(약 50초) · 해제 |
+| M3 게이트웨이 0대 60초 | `PHASE=p9a bash load/k8s/run.sh gwzero 1` | GatewayNoLeader 도착, BankDisconnected 억제 |
+| M4 모의 은행 10분 끊김 | `BANK_DOWN_S=600 PHASE=p9a bash load/k8s/run.sh bank 1` | 상태 조회 시간(50ms 넘으면 V7 인덱스) · 시계열 수 · 카운터 vs DB |
+| M5 점검 창 = 지금 | `PHASE=p9a bash load/k8s/run.sh maint 1` | 울린 알림 없음 (`app-config` 를 고쳐 재시작 — 끝나면 도구가 되돌린다) |
+- 카운터 차이는 `increase()` 로 잰다 (Pod 재시작이 카운터를 0 으로 되돌려 단순 차이는 음수가 나온다 — M1b 에서 −420).
+- 은행 공백의 지표 값은 두 가지다: `bank_gap_diff_s`(5초 격자 — 대시보드가 보는 값, 5.0 ~ 8.2초) · `bank_gap_diff_raw_s`(Prometheus 원 표본, 2.4 ~ 4.5초). 성공 기준(차이 ≤ 5초)은 원 표본으로 판정한다.
+- 끝나면 `bash load/k8s/run.sh cleanup` (§15-7). `MAINT_S` · `GW_DOWN_S` 등 환경변수는 `run.sh` 머리말.
+- 알림 규칙 · 설정 검사는 PC 에서도 같은 명령: `bash infra/k8s/monitoring/check.sh` (`promtool test rules` · `amtool check-config` · 대시보드 검사 — 컨테이너로 돌아 설치할 것이 없다).
+
+### 17-7. 막히는 곳
+- Prometheus Targets 가 0 → RBAC: `kubectl --context kind-bank-transfer -n monitoring logs deploy/prometheus | grep forbidden`.
+- `up == 0` + `context deadline exceeded` → NetworkPolicy `metrics-from-prometheus-*` (`kubectl --context kind-bank-transfer -n bank-transfer get networkpolicy`).
+- 규칙이 0개 → ConfigMap · `bash infra/k8s/monitoring/check.sh` (`promtool check rules`).
+- Grafana 비밀번호 분실 → Secret `grafana-admin` 을 지우고 `bash infra/k8s/up.sh` 다시 (새로 만든다).
+- 알림이 alert-sink 에 안 온다 → ① Alertmanager 로그의 `notify` 오류 (`kubectl --context kind-bank-transfer -n monitoring logs deploy/alertmanager | grep -i notify`), ② `kubectl --context kind-bank-transfer -n monitoring get svc,pods` 에서 alert-sink Service · Pod 가 Ready 인지, ③ 웹훅 주소가 `http://alert-sink.monitoring.svc.cluster.local:8080/cgi-bin/sink` (경로 `/cgi-bin/sink`) 인지. 억제된 알림(`suppressed`)은 일부러 안 온다.
+- 옛 `nc` 방식 alert-sink 는 본문을 잃었다 — 응답은 200 인데 알림 절반이 빈 줄이었다. 지금은 busybox `httpd` + CGI 로 고쳤다 ([측정 결과 B7](docs/perf/p9a-metrics.md)).

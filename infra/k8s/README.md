@@ -1,14 +1,22 @@
-# Kubernetes (kind) — P8-3a · P8-3b
+# Kubernetes (kind) — P8-3a · P8-3b · P9a
 
-kind 클러스터(제어 1 + 워커 2)에 인프라 · 모의 은행 · 게이트웨이 · api 2대 · Envoy Gateway 입구를 띄운다. 이유 · 결정은 [ADR-0017](../../docs/adr/0017-kubernetes-kind.md), 설계는 [스펙](../../docs/superpowers/specs/2026-11-12-p8-3a-k8s-design.md), 실험 숫자는 [측정 결과](../../docs/perf/p8-3a-k8s.md), 운영 절차는 [OPERATION §15](../../OPERATION.md#15-kubernetes-실행-p8-3a), 게이트웨이 2대(P8-3b — [ADR-0018](../../docs/adr/0018-gateway-ha-leader-election.md) · [측정](../../docs/perf/p8-3b-gateway-ha.md))는 [OPERATION §16](../../OPERATION.md#16-게이트웨이-이중화-p8-3b), 설치는 [SETUP §2-9](../../SETUP.md). 모든 명령은 저장소 루트의 Git Bash(또는 Linux bash)에서.
+kind 클러스터(제어 1 + 워커 2)에 인프라 · 모의 은행 · 게이트웨이 · api 2대 · Envoy Gateway 입구를 띄운다. 이유 · 결정은 [ADR-0017](../../docs/adr/0017-kubernetes-kind.md), 설계는 [스펙](../../docs/superpowers/specs/2026-11-12-p8-3a-k8s-design.md), 실험 숫자는 [측정 결과](../../docs/perf/p8-3a-k8s.md), 운영 절차는 [OPERATION §15](../../OPERATION.md#15-kubernetes-실행-p8-3a), 게이트웨이 2대(P8-3b — [ADR-0018](../../docs/adr/0018-gateway-ha-leader-election.md) · [측정](../../docs/perf/p8-3b-gateway-ha.md))는 [OPERATION §16](../../OPERATION.md#16-게이트웨이-이중화-p8-3b), 설치는 [SETUP §2-9](../../SETUP.md). 관측(P9a — `monitoring` namespace: Prometheus · Alertmanager · alert-sink · Grafana)은 [ADR-0020](../../docs/adr/0020-observability-metrics-alerts.md) · [측정](../../docs/perf/p9a-metrics.md) · [OPERATION §17](../../OPERATION.md#17-관측--지표--대시보드--알림-p9a). 모든 명령은 저장소 루트의 Git Bash(또는 Linux bash)에서.
 
 ## 올리기 · 확인 · 내리기
 ```bash
 # 먼저: Docker Desktop 켜기, IntelliJ 의 API · 게이트웨이 · 모의 은행 끄기, Compose app 프로필 내리기 (둘 다 127.0.0.1:8000)
 bash infra/k8s/up.sh            # 클러스터 + Envoy Gateway + 이미지 빌드 · kind load + Secret + 매니페스트 + 준비 대기 (클러스터가 있을 때 재실행 약 2분 7초 — 이미지 빌드 · `kind load` 포함. 처음 생성 시간은 재지 않았다)
-bash infra/k8s/smoke.sh         # [0] ~ [9] 입구로 1원인증 · 출금 · 멱등 · 분배 · 분산 배치 · 게이트웨이 · 비root · NetworkPolicy · 리더 1개
+bash infra/k8s/smoke.sh         # [0] ~ [10] 입구로 1원인증 · 출금 · 멱등 · 분배 · 분산 배치 · 게이트웨이 · 비root · NetworkPolicy · 리더 1개 · 관측(지표 · 입구 404 · 규칙 · 시험 알림)
 kubectl --context kind-bank-transfer -n bank-transfer get pods -o wide
 bash infra/k8s/down.sh          # 클러스터 삭제 (PV · 데이터까지)
+```
+관측 화면은 port-forward 로 연다 (입구로는 열리지 않는다 — `/actuator/prometheus` 는 404):
+```bash
+kubectl --context kind-bank-transfer -n monitoring port-forward svc/grafana 3000:3000        # http://127.0.0.1:3000 (익명 보기)
+kubectl --context kind-bank-transfer -n monitoring port-forward svc/prometheus 9090:9090     # Targets · Alerts · Graph
+kubectl --context kind-bank-transfer -n monitoring port-forward svc/alertmanager 9093:9093   # 울리는 알림 · 억제
+kubectl --context kind-bank-transfer -n monitoring logs deploy/alert-sink --timestamps        # 받은 알림
+bash infra/k8s/monitoring/check.sh   # 알림 규칙 단위 테스트 · 설정 · 대시보드 검사 (컨테이너로 — 설치 없음)
 ```
 - `up.sh [local|ci]` — 다시 불러도 된다 (클러스터가 있으면 그대로 쓰고 apply 만). `SKIP_BUILD=1` 이미지 빌드 생략(CI), `IMAGE_TAG=…` 태그 지정, `UP_ONLY=cluster` 클러스터 · Envoy Gateway 까지만.
 - 입구는 `http://127.0.0.1:8000` (제어 노드 NodePort 30080 → PC). 앱 입구는 이것 하나다 (kind API 서버도 `127.0.0.1` 의 임의 포트에 열린다 — kubectl 용).
@@ -21,14 +29,16 @@ bash infra/k8s/down.sh          # 클러스터 삭제 (PV · 데이터까지)
 | `kind.yaml` | 클러스터 설정: 제어 노드(라벨 `bank-transfer/role=infra`, NodePort 30080 → `127.0.0.1:8000`) + 워커 2(`role=app`) |
 | `lib.sh` | 스크립트 공통: 저장소 루트로 `cd`, 래퍼 `k`(namespace) · `ka`(전체) · `d` · `kindc`(여기에만 `MSYS_NO_PATHCONV`), `sql`, `image_tag`, `apply_overlay`, `wait_ready`, `pin_patch`, `np_probe` |
 | `up.sh` · `down.sh` | 올리기 · 삭제 |
-| `smoke.sh` | 입구 기준 확인 [0] ~ [9] — [9] 는 게이트웨이 2대 Ready · 리더 라벨 Pod 정확히 1개 = Lease 보유자 · Service 엔드포인트 = 그 Pod · 모의 은행 동시 세션 1 (CI `k8s-smoke` 도 같은 파일) |
+| `smoke.sh` | 입구 기준 확인 [0] ~ [10] — [10] 은 관측 4개 Ready · 수집 대상 4개 `up` · 리더 1 · 은행 연결 1 · 스모크 출금이 지표에 남음 · 입구 `/actuator/prometheus` 404 · 규칙 11 · 시험 알림이 alert-sink 에 30초 안 도착, [9] 는 게이트웨이 2대 Ready · 리더 라벨 Pod 정확히 1개 = Lease 보유자 · Service 엔드포인트 = 그 Pod · 모의 은행 동시 세션 1 (CI `k8s-smoke` 도 같은 파일) |
 | `cluster/` | 클러스터 범위: `namespace.yaml` · `gatewayclass.yaml` (Kustomize namespace 변환 밖에서 `up.sh` 가 apply) |
 | `base/config.yaml` | ConfigMap `app-config` (주소 · 점검 설정 — 비밀번호 없음) |
 | `base/{mysql,kafka,redis}.yaml` | 인프라: MySQL · Kafka(KRaft) StatefulSet + PVC + headless Service, Redis Deployment |
 | `base/mock-bank.yaml` · `bank-gateway.yaml` · `api.yaml` | 앱 3개 (Service · Deployment · 프로브 · preStop). 모의 은행은 PVC `mock-bank-files` + 제약 옵션 3개(`--single-session` 등)와 `/proc/net/tcp` LISTEN exec readiness. 게이트웨이는 replicas 2 · `RollingUpdate` · Service selector 에 리더 라벨 (P8-3b) |
 | `base/rbac-gateway.yaml` | 게이트웨이 ServiceAccount · Role(Lease `bank-gateway-leader` · ConfigMap `bank-gateway-tran-no` 이름 한정 + Pod get · patch namespace 범위) · RoleBinding (P8-3b) |
-| `base/gateway.yaml` | `EnvoyProxy`(NodePort 30080 패치 · 제어 노드) + `Gateway` + `HTTPRoute` (재시도 없음) |
-| `base/networkpolicy.yaml` | ingress 기본 거부 + 허용 7개 (스펙 §8) |
+| `base/networkpolicy.yaml` | ingress 기본 거부 + 허용 7개 (스펙 §8) + P9a `metrics-from-prometheus-api` · `-gateway` (`monitoring` 의 Prometheus → api:8080 · 게이트웨이:8082) |
+| `base/rbac-prometheus.yaml` | Prometheus ServiceAccount · Role(`bank-transfer` namespace Pod get · list · watch 만) · RoleBinding (P9a) |
+| `monitoring/` | P9a 관측 (namespace `monitoring`, 제어 노드): `prometheus.yaml` · `alertmanager.yaml` · `alert-sink.yaml` · `grafana.yaml` + 설정 `prometheus/`(`prometheus.yml` · 규칙 `alerts.yml` 11개 · 규칙 테스트 `alerts-test.yml`) · `alertmanager/alertmanager.yml` · `alert-sink/sink.sh`(busybox httpd CGI) · `grafana/`(데이터소스 · 대시보드 2장 JSON) · `check.sh` · `check-dashboards.sh` |
+| `base/gateway.yaml` | `EnvoyProxy`(NodePort 30080 패치 · 제어 노드) + `Gateway` + `HTTPRoute` (재시도 없음). P9a 부터 HTTPRoute 는 허용 목록 — `/api/v1` · `/admin` · `/actuator/health` · `/actuator/info` 만, 나머지 404 |
 | `base/pdb.yaml` | api · 게이트웨이 `minAvailable: 1` |
 | `overlays/local` · `ci` | 평소 · CI (`ci` 는 점검 시간 503 을 끈다) |
 | `overlays/experiment-prestop0` | R1 대조: api preStop 제거 |
@@ -48,6 +58,7 @@ for o in infra/k8s/overlays/*/; do kubectl kustomize "$o" > /dev/null && echo "o
 
 ## 비밀
 - Secret `db-credentials` 는 **`up.sh` 가** `infra/.env`(없으면 `infra/.env.example`)의 `MYSQL_DATABASE` · `MYSQL_USER` · `MYSQL_PASSWORD` · `MYSQL_ROOT_PASSWORD` 4줄로 만든다. 저장소에는 비밀이 없고 ConfigMap 에도 넣지 않는다. CI 는 실행마다 임의 비밀번호 (P8-2 `app-smoke` 와 같은 방식).
+- Secret `grafana-admin` (P9a, namespace `monitoring`) 는 `up.sh` 가 **처음 한 번만** 임의 비밀번호로 만든다 (다시 불러도 그대로, 커밋 안 함). 보기: `kubectl --context kind-bank-transfer -n monitoring get secret grafana-admin -o jsonpath='{.data.password}' | base64 -d` (화면에만). 잃으면 Secret 을 지우고 `up.sh` 다시 (새로 만든다).
 - **MySQL PV 가 이미 초기화됐으면 `.env` 의 비밀번호를 바꿔도 DB 에 반영되지 않는다** (이미지는 빈 데이터 디렉터리에서만 초기화한다). 바꾸려면 `down.sh` 부터 다시 만든다.
 
 ## 배치

@@ -203,3 +203,9 @@
 - **스모크 [10]-4 이름**: Timer 라 `banktransfer_transfer_completed_seconds_count`.
 - **M5** 는 정적 overlay 대신 `app-config` ConfigMap 을 고쳐 재시작하고 끝나면 되돌린다 ("지금" 을 정적 파일에 적을 수 없다).
 - **Prometheus 자기 수집** 추가 (시계열 수 B2 측정용). 이미지: Prometheus v3.5.0 · Alertmanager v0.28.1 · Grafana 12.0.0 · busybox 1.37.0 (구현 때 `docker manifest inspect` 로 존재 확인).
+
+## 16. 실험 뒤 정정 (2026-11-17)
+실험(M1 ~ M5, [측정 결과](../../perf/p9a-metrics.md))에서 알게 된 것으로 위 내용을 바로잡는다. §6 표의 alert-sink 줄은 설계 당시 그대로 두었다.
+- **alert-sink 는 `busybox nc -l` 이 아니다** (§6 표 · §11 B7 정정). nc 방식은 응답(200)을 먼저 쓰고 본문을 읽기 전에 끝나, 1초 넘게 늦게 온 알림의 본문을 조용히 잃었다 (첫 회차 알림의 절반쯤). B7 은 "동시에 오면 거부되고 재시도" 가 아니라 **성공 응답 뒤 유실이라 재시도도 없었다** — 설계보다 나빴다. 지금은 busybox `httpd` + CGI 스크립트(ConfigMap — `infra/k8s/monitoring/alert-sink.yaml` · `alert-sink/sink.sh`), 웹훅 주소 `/cgi-bin/sink` (ADR-0020).
+- **성공 기준 2 (은행 공백 차이 ≤ 5초)는 Prometheus 원 표본으로 판정한다**: 원 표본 2.4 ~ 4.5초(통과), 5초 `query_range` 격자로 읽으면 5.0 ~ 8.2초. 기준값은 바꾸지 않고 두 값을 다 남긴다 (`bank_gap_diff_s` · `bank_gap_diff_raw_s`). 대시보드는 복구를 최대 약 8초 늦게 보일 수 있다 (OPERATION §17-2).
+- **실험의 카운터 차이는 `increase()` 로 잰다**: Pod 가 재시작하면 카운터가 0 으로 돌아가 단순 차이가 음수가 된다 (M1b −420). §4-1 "카운터는 근사치" 그대로이고, `increase()` 도 창 끝 외삽으로 약 1% 어긋난다.

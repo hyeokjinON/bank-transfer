@@ -9,6 +9,27 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
+## [P9a] 관측성 — 지표 · 대시보드 · 알림 — 2026-11-17 (PR 번호는 PR 을 만든 뒤 채운다, 머지 후 정리 PR)
+### Added
+- 업무 지표 (`banktransfer.*`): api — 접수 · 은행 결과(`ok|rejected|not_sent|unknown|maintenance`) · 완료 시간(접수 → 확정) · 포기 · DLT(`kind`) · 재발행 · 결과조회 · 아웃박스 발행, 게이트웨이 — 은행 호출 시간 · 안 보냄 사유 · 리더 · 은행 연결 · 번호 구간. 두 앱 `/actuator/prometheus` 노출. 지표 이름 표는 OPERATION §17-4.
+- 상태 Gauge (api, 10초마다 DB 조회): 미완료 건 수 · 가장 오래된 나이(SQL `NOW(6)`) · 결과조회 소진 UNKNOWN · 미발행 아웃박스. 조회 실패는 NaN.
+- `monitoring` namespace (제어 노드): Prometheus(Pod 직접 5초 수집, Role) · Alertmanager · alert-sink(busybox `httpd` CGI) · Grafana, 규칙 11개 · 대시보드 2장(① 출금 흐름 · ② 게이트웨이 · 은행 · JVM). `infra/k8s/monitoring/` · `base/rbac-prometheus.yaml` · Secret `grafana-admin`. 규칙 · 설정 검사 `bash infra/k8s/monitoring/check.sh` (CI `build` 잡도).
+- 스모크 [10] (관측 4개 Ready · 수집 대상 `up` · 리더 1 · 은행 연결 1 · 지표 증가 · 입구 `/actuator/prometheus` 404 · 규칙 11 · 시험 알림 도착). NetworkPolicy `metrics-from-prometheus-api` · `-gateway`.
+- 실험 도구: `PHASE=p9a`(감시 원자료), 동작 `gwzero` · `maint`, 요약 JSON `bank_gap_diff_s`(5초 격자) · `bank_gap_diff_raw_s`(원 표본), 카운터는 `increase()`. [측정 결과](docs/perf/p9a-metrics.md) · 원자료 `docs/perf/raw/p9a/`.
+- [ADR-0020](docs/adr/0020-observability-metrics-alerts.md) (제안), OPERATION §17, ARCHITECTURE 관측 절, 구성도 두 장 갱신 (`runtime-k8s.svg` 에 monitoring, `app-architecture.svg` 에 지표 지점 ● M).
+### Changed
+- Envoy HTTPRoute 를 허용 목록으로: `/api/v1` · `/admin` · `/actuator/health` · `/actuator/info` 만 넘기고 나머지는 404 (이전에는 모든 경로를 넘겼다).
+- `BankNotSentException` 에 `reason: NotSentReason`(기본 `OTHER`, 점검 보류 `MAINTENANCE` 포함), 도메인 포트 `TransferObserver`, `finish(transferId, …)` → `finish(transfer, …)`, `DltKind` public, 스케줄 풀 4 → 5.
+- 앱 Pod 템플릿에 수집 어노테이션 (롤링 1회).
+### 측정 요약 (이 PC · kind 3노드 기준 — 운영 수치가 아니다, 돈은 8회 전부 정확)
+- 은행 공백 지표 vs 모의 은행 로그: 차이 원 표본 **2.4 ~ 4.5초** (기준 5초 이내), 5초 격자로 읽으면 5.0 ~ 8.2초 — 대시보드는 복구를 최대 약 8초 늦게 보인다. 5초보다 짧은 공백(1.9 · 2.0초)은 지표에 안 보인다.
+- 알림 도착: BankDisconnected **49 · 50초**, GatewayNoLeader **47초** (계산값 50초). 억제 동작 (M3 의 BankDisconnected 는 Alertmanager 에서 `suppressed`). 점검 창 M5 거짓 알림 **0건**.
+- M4 (은행 10분 끊김, 약 1만 2천 건 밀림): 상태 조회 최대 **43.8ms** (≤ 50 — V7 인덱스 불필요), 시계열 수 최대 55,395, 카운터 접수 = DB (12801). Pod 재시작이 있으면 단순 차이는 −420 → `increase()` 로 재며 약 1% 어긋난다 — 카운터는 추세용, 돈의 정답은 DB.
+- 발견: alert-sink 를 `nc` 로 만들었더니 본문을 읽기 전에 200 을 답하고 끝나 알림 절반이 조용히 사라졌다 (설계의 위험 B7 보다 나빴다) → busybox `httpd` + CGI 로 고치고 M2 를 다시 쟀다.
+### CI · 사람 확인
+- CI: PR CI 에서 기록 (`k8s-smoke` 시간 — 20분 제한).
+- Postman 직접 확인: 머지 전에 기록.
+
 ## [P8-3c] 게이트웨이 필수 분산 — 2026-11-17 ([#33](https://github.com/hyeokjinON/bank-transfer/pull/33), 머지 후 정리 PR)
 ### Changed
 - 게이트웨이 `topologySpreadConstraints`: `ScheduleAnyway` → **`DoNotSchedule`** + `nodeTaintsPolicy: Ignore` · `nodeAffinityPolicy: Honor` 명시 (`matchLabelKeys [pod-template-hash]` 유지). 두 게이트웨이는 한 워커에 놓일 수 없다 — 워커가 빠지면 대체 Pod 는 Pending, 돌아오면 그 워커에 뜬다 ([ADR-0019](docs/adr/0019-gateway-required-spread.md), 채택).

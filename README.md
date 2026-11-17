@@ -124,6 +124,8 @@ sequenceDiagram
 
 > 게이트웨이 2대 active-standby (P8-3b): K8s 에서는 게이트웨이가 2대(리더 1 · 대기 1)이고 은행에 붙는 것은 리더뿐이다. 리더 확인 · 장애 대응 · 첫 도입 절차(옛 Pod 를 먼저 내린다)는 [OPERATION §16](OPERATION.md#16-게이트웨이-이중화-p8-3b), 이유는 [ADR-0018](docs/adr/0018-gateway-ha-leader-election.md). IntelliJ · Compose 는 선출이 꺼져 있어 1대가 그대로 동작한다.
 
+> 관측 (P9a): Grafana · Prometheus · Alertmanager 는 port-forward 로 연다 — [OPERATION §17](OPERATION.md#17-관측--지표--대시보드--알림-p9a). 입구로 /actuator/prometheus 는 404.
+
 > 디버깅 추천 위치: `BankGatewayClient.send` (요청 등록), `ClientHandler.channelRead0` (전문번호로 응답 매칭), `AccountVerificationService.request` (성명조회 → 1원 이체 연결).
 
 ### 로컬 인프라 (P3 부터 필요)
@@ -222,6 +224,9 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
   - [x] P8-3b 게이트웨이 이중화 (active-standby · K8s Lease 리더 선출 · 전문번호 ConfigMap 구간 예약 · 리더 라벨 + 둘 다 Ready) → [ADR-0018](docs/adr/0018-gateway-ha-leader-election.md) · [실험 결과](docs/perf/p8-3b-gateway-ha.md)
   - [x] P8-3c 게이트웨이 필수 분산 (`DoNotSchedule` — 두 대는 반드시 다른 워커) — [#33](https://github.com/hyeokjinON/bank-transfer/pull/33) · [ADR-0019](docs/adr/0019-gateway-required-spread.md) · [실험 결과](docs/perf/p8-3c-gateway-spread.md)
 - [ ] **P9** 관측성: Micrometer, Prometheus, Grafana
+  - [ ] P9a 지표 · 대시보드 · 알림 (Micrometer · Prometheus · Alertmanager · Grafana, kind) → [ADR-0020](docs/adr/0020-observability-metrics-alerts.md) · [실험 결과](docs/perf/p9a-metrics.md)
+  - [ ] P9b 분산 추적 (OpenTelemetry)
+  - [ ] P9c 로그 모으기
 
 ## 기술 스택
 
