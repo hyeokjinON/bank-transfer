@@ -78,6 +78,24 @@ p9a_alerts() {
   done
 }
 alert_s() { since_ta "$(awk -v n="$1" -v s="$2" -v t="$TA_MS" '$2 == n && $3 == s && $1 >= t { print $1; exit }' "$WORK/alerts.txt")"; }
+# 은행 연결 원 표본(질의 격자 없이 저장된 그대로)으로 잰 복구 시각 — 동작 시각 기준 초, 소수 1자리, 없으면 null
+# 표본 시각 > ta + zero_s 이고 값 >= 1 이며 같은 Pod 의 다음 표본도 >= 1 인 것 중 가장 이른 시각 (promgap.awk 의 "연속 두 표본" 규칙과 같은 뜻)
+# $1 = ta(epoch 초), $2 = metric_bank_zero_s (null 이면 null), $3 = 원 표본 JSON (banktransfer_gateway_bank_connected[<W>s] 즉시 질의 결과)
+p9a_raw_back() {
+  local ta=$1 zero=$2 file=$3
+  if [ -z "$zero" ] || [ "$zero" = null ]; then echo null; return; fi
+  { sed 's/{"metric"/\n{"metric"/g' "$file" || true; } | awk -v ta="$ta" -v zero="$zero" '
+    NR > 1 {
+      n = 0; s = $0
+      while (match(s, /\[[0-9.]+,"[^"]*"\]/)) {
+        p = substr(s, RSTART + 1, RLENGTH - 2); s = substr(s, RSTART + RLENGTH)
+        split(p, a, ","); gsub(/"/, "", a[2]); n++; t[n] = a[1] + 0; v[n] = a[2]
+      }
+      for (i = 1; i < n; i++)
+        if (t[i] > ta + zero && v[i] != "NaN" && v[i] + 0 >= 1 && v[i + 1] != "NaN" && v[i + 1] + 0 >= 1) { if (best == "" || t[i] < best) best = t[i]; break }
+    }
+    END { if (best == "") print "null"; else printf "%.1f\n", best - ta }'
+}
 delta() { if [[ "${1:-}" =~ ^[0-9.]+$ && "${2:-}" =~ ^[0-9.]+$ ]]; then awk -v a="$1" -v b="$2" 'BEGIN { printf "%d", b - a }'; else echo null; fi; }
 # ALERTS 범위 질의 결과에서 ScrapeTargetDown 시계열마다 "pod=동작뒤_첫_firing_초" (M1 노드 kill — Pod 당 약 1분 뒤 하나)
 p9a_scrape_down() {
@@ -108,6 +126,9 @@ p9a_capture() {
   p9a_range alerts 'ALERTS{alertstate="firing"}'
   p9a_range db-query-max 'max(banktransfer_metrics_db_query_seconds_max)'
   p9a_range head-series 'max(prometheus_tsdb_head_series)'
+  # 원 표본 — 질의 격자(5초) · 정렬 탓에 늦게 잡히는 것을 피한다. Pod 별 (타임스탬프 · 값) 그대로
+  local win_s=$(( $(date +%s) - t0_s ))
+  prom_query "banktransfer_gateway_bank_connected[${win_s}s]" > "$OUT_DIR/$RUN.prom-connected-raw.json" 2>/dev/null || echo '{}' > "$OUT_DIR/$RUN.prom-connected-raw.json"
   if [ -n "${VICTIM:-}" ]; then p9a_range victim "max(banktransfer_gateway_leader{pod=\"$VICTIM\"})"; fi
   km logs deploy/alert-sink --timestamps --since-time="$T0" > "$OUT_DIR/$RUN.alert-sink.txt" 2>&1 || true
   { grep -a 'session ' "$WORK/mock-bank.log" || true; } > "$OUT_DIR/$RUN.mock-bank-sessions.txt"
@@ -119,25 +140,33 @@ p9a_capture() {
   local key val
   while IFS='=' read -r key val; do G[$key]=$val; done < <(p9a_points connected | awk -v ta="$ta_s" -v name=metric_bank -f load/k8s/promgap.awk)
   while IFS='=' read -r key val; do L[$key]=$val; done < <(p9a_points leaders | awk -v ta="$ta_s" -v name=leaders -f load/k8s/promgap.awk)
-  local log_open_ms log_open_s diff=null victim_end=null db_max_ms head_max acc0 acc1 done0 done1 firing_names sink_firing scrape_down
+  local log_open_ms log_open_s diff=null raw_back=null diff_raw=null victim_end=null db_max_ms head_max acc1 done1 firing_names sink_firing scrape_down
   log_open_ms=$({ grep -a 'session opened' "$WORK/mock-bank.log" || true; } | awk '{print $1}' \
     | while read -r ts; do date -d "$ts" +%s%3N 2>/dev/null; done | awk -v t="$TA_MS" '$1 >= t' | sort -n | head -1)
   log_open_s=$(since_ta "$log_open_ms")
   if [ "${G[metric_bank_back_s]:-null}" != null ] && [ "$log_open_s" != null ]; then
     diff=$(awk -v a="${G[metric_bank_back_s]}" -v b="$log_open_s" 'BEGIN { d = a - b; if (d < 0) d = -d; printf "%.1f", d }')
   fi
+  raw_back=$(p9a_raw_back "$ta_s" "${G[metric_bank_zero_s]:-null}" "$OUT_DIR/$RUN.prom-connected-raw.json")
+  if [ "$raw_back" != null ] && [ "$log_open_s" != null ]; then
+    diff_raw=$(awk -v a="$raw_back" -v b="$log_open_s" 'BEGIN { d = a - b; if (d < 0) d = -d; printf "%.1f", d }')
+  fi
   if [ -n "${VICTIM:-}" ]; then victim_end=$(p9a_points victim | awk -v ta="$ta_s" 'NF { last = $1 } END { if (last != "") printf "%.1f", last - ta; else print "null" }'); fi
   db_max_ms=$(p9a_points db-query-max | awk '$2 != "NaN" { n++; if ($2 + 0 > m) m = $2 + 0 } END { if (n) printf "%.1f", m * 1000; else print "null" }')
   head_max=$(p9a_points head-series | awk '$2 != "NaN" { n++; if ($2 + 0 > m) m = $2 + 0 } END { if (n) printf "%d", m; else print "null" }')
-  acc0=$(prom_value 'sum(banktransfer_transfer_accepted_total{result="created"})' "$t0_s"); acc1=$(prom_value 'sum(banktransfer_transfer_accepted_total{result="created"})')
-  done0=$(prom_value 'sum(banktransfer_transfer_completed_seconds_count{status="COMPLETED"})' "$t0_s"); done1=$(prom_value 'sum(banktransfer_transfer_completed_seconds_count{status="COMPLETED"})')
+  # 카운터 차이 = 지금 시각 기준 최근 (지금 − T0)초 증가량. 지금 − T0 시각 sum 은 Pod 재시작(카운터 0 부터)에서 음수가 된다.
+  # increase 는 리셋을 견디지만 창 끝 외삽으로 몇 건 어긋난다 — 근사치
+  acc1=$(prom_value "sum(increase(banktransfer_transfer_accepted_total{result=\"created\"}[${win_s}s]))")
+  done1=$(prom_value "sum(increase(banktransfer_transfer_completed_seconds_count{status=\"COMPLETED\"}[${win_s}s]))")
+  [ -z "$acc1" ] || acc1=$(awk -v v="$acc1" 'BEGIN { printf "%d", v + 0.5 }')
+  [ -z "$done1" ] || done1=$(awk -v v="$done1" 'BEGIN { printf "%d", v + 0.5 }')
   firing_names=$({ grep -o '"alertname":"[^"]*"' "$OUT_DIR/$RUN.prom-alerts.json" || true; } | cut -d'"' -f4 | sort -u | tr '\n' ' ' | sed 's/ $//')
   sink_firing=$(awk -v t="$TA_MS" '$3 == "firing" && $1 >= t' "$WORK/alerts.txt" | wc -l | tr -d ' ')
   scrape_down=$(p9a_scrape_down)
   cat > "$OUT_DIR/$RUN.p9a.json" <<JSON
 {"run":"$RUN","t0":"$T0","t_action_ms":$TA_MS,
  "metric_bank_zero_s":${G[metric_bank_zero_s]:-null},"metric_bank_back_s":${G[metric_bank_back_s]:-null},"metric_bank_gap_s":${G[metric_bank_gap_s]:-null},
- "log_bank_reconnect_s":$log_open_s,"bank_gap_diff_s":$diff,
+ "metric_bank_back_raw_s":$raw_back,"log_bank_reconnect_s":$log_open_s,"bank_gap_diff_s":$diff,"bank_gap_diff_raw_s":$diff_raw,
  "leaders_zero_s":${L[leaders_zero_s]:-null},"leaders_back_s":${L[leaders_back_s]:-null},"leaders_gap_s":${L[leaders_gap_s]:-null},
  "victim_series_end_s":$victim_end,
  "alert_BankDisconnected_firing_s":$(alert_s BankDisconnected firing),"alert_BankDisconnected_resolved_s":$(alert_s BankDisconnected resolved),
@@ -148,7 +177,7 @@ p9a_capture() {
  "scrape_target_down_first_s":$(str "$scrape_down"),
  "maint_start":$(str "${MAINT_START:-}"),"maint_end":$(str "${MAINT_END:-}"),
  "db_query_max_ms":$db_max_ms,"head_series_max":$head_max,
- "accepted_counter_delta":$(delta "$acc0" "$acc1"),"completed_counter_delta":$(delta "$done0" "$done1"),"db_transfers":$(num "${C[transfers]:-}")}
+ "accepted_counter_delta":$(num "$acc1"),"completed_counter_delta":$(num "$done1"),"db_transfers":$(num "${C[transfers]:-}")}
 JSON
   echo "[$RUN] P9a 원자료 — $OUT_DIR/$RUN.p9a.json"
   cat "$OUT_DIR/$RUN.p9a.json"

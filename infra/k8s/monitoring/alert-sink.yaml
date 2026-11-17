@@ -1,6 +1,6 @@
-# P9a 알림 받는 곳 (결정 D5) — busybox nc 반복: 받은 요청(웹훅 JSON)을 그대로 로그에 찍고 200. 운영이면 Slack · 텔레그램 자리.
-# 한 번에 하나만 받는다 (위험 B7 — 겹치면 Alertmanager 가 다시 보낸다). 실험 도구 · 스모크가 kubectl logs --timestamps 로 도착 시각을 읽는다.
-# 응답을 먼저 쓰고 1초 동안 입력을 열어 둔다 — nc 가 요청 본문까지 다 읽고 끝나게. 프로브 없음 (연결 하나가 요청 하나를 잡아먹는다)
+# P9a 알림 받는 곳 (결정 D5) — busybox httpd + CGI: 받은 요청(웹훅 JSON)을 그대로 로그에 찍고 200. 운영이면 Slack · 텔레그램 자리.
+# 연결마다 httpd 가 fork 해서 CGI(sink.sh)가 본문을 CONTENT_LENGTH 만큼 읽어 stderr 로 — 동시에 와도 받고, 본문을 읽기 전에 끝나 잃는 일이 없다
+# (예전 nc 반복은 연결이 1초 뒤에 오면 stdin 이 이미 EOF 라 본문을 못 읽고 200 만 줬다 — 알림 유실). 실험 도구 · 스모크가 kubectl logs --timestamps 로 도착 시각을 읽는다.
 apiVersion: v1
 kind: Service
 metadata:
@@ -31,15 +31,18 @@ spec:
       containers:
         - name: alert-sink
           image: busybox   # 태그 = versions.env BUSYBOX_VERSION (apply_overlay)
-          command: [sh, -c]
-          args:
-            - |
-              while true; do
-                { printf 'HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'; sleep 1; } | nc -l -p 8080
-                echo
-              done
+          command: [busybox, httpd, -f, -p, "8080", -h, /www]   # -f 포그라운드, CGI 는 /www/cgi-bin/ 아래
           ports:
             - {name: http, containerPort: 8080}
           resources:
             requests: {memory: 16Mi, cpu: 10m}
             limits: {memory: 32Mi}
+          readinessProbe:
+            tcpSocket: {port: 8080}
+          volumeMounts:
+            - {name: cgi, mountPath: /www/cgi-bin}
+      volumes:
+        - name: cgi
+          configMap:
+            name: alert-sink-cgi
+            defaultMode: 0555   # 실행 권한 — CGI 로 돌아야 한다

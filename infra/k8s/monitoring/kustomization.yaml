@@ -27,3 +27,6 @@ configMapGenerator:
     files:
       - grafana/transfer-flow.json
       - grafana/gateway-jvm.json
+  - name: alert-sink-cgi
+    files:
+      - sink=alert-sink/sink.sh

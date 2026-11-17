@@ -10,7 +10,7 @@ route:
 receivers:
   - name: alert-sink
     webhook_configs:
-      - url: http://alert-sink.monitoring.svc.cluster.local:8080/
+      - url: http://alert-sink.monitoring.svc.cluster.local:8080/cgi-bin/sink
         send_resolved: true
 
 inhibit_rules:
