@@ -96,7 +96,6 @@ p9a_raw_back() {
     }
     END { if (best == "") print "null"; else printf "%.1f\n", best - ta }'
 }
-delta() { if [[ "${1:-}" =~ ^[0-9.]+$ && "${2:-}" =~ ^[0-9.]+$ ]]; then awk -v a="$1" -v b="$2" 'BEGIN { printf "%d", b - a }'; else echo null; fi; }
 # ALERTS 범위 질의 결과에서 ScrapeTargetDown 시계열마다 "pod=동작뒤_첫_firing_초" (M1 노드 kill — Pod 당 약 1분 뒤 하나)
 p9a_scrape_down() {
   { grep -o '{"metric":{[^}]*"alertname":"ScrapeTargetDown"[^}]*},"values":\[\[[0-9.]*' "$OUT_DIR/$RUN.prom-alerts.json" || true; } \
@@ -158,8 +157,8 @@ p9a_capture() {
   # increase 는 리셋을 견디지만 창 끝 외삽으로 몇 건 어긋난다 — 근사치
   acc1=$(prom_value "sum(increase(banktransfer_transfer_accepted_total{result=\"created\"}[${win_s}s]))")
   done1=$(prom_value "sum(increase(banktransfer_transfer_completed_seconds_count{status=\"COMPLETED\"}[${win_s}s]))")
-  [ -z "$acc1" ] || acc1=$(awk -v v="$acc1" 'BEGIN { printf "%d", v + 0.5 }')
-  [ -z "$done1" ] || done1=$(awk -v v="$done1" 'BEGIN { printf "%d", v + 0.5 }')
+  [[ "$acc1" =~ ^[0-9.]+$ ]] && acc1=$(awk -v v="$acc1" 'BEGIN { printf "%d", v + 0.5 }') || acc1=   # 빈 결과 · NaN → null
+  [[ "$done1" =~ ^[0-9.]+$ ]] && done1=$(awk -v v="$done1" 'BEGIN { printf "%d", v + 0.5 }') || done1=
   firing_names=$({ grep -o '"alertname":"[^"]*"' "$OUT_DIR/$RUN.prom-alerts.json" || true; } | cut -d'"' -f4 | sort -u | tr '\n' ' ' | sed 's/ $//')
   sink_firing=$(awk -v t="$TA_MS" '$3 == "firing" && $1 >= t' "$WORK/alerts.txt" | wc -l | tr -d ' ')
   scrape_down=$(p9a_scrape_down)
