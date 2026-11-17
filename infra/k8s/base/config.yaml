@@ -8,6 +8,8 @@ data:
   BANK_MAINTENANCE_ENABLED: "true"
   BANK_MAINTENANCE_START: "23:50"
   BANK_MAINTENANCE_END: "00:10"
+  # P9a: K8s 에서만 — Compose nginx 입구로 새지 않게, 결정 D2·D6
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,prometheus"
   MYSQL_HOST: mysql
   MYSQL_PORT: "3306"
   KAFKA_BOOTSTRAP_SERVERS: kafka-0.kafka.bank-transfer.svc.cluster.local:9092

@@ -51,6 +51,8 @@ import kotlin.random.Random
         "data-retention.schedule.enabled=false",
         // 상태 지표의 DB 조회 스케줄도 끈다 (P9a): 공유 DB 를 10초마다 읽을 이유가 없다. 테스트는 TransferStateReader · Gauges 를 직접 부른다
         "banktransfer.metrics.db-poll-enabled=false",
+        // prometheus 는 K8s 설정(ConfigMap)에서만 연다 — 앱 기본은 health,info (결정 D2 · D6). 노출 테스트(PrometheusEndpointTest)가 읽을 수 있게 공유 컨텍스트에서 연다 (컨텍스트 · 컨테이너가 두 벌 뜨지 않게)
+        "management.endpoints.web.exposure.include=health,info,prometheus",
     ],
 )
 @Import(MySqlTestContainer::class, KafkaTestContainer::class, RedisTestContainer::class, TestClockConfiguration::class, AlertTestConfiguration::class)

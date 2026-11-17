@@ -37,7 +37,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics   # metrics: 측정 스크립트가 CPU · 스레드 수를 읽는다
+        include: health,info,metrics,prometheus   # metrics: 측정 스크립트가 CPU · 스레드 수를 읽는다. prometheus: P9a (Compose 는 8082 를 PC 에 열지 않는다)
   endpoint:
     health:
       show-details: always             # bankConnection 상태를 본다 (내부망 전용)
@@ -51,6 +51,16 @@ management:
   info:
     env:
       enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}   # P9a 공통 태그
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      minimum-expected-value:
+        http.server.requests: 5ms              # 위험 B2 — api 와 같은 범위
+      maximum-expected-value:
+        http.server.requests: 10s
 
 info:
   gateway:

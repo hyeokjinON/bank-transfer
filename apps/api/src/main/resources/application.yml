@@ -1,5 +1,8 @@
 server:
   shutdown: graceful           # P8-2: 내려갈 때 새 연결을 받지 않고 처리 중인 요청을 끝낸다. Boot 4 기본값이지만 명시 (GracefulShutdownConfigTest)
+  tomcat:
+    mbeanregistry:
+      enabled: true            # P9a: Tomcat 스레드 지표(tomcat_threads_busy_threads) — 꺼져 있으면 Micrometer 가 읽을 MBean 이 없다
 
 spring:
   application:
@@ -86,7 +89,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info   # prometheus 는 K8s 에서만 연다 (ConfigMap app-config) — Compose nginx 입구로 새지 않게, 결정 D2·D6
   endpoint:
     health:
       probes:
@@ -94,6 +97,16 @@ management:
   info:
     env:
       enabled: true   # info.* 설정을 /actuator/info 에 보인다 (P4-2: 차감 전략)
+  metrics:
+    tags:
+      application: ${spring.application.name}   # P9a 공통 태그. Pod · 노드는 Prometheus 가 붙인다 (relabel)
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true             # p95 를 Prometheus 가 계산하게 (histogram_quantile)
+      minimum-expected-value:
+        http.server.requests: 5ms              # 버킷 범위를 5ms ~ 10s 로 묶는다 — 시계열 수 (위험 B2)
+      maximum-expected-value:
+        http.server.requests: 10s
 
 transfer:
   retry:                       # 재시도 토픽 (P3-3b). 은행에 보내지도 못한 메시지만 온다
