@@ -104,7 +104,7 @@ class TransferProcessorBeginFinishTest {
         for ((outcome, expected) in cases) {
             val split = received()
             assertIs<TransferProcessor.Begin.Started>(processor.begin(split.id))
-            val splitResult = processor.finish(split.id, outcome)
+            val splitResult = processor.finish(split, outcome)
 
             val whole = received()
             val wholeResult = TransferProcessor(store, BankTransferPort { _, _, _, _, _ -> outcome }, clock).process(whole.id)
@@ -121,7 +121,7 @@ class TransferProcessorBeginFinishTest {
         val t = received()
         processor.begin(t.id)
 
-        assertEquals(ProcessResult.FAILED, processor.finish(t.id, BankTransferOutcome.Rejected("1001")))
+        assertEquals(ProcessResult.FAILED, processor.finish(t, BankTransferOutcome.Rejected("1001")))
         assertEquals(listOf(Triple(t.id, TransferStatus.SENDING, "1001")), store.failCalls)
     }
 
@@ -131,7 +131,7 @@ class TransferProcessorBeginFinishTest {
         processor.begin(t.id)
         store.transition(t.id, TransferStatus.SENDING, TransferStatus.UNKNOWN, now)   // 응답이 30초 넘게 늦은 사이에 정리 작업이 끼어듦
 
-        assertEquals(ProcessResult.COMPLETED, processor.finish(t.id, BankTransferOutcome.Completed))
+        assertEquals(ProcessResult.COMPLETED, processor.finish(t, BankTransferOutcome.Completed))
         assertEquals(TransferStatus.COMPLETED, store.transfers.getValue(t.id).status)
         assertEquals("0000", store.transfers.getValue(t.id).bankResponseCode)
     }
@@ -143,7 +143,7 @@ class TransferProcessorBeginFinishTest {
         store.transition(t.id, TransferStatus.SENDING, TransferStatus.UNKNOWN, now)
         store.fail(t.id, TransferStatus.UNKNOWN, now, "2001")   // 결과조회가 먼저 FAILED 로 확정 (환불까지)
 
-        assertEquals(ProcessResult.CONFLICT, processor.finish(t.id, BankTransferOutcome.Completed))
+        assertEquals(ProcessResult.CONFLICT, processor.finish(t, BankTransferOutcome.Completed))
         assertEquals(TransferStatus.FAILED, store.transfers.getValue(t.id).status)
         assertEquals(1, store.failCalls.size)
     }
@@ -153,7 +153,7 @@ class TransferProcessorBeginFinishTest {
         val t = received()
         processor.begin(t.id)
 
-        assertEquals(ProcessResult.RETRY_LATER, processor.finish(t.id, BankTransferOutcome.NotSent))
+        assertEquals(ProcessResult.RETRY_LATER, processor.finish(t, BankTransferOutcome.NotSent))
         assertEquals(TransferStatus.RECEIVED, store.transfers.getValue(t.id).status)
         assertIs<TransferProcessor.Begin.Started>(processor.begin(t.id))
     }

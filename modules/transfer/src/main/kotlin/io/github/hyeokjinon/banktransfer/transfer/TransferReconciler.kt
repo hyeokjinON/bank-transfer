@@ -55,6 +55,8 @@ class TransferReconciler(
     private val onAbandon: (Transfer) -> Unit = {},
     /** 건너뛴 건과 그 예외 (도메인은 로거를 모른다 — 로그는 조립하는 쪽에서). */
     private val onItemError: (Transfer, Exception) -> Unit = { _, _ -> },
+    /** P9a 지표 — 저장이 true 로 돌아온 뒤에만 부른다 ([TransferObserver]). */
+    private val observer: TransferObserver = TransferObserver.NONE,
 ) {
 
     fun reconcile(): ReconcileResult {
@@ -79,11 +81,20 @@ class TransferReconciler(
             try {
                 when (outcome) {
                     InquiryOutcome.Processed ->
-                        if (store.transition(transfer.id, UNKNOWN, COMPLETED, now, BANK_OK)) completed++
+                        if (store.transition(transfer.id, UNKNOWN, COMPLETED, now, BANK_OK)) {
+                            completed++
+                            observer.inquired(InquiryResolution.COMPLETED)
+                            observer.finalized(COMPLETED, transfer.createdAt, now)
+                        }
                     is InquiryOutcome.NotProcessed ->
-                        if (store.fail(transfer.id, UNKNOWN, now, outcome.responseCode)) failed++
+                        if (store.fail(transfer.id, UNKNOWN, now, outcome.responseCode)) {
+                            failed++
+                            observer.inquired(InquiryResolution.FAILED)
+                            observer.finalized(FAILED, transfer.createdAt, now)
+                        }
                     InquiryOutcome.Unknown ->
                         if (store.recordInquiryAttempt(transfer.id, now)) {
+                            observer.inquired(InquiryResolution.STILL_UNKNOWN)
                             val attempts = transfer.inquiryAttempts + 1
                             if (attempts >= maxInquiries) {
                                 gaveUp++
@@ -113,9 +124,14 @@ class TransferReconciler(
         for (transfer in store.findRepublishable(now.minus(republishAfter), batchSize)) {
             try {
                 if (transfer.republishCount < maxRepublish) {
-                    if (store.republish(transfer.id, transfer.republishCount, now)) republished++
+                    if (store.republish(transfer.id, transfer.republishCount, now)) {
+                        republished++
+                        observer.republished()
+                    }
                 } else if (store.fail(transfer.id, RECEIVED, now, NOT_SENT)) {
                     abandoned++
+                    observer.abandoned()
+                    observer.finalized(FAILED, transfer.createdAt, now)
                     onAbandon(transfer.copy(status = FAILED, bankResponseCode = NOT_SENT, updatedAt = now))
                 }
             } catch (e: Exception) {
