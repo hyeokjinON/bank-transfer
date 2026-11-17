@@ -22,6 +22,7 @@ spec:
     metadata:
       labels: {app: alertmanager}
     spec:
+      automountServiceAccountToken: false   # 쿠버네티스 API 를 쓰지 않는다
       nodeSelector: {bank-transfer/role: infra}
       tolerations:
         - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}

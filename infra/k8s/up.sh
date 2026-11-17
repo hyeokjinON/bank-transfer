@@ -48,17 +48,17 @@ ENV_FILE=infra/.env
 [ -f "$ENV_FILE" ] || ENV_FILE=infra/.env.example
 mkdir -p build/k8s
 SECRET_ENV=$(mktemp build/k8s/db-credentials.XXXXXX)
-trap 'rm -f "$SECRET_ENV" "${GF_PW:-}"' EXIT
+trap 'rm -f "$SECRET_ENV"' EXIT
 grep -E '^(MYSQL_DATABASE|MYSQL_USER|MYSQL_PASSWORD|MYSQL_ROOT_PASSWORD)=' "$ENV_FILE" | tr -d '\r' > "$SECRET_ENV"
 [ "$(wc -l < "$SECRET_ENV" | tr -d ' ')" = 4 ] || { echo "$ENV_FILE 에 MYSQL_DATABASE · MYSQL_USER · MYSQL_PASSWORD · MYSQL_ROOT_PASSWORD 가 모두 있어야 한다" >&2; exit 1; }
 k create secret generic db-credentials --from-env-file="$SECRET_ENV" --dry-run=client -o yaml | ka apply -f - >/dev/null
 rm -f "$SECRET_ENV"
 # P9a Grafana 관리자 비밀번호: 처음 한 번 임의로 만들어 Secret 에만 둔다 (출력 · 커밋하지 않는다). 다시 불러도 바꾸지 않는다
 if ! ka -n monitoring get secret grafana-admin >/dev/null 2>&1; then
-  GF_PW=$(mktemp build/k8s/grafana-admin.XXXXXX)
-  head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24 > "$GF_PW"
-  ka -n monitoring create secret generic grafana-admin --from-file=password="$GF_PW" >/dev/null
-  rm -f "$GF_PW"
+  # 파일 · 명령행에 남기지 않는다 — printf(셸 내장)로 stdin 매니페스트에만 (kubectl.exe 는 /dev/stdin 을 못 읽는다)
+  GF_PW=$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)
+  printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: grafana-admin\n  namespace: monitoring\nstringData:\n  password: "%s"\n' "$GF_PW" | ka create -f - >/dev/null
+  unset GF_PW
 fi
 
 echo "[6/7] 매니페스트 (overlays/$OVERLAY)"
