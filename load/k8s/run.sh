@@ -164,9 +164,9 @@ GW_FOLLOW=$!
 AM_POLL=
 if [ "$PHASE" = p9a ]; then p9a_am_start; fi   # Alertmanager 표본 (억제 · 침묵 증거)
 K6_NAME="k6-$PHASE-$RUN"
-RESTORE=   # 동작이 시작돼 되돌려야 할 것 (drain | node | bank | gwcut) — 정상 흐름에서 되돌리면 비운다
+RESTORE=${RESTORE:-}   # 동작이 시작돼 되돌려야 할 것 (drain | node | bank | gwcut | gwzero | maint) — 정상 흐름에서 되돌리면 비운다. maint 는 maint_prepare 가 이미 정했다 — 지우지 않는다
 stop_bg() {
-  kill "$SAMPLER" "$FOLLOW" "$GW_FOLLOW" ${AM_POLL:+"$AM_POLL"} 2>/dev/null || true; d rm -f "$K6_NAME" >/dev/null 2>&1 || true
+  kill "$SAMPLER" "$FOLLOW" "$GW_FOLLOW" ${AM_POLL:+"$AM_POLL"} 2>/dev/null || true; [ -z "${AM_POLL:-}" ] || wait "$AM_POLL" 2>/dev/null || true; d rm -f "$K6_NAME" >/dev/null 2>&1 || true
   case "$RESTORE" in
     drain) ka uncordon "$NODE" >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — 노드 $NODE uncordon" >&2 ;;
     node)  d start "$NODE" >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — 노드 $NODE docker start (Ready 는 직접 확인)" >&2 ;;
@@ -178,6 +178,7 @@ stop_bg() {
   esac
 }
 trap stop_bg EXIT
+trap 'exit 130' INT TERM   # 신호도 EXIT 트랩(stop_bg → 되돌리기)을 거치게
 # 다음 회차를 위해: api 두 대가 한 워커에 몰렸으면 다시 나눈다 (ScheduleAnyway · drain 뒤). 판정과 무관한 최선 노력
 spread_nodes() { live_pods api 2>/dev/null | awk 'NF {print $2}' | sort -u | grep -c . || true; }
 restore_spread() {

@@ -9,6 +9,9 @@
 restore_maint() {
   apply_overlay local "$MAINT_TAG" >/dev/null 2>&1 || true
   k rollout restart deploy/api deploy/bank-gateway >/dev/null 2>&1 || true
+  # 다음 실험의 사전 확인("준비 x/y")이 걸리지 않게 끝날 때까지 기다린다 (최선 노력 — 여러 번 불려도 된다)
+  k rollout status deploy/bank-gateway --timeout=300s >/dev/null 2>&1 || true
+  k rollout status deploy/api --timeout=420s >/dev/null 2>&1 || true
   echo "[$RUN] 점검 창을 overlays/local 값으로 되돌렸다 — 재시작 중 (kubectl -n bank-transfer rollout status deploy/api)" >&2
 }
 
@@ -95,7 +98,7 @@ p9a_capture() {
       sleep $(( until - now ))
     fi
   fi
-  if [ -n "${AM_POLL:-}" ]; then kill "$AM_POLL" 2>/dev/null || true; AM_POLL=; fi
+  if [ -n "${AM_POLL:-}" ]; then kill "$AM_POLL" 2>/dev/null || true; wait "$AM_POLL" 2>/dev/null || true; AM_POLL=; fi
   local ta_s=$(( TA_MS / 1000 )) t0_s
   t0_s=$(date -u -d "$T0" +%s)
   p9a_range connected 'max(banktransfer_gateway_bank_connected) or vector(0)'
@@ -124,8 +127,8 @@ p9a_capture() {
     diff=$(awk -v a="${G[metric_bank_back_s]}" -v b="$log_open_s" 'BEGIN { d = a - b; if (d < 0) d = -d; printf "%.1f", d }')
   fi
   if [ -n "${VICTIM:-}" ]; then victim_end=$(p9a_points victim | awk -v ta="$ta_s" 'NF { last = $1 } END { if (last != "") printf "%.1f", last - ta; else print "null" }'); fi
-  db_max_ms=$(p9a_points db-query-max | awk '$2 != "NaN" && $2 + 0 > m { m = $2 + 0 } END { printf "%.1f", m * 1000 }')
-  head_max=$(p9a_points head-series | awk '$2 + 0 > m { m = $2 + 0 } END { printf "%d", m }')
+  db_max_ms=$(p9a_points db-query-max | awk '$2 != "NaN" { n++; if ($2 + 0 > m) m = $2 + 0 } END { if (n) printf "%.1f", m * 1000; else print "null" }')
+  head_max=$(p9a_points head-series | awk '$2 != "NaN" { n++; if ($2 + 0 > m) m = $2 + 0 } END { if (n) printf "%d", m; else print "null" }')
   acc0=$(prom_value 'sum(banktransfer_transfer_accepted_total{result="created"})' "$t0_s"); acc1=$(prom_value 'sum(banktransfer_transfer_accepted_total{result="created"})')
   done0=$(prom_value 'sum(banktransfer_transfer_completed_seconds_count{status="COMPLETED"})' "$t0_s"); done1=$(prom_value 'sum(banktransfer_transfer_completed_seconds_count{status="COMPLETED"})')
   firing_names=$({ grep -o '"alertname":"[^"]*"' "$OUT_DIR/$RUN.prom-alerts.json" || true; } | cut -d'"' -f4 | sort -u | tr '\n' ' ' | sed 's/ $//')
