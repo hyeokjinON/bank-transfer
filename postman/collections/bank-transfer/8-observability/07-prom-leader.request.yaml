@@ -1,7 +1,7 @@
 $kind: http-request
 name: '8-7 Prometheus 게이트웨이 리더 수 → 1'
 method: GET
-url: '{{promUrl}}/api/v1/query?query=sum(banktransfer_gateway_leader)'
+url: 'http://127.0.0.1:9090/api/v1/query?query=sum(banktransfer_gateway_leader)'
 order: 7000
 queryParams:
   - key: query

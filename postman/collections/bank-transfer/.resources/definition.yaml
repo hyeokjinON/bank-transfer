@@ -17,8 +17,6 @@ description: |-
 variables:
   baseUrl: http://localhost:8080
   reactiveBaseUrl: http://localhost:8081
-  k8sUrl: http://127.0.0.1:8000
-  promUrl: http://127.0.0.1:9090
   p9aTransferId: ""
   userId: user-1
   accountNo: "1002123456789"

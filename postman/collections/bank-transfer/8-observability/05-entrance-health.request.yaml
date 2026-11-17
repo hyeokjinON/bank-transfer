@@ -1,7 +1,7 @@
 $kind: http-request
 name: 8-5 입구로 /actuator/health → 200 UP
 method: GET
-url: '{{k8sUrl}}/actuator/health'
+url: 'http://127.0.0.1:8000/actuator/health'
 order: 5000
 scripts:
   - type: afterResponse

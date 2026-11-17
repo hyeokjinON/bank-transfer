@@ -1,7 +1,7 @@
 $kind: http-request
 name: 8-3 그 출금 조회 → COMPLETED (몇 초 뒤 · 은행 끊김 중이면 RECEIVED)
 method: GET
-url: '{{k8sUrl}}/api/v1/transfers/{{p9aTransferId}}'
+url: 'http://127.0.0.1:8000/api/v1/transfers/{{p9aTransferId}}'
 order: 3000
 headers:
   - key: X-User-Id

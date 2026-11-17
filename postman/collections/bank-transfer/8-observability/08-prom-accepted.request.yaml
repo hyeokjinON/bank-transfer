@@ -1,7 +1,7 @@
 $kind: http-request
 name: '8-8 Prometheus 5분간 접수 증가 (근사치, 8-2 횟수와 비슷)'
 method: GET
-url: '{{promUrl}}/api/v1/query?query=sum(increase(banktransfer_transfer_accepted_total[5m]))'
+url: 'http://127.0.0.1:9090/api/v1/query?query=sum(increase(banktransfer_transfer_accepted_total[5m]))'
 order: 8000
 queryParams:
   - key: query

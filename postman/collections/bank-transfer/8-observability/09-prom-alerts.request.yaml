@@ -1,7 +1,7 @@
 $kind: http-request
 name: 8-9 Prometheus 지금 울리는 알림 → 평소 없음 · 은행 끊고 약 1분 뒤 BankDisconnected
 method: GET
-url: '{{promUrl}}/api/v1/alerts'
+url: 'http://127.0.0.1:9090/api/v1/alerts'
 order: 9000
 scripts:
   - type: afterResponse

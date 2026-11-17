@@ -1,7 +1,7 @@
 $kind: http-request
 name: 8-2 출금 3만 원 → 202 RECEIVED (id 저장)
 method: POST
-url: '{{k8sUrl}}/api/v1/transfers'
+url: 'http://127.0.0.1:8000/api/v1/transfers'
 order: 2000
 headers:
   - key: Content-Type
