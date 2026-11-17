@@ -103,11 +103,17 @@ class TransferProcessor(
     private fun record(transfer: Transfer, to: TransferStatus, bankResponseCode: String?, result: ProcessResult): ProcessResult {
         val id = transfer.id
         val now = clock.instant()
-        if (move(id, SENDING, to, now, bankResponseCode)) return result.also { if (to == COMPLETED || to == FAILED) observer.finalized(to, transfer.createdAt, now) }
-        if ((to == COMPLETED || to == FAILED) && move(id, UNKNOWN, to, now, bankResponseCode)) return result.also { observer.finalized(to, transfer.createdAt, now) }
-        if (to == COMPLETED || to == FAILED) {
+        if (move(id, SENDING, to, now, bankResponseCode)) {
+            if (to.isFinal) observer.finalized(to, transfer.createdAt, now)
+            return result
+        }
+        if (to.isFinal && move(id, UNKNOWN, to, now, bankResponseCode)) {
+            observer.finalized(to, transfer.createdAt, now)
+            return result
+        }
+        if (to.isFinal) {
             val current = store.findById(id)?.status
-            if ((current == COMPLETED || current == FAILED) && current != to) return ProcessResult.CONFLICT
+            if (current?.isFinal == true && current != to) return ProcessResult.CONFLICT
         }
         return ProcessResult.ALREADY_HANDLED
     }

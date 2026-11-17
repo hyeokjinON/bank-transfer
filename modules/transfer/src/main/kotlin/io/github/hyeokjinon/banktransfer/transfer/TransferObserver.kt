@@ -10,6 +10,7 @@ enum class InquiryResolution { COMPLETED, FAILED, STILL_UNKNOWN }
  * 부르는 시점: 저장 메서드(transition · fail · republish · recordInquiryAttempt)가 true 로 돌아온 뒤 = 그 저장의 트랜잭션이 커밋된 뒤
  * (부르는 쪽 — 컨슈머 · 정리 작업 — 은 트랜잭션 밖이다). 저장이 예외이거나 false(다른 쪽이 먼저 바꿈)면 부르지 않는다:
  * 롤백 · 낙관 락 재시도 · 중복 메시지에 두 번 세지 않게 (스펙 위험 A4). 카운터는 근사치다 — 돈의 정답은 DB (위험 B3).
+ * 구현은 예외를 던지지 않는다 — 관찰은 돈 처리 흐름을 바꾸지 않는다 (호출자는 막지 않는다).
  * 기본 구현은 아무것도 하지 않는다 ([NONE]).
  */
 interface TransferObserver {

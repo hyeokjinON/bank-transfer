@@ -94,7 +94,6 @@ class TransferReconciler(
                         }
                     InquiryOutcome.Unknown ->
                         if (store.recordInquiryAttempt(transfer.id, now)) {
-                            observer.inquired(InquiryResolution.STILL_UNKNOWN)
                             val attempts = transfer.inquiryAttempts + 1
                             if (attempts >= maxInquiries) {
                                 gaveUp++
@@ -102,6 +101,7 @@ class TransferReconciler(
                             } else {
                                 stillUnknown++
                             }
+                            observer.inquired(InquiryResolution.STILL_UNKNOWN)   // 관찰은 업무 콜백 뒤 — 던져도 알림이 막히지 않는다
                         }
                     // 연결이 없으면 남은 건도 똑같다: 건마다 기다리지 않고 다음 주기에 다시 묻는다. 시도로 세지 않는다
                     InquiryOutcome.Unavailable -> break@inquiries
@@ -130,9 +130,9 @@ class TransferReconciler(
                     }
                 } else if (store.fail(transfer.id, RECEIVED, now, NOT_SENT)) {
                     abandoned++
-                    observer.abandoned()
-                    observer.finalized(FAILED, transfer.createdAt, now)
                     onAbandon(transfer.copy(status = FAILED, bankResponseCode = NOT_SENT, updatedAt = now))
+                    observer.abandoned()   // 관찰은 업무 콜백 뒤 — 던져도 알림이 막히지 않는다
+                    observer.finalized(FAILED, transfer.createdAt, now)
                 }
             } catch (e: Exception) {
                 errors++
