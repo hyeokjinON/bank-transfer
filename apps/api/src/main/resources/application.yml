@@ -9,7 +9,7 @@ spring:
   task:
     scheduling:
       pool:
-        size: 4   # 발행기(0.5초) · 정리 작업(10초) · 일마감 대사(01 ~ 06시) · 보존 배치(06:30, 밀린 행이 많으면 길다)가 서로 막지 않게 (P5-2 에서 3 → 4)
+        size: 5   # 발행기(0.5초) · 정리 작업(10초) · 상태 지표 조회(10초, P9a) · 일마감 대사(01 ~ 06시) · 보존 배치(06:30, 밀린 행이 많으면 길다)가 서로 막지 않게 (P5-2 3 → 4, P9a 4 → 5)
   threads:
     virtual:
       enabled: false   # 가상 스레드 (P7): 켜면 Tomcat 요청 · 앱 실행기 · @Scheduled · Kafka 리스너가 가상 스레드. 기본은 끔 — 켤지는 ADR-0014, 측정은 VT=1 (OPERATION §13)
@@ -157,6 +157,11 @@ alert:
     bot-token: ${ALERT_TELEGRAM_BOT_TOKEN:}
     chat-id: ${ALERT_TELEGRAM_CHAT_ID:}
     base-url: https://api.telegram.org
+
+banktransfer:
+  metrics:                     # P9a 상태 Gauge (스펙 §4-2). 조회 주기 · 켜기만 둔다 (Prometheus 노출은 kind 매니페스트에서)
+    db-poll-enabled: true      # 테스트는 끈다 (ApiIntegrationTest — refresh() 를 직접 부른다)
+    db-poll-interval: 10s      # 조회 시간이 50ms 를 넘으면 V7 인덱스를 검토 (위험 B1, docs/perf/p9a-metrics.md)
 
 info:
   instance: ${INFO_INSTANCE:local}   # 어느 api 인가 (P8-2). Compose 가 api-1 · api-2 를 넣는다 — nginx 뒤 분배 확인 · ShedLock locked_by
