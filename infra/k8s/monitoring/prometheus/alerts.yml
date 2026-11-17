@@ -61,7 +61,8 @@ groups:
 
       # 6 일마감 대사가 맞출 건 — 남아 있는 동안 1시간마다 다시 (repeat_interval, A3)
       - alert: TransferUnknownExhausted
-        expr: max(banktransfer_transfer_unknown_exhausted) > 0
+        # max_over_time 1m — DB 조회 한 번 실패(NaN)나 30초 캐시 만료로 해제 · 재발 쌍이 나가지 않게 (for 는 없다)
+        expr: max(max_over_time(banktransfer_transfer_unknown_exhausted[1m])) > 0
         labels:
           severity: warning
         annotations:

@@ -140,6 +140,32 @@ tests:
           - exp_labels: {severity: critical}
             exp_annotations: {summary: "출금이 단계에서 막혔다 (RECEIVED 30분 또는 SENDING 2분 넘게)", runbook: "OPERATION.md §17-3 TransferPipelineStalled"}
 
+  # 7 모든 Pod 가 30초 → 없음 (기준 60초 아래)
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_outbox_unpublished_oldest_seconds{pod="api-0"}'
+        values: '30x30'
+      - series: 'banktransfer_outbox_unpublished_oldest_seconds{pod="api-1"}'
+        values: '30x30'
+    alert_rule_test:
+      - eval_time: 70s
+        alertname: OutboxBacklog
+        exp_alerts: []
+
+  # 4 임계값 바로 아래(RECEIVED 1799 · SENDING 119)는 for 가 지나도 울리지 않는다 — 점검 아님
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_transfer_open_oldest_seconds{status="RECEIVED", pod="api-0"}'
+        values: '1799x30'
+      - series: 'banktransfer_transfer_open_oldest_seconds{status="SENDING", pod="api-0"}'
+        values: '119x30'
+      - series: 'banktransfer_bank_maintenance{pod="api-0"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 70s
+        alertname: TransferPipelineStalled
+        exp_alerts: []
+
   # 4 · 9 점검 중이면 울리지 않는다
   - interval: 5s
     input_series:
@@ -219,7 +245,29 @@ tests:
           - exp_labels: {severity: warning}
             exp_annotations: {summary: "결과조회를 다 써도 결과를 모르는 출금이 있다 (일마감 대사 대상)", runbook: "OPERATION.md §17-3 TransferUnknownExhausted"}
 
-  # 7 아웃박스 60초 넘게 → 1분 뒤 / 30초면 없음
+  # 6 DB 조회 한 번 실패(NaN)나 표본 빠짐이 끼어도 해제 · 재발이 없다 (max_over_time 1m)
+  - interval: 5s
+    input_series:
+      - series: 'banktransfer_transfer_unknown_exhausted{pod="api-0"}'
+        values: '2x5 NaN 2x4 _ 2x10'
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: TransferUnknownExhausted
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: "결과조회를 다 써도 결과를 모르는 출금이 있다 (일마감 대사 대상)", runbook: "OPERATION.md §17-3 TransferUnknownExhausted"}
+      - eval_time: 35s
+        alertname: TransferUnknownExhausted
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: "결과조회를 다 써도 결과를 모르는 출금이 있다 (일마감 대사 대상)", runbook: "OPERATION.md §17-3 TransferUnknownExhausted"}
+      - eval_time: 55s
+        alertname: TransferUnknownExhausted
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations: {summary: "결과조회를 다 써도 결과를 모르는 출금이 있다 (일마감 대사 대상)", runbook: "OPERATION.md §17-3 TransferUnknownExhausted"}
+
+  # 7 아웃박스 60초 넘게 → 1분 뒤 (max 라서 api-1 의 30초는 영향 없다)
   - interval: 5s
     input_series:
       - series: 'banktransfer_outbox_unpublished_oldest_seconds{pod="api-0"}'
@@ -293,11 +341,11 @@ tests:
   - interval: 5s
     input_series:
       - series: 'up{namespace="bank-transfer", pod="api-0", app="api"}'
-        values: '1x10 0x30'
+        values: '1x10 0x250'
       - series: 'process_start_time_seconds{namespace="bank-transfer", pod="api-0", app="api"}'
-        values: '1700000000x10 _x30'
+        values: '1700000000x10 stale'
       - series: 'up{namespace="bank-transfer", pod="api-1", app="api"}'
-        values: '0x40'
+        values: '0x260'
     alert_rule_test:
       - eval_time: 100s
         alertname: ScrapeTargetDown
@@ -307,6 +355,10 @@ tests:
         exp_alerts:
           - exp_labels: {severity: warning, namespace: bank-transfer, pod: api-0, app: api}
             exp_annotations: {summary: "지표를 읽던 앱 Pod 를 1분 넘게 못 읽는다", runbook: "OPERATION.md §17-3 ScrapeTargetDown"}
+      # 마지막 표본(50초)이 15분 창에서 빠진 뒤(16분)엔 울리지 않는다 — last_over_time 15m 를 고정. 수집 실패는 stale 표식 (실제 Prometheus 와 같다)
+      - eval_time: 16m
+        alertname: ScrapeTargetDown
+        exp_alerts: []
 
   # 11 상태 Gauge 가 NaN (DB 조회 실패) → 2분 뒤
   - interval: 5s
