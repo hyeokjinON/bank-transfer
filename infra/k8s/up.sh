@@ -72,3 +72,4 @@ ka -n envoy-gateway-system wait pod -l "gateway.envoyproxy.io/owning-gateway-nam
 echo "올라왔다 (태그 $TAG) — 확인: bash infra/k8s/smoke.sh · 입구 http://127.0.0.1:8000"
 echo "관측 (P9a, OPERATION §17): kubectl --context $CTX -n monitoring port-forward svc/grafana 3000:3000 → http://127.0.0.1:3000 (익명 보기)"
 echo "  Prometheus svc/prometheus 9090:9090 · Alertmanager svc/alertmanager 9093:9093 · Grafana 관리자 비밀번호: kubectl --context $CTX -n monitoring get secret grafana-admin -o jsonpath='{.data.password}' | base64 -d"
+echo "추적 (P9b, OPERATION §18): Grafana → Explore → 데이터 소스 Tempo → TraceQL { span.transfer.id = \"<출금 id>\" } · API: kubectl --context $CTX -n monitoring port-forward svc/tempo 3200:3200"

@@ -10,3 +10,10 @@ datasources:
     editable: false
     jsonData:
       timeInterval: 5s
+  # P9b: Explore 에서 TraceQL (예 { span.transfer.id = "<출금 id>" }). 서비스 맵 · 로그 연결은 범위 밖 (P9c)
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo.monitoring.svc.cluster.local:3200
+    editable: false

@@ -1,0 +1,26 @@
+# P9b Tempo 단일 바이너리 설정 (스펙 §6, 결정 E2 · E5). 받기 = OTLP HTTP 4318 만 (gRPC · Jaeger · Zipkin 수신기 없음), 조회 = 3200,
+# 로컬 디스크(emptyDir) · 보관 2일. metrics-generator(서비스 맵 · 구간 지표)는 범위 밖 (스펙 §11)
+stream_over_http_enabled: true
+server:
+  http_listen_port: 3200
+  log_level: info
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+          endpoint: 0.0.0.0:4318   # 2.7 부터 기본이 localhost — 명시하지 않으면 Pod 밖(앱)에서 못 보낸다
+ingester:
+  max_block_duration: 5m           # 5분마다 블록을 닫아 로컬 저장으로 — 재시작 때 잃는 양을 줄인다 (emptyDir 라 Pod 가 바뀌면 다 잃는다)
+compactor:
+  compaction:
+    block_retention: 48h           # 보관 2일 (Prometheus 와 같다)
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+usage_report:
+  reporting_enabled: false         # 밖으로 나가는 사용 통계를 끈다 (Grafana 와 같은 원칙)

@@ -10,6 +10,9 @@ data:
   BANK_MAINTENANCE_END: "00:10"
   # P9a: K8s 에서만 — Compose nginx 입구로 새지 않게, 결정 D2·D6
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,prometheus"
+  # P9b: 추적 보내기 — kind 에만 (결정 E3 · E5). 앱 기본은 주소 없음 = 보내지 않음. 샘플링 끔 실험(T1)은 load/k8s/p9b.sh 가 0.0 으로 바꿨다 되돌린다
+  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://tempo.monitoring.svc.cluster.local:4318/v1/traces
+  MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
   MYSQL_HOST: mysql
   MYSQL_PORT: "3306"
   KAFKA_BOOTSTRAP_SERVERS: kafka-0.kafka.bank-transfer.svc.cluster.local:9092

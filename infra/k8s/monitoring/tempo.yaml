@@ -1,0 +1,52 @@
+# P9b Tempo (스펙 §6) — 단일 바이너리 1대 + 설정 ConfigMap. 앱(api · 게이트웨이)이 OTLP HTTP 4318 로 직접 보낸다 (Collector 없음, 결정 E5).
+# 조회 3200 은 Grafana · 스모크 · 실험(Prometheus Pod 의 wget)만 — PC 는 port-forward. 제어 노드 고정 (P9a 감시 4개와 같은 자리)
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+  labels: {app: tempo}
+spec:
+  selector: {app: tempo}
+  ports:
+    - {name: http, port: 3200}
+    - {name: otlp-http, port: 4318}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tempo
+spec:
+  replicas: 1
+  strategy: {type: Recreate}   # 한 대 · emptyDir — 겹칠 이유가 없다
+  selector:
+    matchLabels: {app: tempo}
+  template:
+    metadata:
+      labels: {app: tempo}
+    spec:
+      automountServiceAccountToken: false   # 쿠버네티스 API 를 쓰지 않는다
+      nodeSelector: {bank-transfer/role: infra}
+      tolerations:
+        - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+      securityContext: {runAsUser: 10001, runAsGroup: 10001, runAsNonRoot: true, fsGroup: 10001}
+      containers:
+        - name: tempo
+          image: grafana/tempo   # 태그 = versions.env TEMPO_VERSION (apply_overlay)
+          args: [-config.file=/etc/tempo/tempo.yml]
+          ports:
+            - {name: http, containerPort: 3200}
+            - {name: otlp-http, containerPort: 4318}
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            periodSeconds: 5
+          resources:
+            requests: {memory: 128Mi, cpu: 50m}
+            limits: {memory: 512Mi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/tempo}
+            - {name: data, mountPath: /var/tempo}
+      volumes:
+        - name: config
+          configMap: {name: tempo-config}
+        - name: data
+          emptyDir: {sizeLimit: 2Gi}
