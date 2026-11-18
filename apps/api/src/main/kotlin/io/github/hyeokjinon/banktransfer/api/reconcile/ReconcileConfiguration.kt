@@ -6,6 +6,7 @@ import io.github.hyeokjinon.banktransfer.api.alert.AlertLevel
 import io.github.hyeokjinon.banktransfer.api.alert.AlertNotifier
 import io.github.hyeokjinon.banktransfer.api.alert.notifySafely
 import io.github.hyeokjinon.banktransfer.api.config.BankInquiryAdapter
+import io.github.hyeokjinon.banktransfer.api.tracing.ReconcileTracing
 import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.transfer.ReconcileResult
 import io.github.hyeokjinon.banktransfer.transfer.Transfer
@@ -33,14 +34,17 @@ data class ReconcileProperties(
     val maxRepublish: Int = 3,
 )
 
-/** 정리 작업을 주기적으로 돌린다. 테스트는 이 빈을 끄고 TransferReconciler.reconcile() 을 직접 부른다. */
-class TransferReconcilerScheduler(private val reconciler: TransferReconciler) {
+/** 정리 작업을 주기적으로 돌린다. 테스트는 이 빈을 끄고 TransferReconciler.reconcile() 을 직접 부른다. 실행 1회 = 새 trace (P9b). */
+class TransferReconcilerScheduler(
+    private val reconciler: TransferReconciler,
+    private val tracing: ReconcileTracing = ReconcileTracing.NOOP,
+) {
     private val log = LoggerFactory.getLogger(javaClass)
 
     @Scheduled(fixedDelayString = "\${transfer.reconcile.interval-ms:10000}")
     fun run() {
         try {
-            val result = reconciler.reconcile()
+            val result = tracing.reconcile { reconciler.reconcile() }
             if (result != NOTHING) log.info("reconcile: {}", result)
         } catch (e: Exception) {
             // DB 장애 등. 상태 변경은 모두 조건부라 다음 주기에 그대로 다시 하면 된다.
@@ -73,7 +77,7 @@ class ReconcileConfiguration {
     private val log = LoggerFactory.getLogger(javaClass)
 
     @Bean
-    fun transferReconciler(store: TransferStore, client: BankGateway, props: ReconcileProperties, clock: Clock, alerts: AlertNotifier, metrics: TransferMetrics) =
+    fun transferReconciler(store: TransferStore, client: BankGateway, props: ReconcileProperties, clock: Clock, alerts: AlertNotifier, metrics: TransferMetrics, tracing: ReconcileTracing) =
         TransferReconciler(
             store = store,
             bank = BankInquiryAdapter(client),
@@ -94,9 +98,10 @@ class ReconcileConfiguration {
             // 한 건이 깨져도 나머지는 계속 돈다. 건너뛴 건은 매 주기 다시 여기로 온다 — 손으로 고칠 때까지 ERROR 가 반복된다
             onItemError = { transfer, e -> log.error("reconcile skipped transfer {}: {}", transfer, e.toString(), e) },
             observer = metrics,   // P9a: 재발행 · 포기 · 결과조회 · 확정 (저장이 true 로 돌아온 뒤에만)
+            itemScope = tracing,   // P9b: 결과조회 · 재발행 한 건 = transfer.id 구간
         )
 
     @Bean
     @ConditionalOnProperty(prefix = "transfer.reconcile", name = ["enabled"], havingValue = "true", matchIfMissing = true)
-    fun transferReconcilerScheduler(reconciler: TransferReconciler) = TransferReconcilerScheduler(reconciler)
+    fun transferReconcilerScheduler(reconciler: TransferReconciler, tracing: ReconcileTracing) = TransferReconcilerScheduler(reconciler, tracing)
 }

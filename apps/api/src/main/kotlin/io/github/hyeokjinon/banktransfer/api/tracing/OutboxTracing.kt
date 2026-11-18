@@ -14,20 +14,22 @@ import io.micrometer.tracing.propagation.Propagator
 class OutboxTracing(private val tracer: Tracer, private val propagator: Propagator) {
 
     /** 지금 구간의 W3C traceparent. 구간이 없거나 전파가 꺼져 있으면 null. 샘플링 0 이면 끝 깃발이 00 (전파는 계속된다). */
-    fun currentTraceParent(): String? {
-        val context = tracer.currentTraceContext().context() ?: return null
+    fun currentTraceParent(): String? = runCatching {   // 접수 · 재발행 트랜잭션 안에서 불린다 — 던지지 않는다 (E10)
+        val context = tracer.currentTraceContext().context() ?: return@runCatching null
         val carrier = HashMap<String, String>()
         propagator.inject(context, carrier) { c, key, value -> c?.put(key, value) }
-        return carrier[TRACEPARENT]?.takeIf(::isValid)
-    }
+        carrier[TRACEPARENT]?.takeIf(::isValid)
+    }.getOrNull()
 
-    /** [traceParent] 를 부모로 `outbox.publish` 를 열고 그 범위 안에서 [send]. [send] 의 예외는 구간에 남기고 그대로 던진다. */
+    /** [traceParent] 를 부모로 `outbox.publish` 를 열고 그 범위 안에서 [send]. [send] 의 동기 예외는 구간에 남기고 그대로 던진다 (비동기 브로커 확인 실패는 Kafka producer 구간에 남는다). */
     fun <T> publishing(traceParent: String?, transferId: String, eventId: Long, send: () -> T): T {
-        val builder = if (isValid(traceParent)) propagator.extract(traceParent!!, GETTER) else tracer.spanBuilder().setNoParent()
-        val span = builder.name(SPAN_NAME)
-            .tag(TraceKeys.TRANSFER_ID, transferId)
-            .tag(TraceKeys.OUTBOX_EVENT_ID, eventId.toString())
-            .start()
+        val span = runCatching {   // 구간을 못 열면 구간 없이 보낸다 (E10) — send 의 예외는 건드리지 않는다
+            val builder = if (isValid(traceParent)) propagator.extract(traceParent!!, GETTER) else tracer.spanBuilder().setNoParent()
+            builder.name(SPAN_NAME)
+                .tag(TraceKeys.TRANSFER_ID, transferId)
+                .tag(TraceKeys.OUTBOX_EVENT_ID, eventId.toString())
+                .start()
+        }.getOrNull() ?: return send()
         return tracer.inSpan(span, send)
     }
 

@@ -32,6 +32,10 @@ class TracingConfiguration {
     fun outboxTracing(tracer: ObjectProvider<Tracer>, propagator: ObjectProvider<Propagator>) =
         OutboxTracing(tracer.getIfAvailable { Tracer.NOOP }, propagator.getIfAvailable { Propagator.NOOP })
 
+    /** 정리 작업 root · 건별 구간 (스펙 §4-2). */
+    @Bean
+    fun reconcileTracing(tracer: ObjectProvider<Tracer>) = ReconcileTracing(tracer.getIfAvailable { Tracer.NOOP })
+
     @Bean
     fun traceTags(tracer: ObjectProvider<Tracer>) = TraceTags(tracer.getIfAvailable { Tracer.NOOP })
 }

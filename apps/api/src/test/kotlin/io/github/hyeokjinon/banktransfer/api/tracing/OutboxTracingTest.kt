@@ -83,4 +83,15 @@ class OutboxTracingTest {
         assertEquals(StatusCode.ERROR, publishSpans().single().status.statusCode)
         assertNull(tracer.currentSpan())
     }
+
+    @Test
+    fun `바깥 구간 안에서 틀린 traceparent 로 열어도 outbox publish 는 부모가 없다 (setNoParent 가 필요한 이유)`() {
+        val outer = tracer.nextSpan().name("outer").start()
+        tracer.withSpan(outer).use { tracing.publishing("garbage", "t", 1L) { } }
+        outer.end()
+
+        val publish = publishSpans().single()
+        assertFalse(publish.parentSpanContext.isValid)
+        assertTrue(publish.traceId != outer.context().traceId())
+    }
 }

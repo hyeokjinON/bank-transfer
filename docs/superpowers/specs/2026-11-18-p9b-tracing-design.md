@@ -156,3 +156,4 @@ OpenTelemetry Collector · 꼬리 샘플링, JDBC · SQL 구간, Redis 구간, �
 18. **별도 JVM 게이트웨이 확인** (§8) — 테스트가 OTLP 수신기(JDK HttpServer + opentelemetry-proto)를 띄워 게이트웨이 JVM 의 구간을 받는다. 기존 `HttpGatewayFlowTest` 에 더한다 (새 컨텍스트 · 컨테이너를 늘리지 않음).
 19. **exemplar 는 덤 Task 로 유지** (§6) — Boot 4.1.1 에 Prometheus exemplar 자동 구성이 있다. Prometheus `exemplar-storage` · Grafana 연결 · 패널 13, 안 보이면 되돌린다.
 20. **로그 줄 모양** (위험 C8) — 실험 도구 · 스모크는 kubectl 시각 열과 부분 문자열만 읽는다 (점검함). Boot 기본 상관 패턴은 통합 테스트로 확인, 비어 있으면 `logging.pattern.correlation` 명시.
+21. **`reconcile.*` 건수는 숫자(long) 속성** (§5 표) — "우리가 붙이는 속성 값은 문자열" 규칙의 의도된 예외. TraceQL 이 `span.reconcile.republished > 0` 처럼 비교하게 하려는 것이다.

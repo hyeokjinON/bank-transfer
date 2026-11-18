@@ -10,7 +10,7 @@ import java.util.UUID
 class TraceTags(private val tracer: Tracer) {
 
     fun transferId(id: UUID) {
-        tracer.currentSpan()?.tag(TraceKeys.TRANSFER_ID, id.toString())
+        runCatching { tracer.currentSpan()?.tag(TraceKeys.TRANSFER_ID, id.toString()) }   // 돈 흐름으로 던지지 않는다 (E10)
     }
 
     companion object {
