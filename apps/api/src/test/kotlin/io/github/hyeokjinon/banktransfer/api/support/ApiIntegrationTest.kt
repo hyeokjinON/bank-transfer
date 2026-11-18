@@ -55,7 +55,7 @@ import kotlin.random.Random
         "management.endpoints.web.exposure.include=health,info,prometheus",
     ],
 )
-@Import(MySqlTestContainer::class, KafkaTestContainer::class, RedisTestContainer::class, TestClockConfiguration::class, AlertTestConfiguration::class)
+@Import(MySqlTestContainer::class, KafkaTestContainer::class, RedisTestContainer::class, TestClockConfiguration::class, AlertTestConfiguration::class, TracingTestConfiguration::class)
 abstract class ApiIntegrationTest {
 
     companion object {
