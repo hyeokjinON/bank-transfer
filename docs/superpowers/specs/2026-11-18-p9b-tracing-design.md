@@ -132,3 +132,27 @@ OpenTelemetry Collector · 꼬리 샘플링, JDBC · SQL 구간, Redis 구간, �
 
 ## 13. 작업 순서
 1. 의존성 · 설정 (끔 기본) + 메모리 내보내기 테스트 토대 → 2. 자동 구간 확인(HTTP · Kafka) → 3. 아웃박스 traceparent (V7 · 쓰기 · 복원) → 4. 정리 작업 구간 → 5. 게이트웨이 `bank.request` → 6. 비교 판(코루틴 · JDK) → 7. 금지 속성 · 끔 테스트 → 8. 인프라(Tempo · Grafana · exemplar) → 9. 스모크 [11] · CI → 10. 실험 도구 `PHASE=p9b` → 11. 실험 T1 ~ T5 · 측정 문서 → 12. 문서 · 구성도.
+
+## 14. 계획 단계에서 고친 점 (2026-11-18)
+구현 계획(`docs/superpowers/plans/2026-11-18-p9b-tracing.md`)을 쓰며 실제 jar(메타데이터 · 바이트코드) · 코드로 확인한 결과다. 이 절이 앞 절과 다르면 이 절이 맞다. 번호는 계획의 "계획에서 정한 것" 과 같다.
+
+1. **Kafka 관측 속성 확인** (§3 표 "계획 단계에서 확인") — `spring.kafka.template.observation-enabled` · `spring.kafka.listener.observation-enabled` 가 Boot 4.1.1 에 있고 기본 false. yml 두 줄로 켠다 (코드 불필요). 재시도 · DLT 발행은 자동 구성 템플릿을 쓰고 Spring Kafka 4.1.1 은 오류 처리기를 소비 구간 범위 안에서 부른다 → 재시도 체인은 같은 trace (위험 C2 확인).
+2. **§3 표의 "보내기 켜기 `management.tracing.export.enabled` 기본 false" 를 버린다** — Boot 4.1 에서 이 값은 전파기까지 끈다. 보내기는 **주소(`management.opentelemetry.tracing.export.otlp.endpoint`)가 있을 때만** 생기므로 앱 기본 = 주소 없음, kind 의 app-config 만 주소를 준다. 구간 · 전파 · 로그 상관은 어디서나 켜져 있다. T1 의 "끔" = 샘플링 0.
+3. **테스트 의존성 확정** (§3 끝) — `spring-boot-micrometer-tracing-test` 는 넣지 않는다 (`@AutoConfigureTracing` 없는 테스트마다 export.enabled=false → 2 때문에 전파가 꺼진다). `io.opentelemetry:opentelemetry-sdk-testing` 의 `InMemorySpanExporter` 를 `SimpleSpanProcessor` 빈으로 단다.
+4. **OTLP 지표 끔** (새로) — 스타터가 `micrometer-registry-otlp` 도 끌어와 1분마다 `localhost:4318` 로 지표를 민다 → `management.otlp.metrics.export.enabled=false` (지표는 P9a Prometheus).
+5. **@Scheduled 관측 끔** (§4-1 "발행기 주기 실행은 관측하지 않는다" 의 방법) — Boot 가 @Scheduled 실행마다 관측한다 → `management.observations.enable.[tasks.scheduled.execution]=false` (이 지표는 쓰지 않는다). 정리 작업 root 는 코드가 연다.
+6. **actuator 구간은 내보내지 않는다** (새로) — 프로브 · Prometheus 수집 요청. 지표는 그대로.
+7. **내보내기 앞 지우개 + 공용 모듈 `modules/tracing`** (새로, E9) — 예외를 구간에 남기면 메시지 · 스택 · 상태 설명이 같이 간다 (예: 잔고 부족 메시지의 사용자 id · 금액, 검증 메시지의 거절된 계좌번호). 보내기 전에 `exception.type` 만 남긴다. 두 앱이 같이 쓴다.
+8. **아웃박스 복원 = 행마다 `outbox.publish` 구간** (§4-1 · §5 표) — 저장한 traceparent 를 부모로 짧은 구간을 열고 그 안에서 send. Kafka 자동 producer 구간은 사용자 속성을 받지 못해 `transfer.id` · `outbox.event_id` 를 이 구간에 둔다. 구간 표에 한 줄 는다.
+9. **WebClient** (§4-4) — 게이트웨이 클라이언트는 `modules/bank-gateway-http` 에서 `WebClient.builder()` 로 직접 만든다 (Boot Builder 아님) → `HttpBankGateway.create(kind, settings, observations)` 로 관측 레지스트리를 넘긴다. JDK 판은 보내는 쪽 관측(`banktransfer.gateway.http.client`)을 손으로 — 모듈은 micrometer-observation 에만 의존.
+10. **코루틴** (§4-4 "정확한 API") — Spring 7.0.9 가 suspend 리스너를 부를 때 자동 문맥 전파가 켜져 있으면 `PropagationContextElement` 를 붙인다 → `spring.reactor.context-propagation=auto` 한 줄 (코드 없음). 비동기 실패 경로의 재시도 발행은 소비 구간 밖이라 새 trace 일 수 있다 (시험 범위 밖).
+11. **1원인증 실행기 넘김** (새로) — 성명조회 응답 뒤 1원 이체가 앱 실행기 스레드에서 불려 trace 가 끊긴다 → 요청 스레드에서 ContextSnapshot 을 잡아 실행기를 감싼다.
+12. **`bank.request` 는 Observation 이 아니라 Tracer** (§4-3 "구간(Observation)") — Observation 이면 P9a Timer 와 같은 이름의 지표가 다른 태그로 생긴다. 속성에 `error.type`(클래스 이름) 추가.
+13. **정리 작업 건별 구간 = 도메인 포트 `ReconcileItemScope`** (§4-2) — 결과조회 · 재발행 한 건에 transfer.id 를 붙일 자리. 기본 no-op, apps/api 가 구현.
+14. **소비 구간의 `transfer.reference` 는 뺀다** (§5 표) — 컨슈머는 이체 id 만 안다. 거래번호는 같은 trace 의 `bank.request` 에.
+15. **T1 처리량 정의** (§1 기준 4 · §7) — 고정 도착률이라 초당 접수는 같다 → 처리량 = 출금 수 ÷ (부하 + 마무리 대기), CPU 는 부하 동안 평균. 포화 근처 40건/s 쌍 추가, 회차마다 재시작.
+16. **Tempo `2.10.10`** (§6) — 2.x 마지막 줄 (3.x 는 구성이 크게 바뀌어 이번에 쓰지 않음). 2.7 부터 OTLP 수신 기본이 localhost → `0.0.0.0:4318` 명시.
+17. **스모크 [11] 검색** (§9) — `{ span.transfer.id = … } && { resource.service.name = "bank-gateway" }` 로 멱등 재응답 trace 를 거르고, Tempo 가 뗀 traceID 앞 0 을 채워 로그를 grep, actuator 구간 0 도 본다.
+18. **별도 JVM 게이트웨이 확인** (§8) — 테스트가 OTLP 수신기(JDK HttpServer + opentelemetry-proto)를 띄워 게이트웨이 JVM 의 구간을 받는다. 기존 `HttpGatewayFlowTest` 에 더한다 (새 컨텍스트 · 컨테이너를 늘리지 않음).
+19. **exemplar 는 덤 Task 로 유지** (§6) — Boot 4.1.1 에 Prometheus exemplar 자동 구성이 있다. Prometheus `exemplar-storage` · Grafana 연결 · 패널 13, 안 보이면 되돌린다.
+20. **로그 줄 모양** (위험 C8) — 실험 도구 · 스모크는 kubectl 시각 열과 부분 문자열만 읽는다 (점검함). Boot 기본 상관 패턴은 통합 테스트로 확인, 비어 있으면 `logging.pattern.correlation` 명시.
