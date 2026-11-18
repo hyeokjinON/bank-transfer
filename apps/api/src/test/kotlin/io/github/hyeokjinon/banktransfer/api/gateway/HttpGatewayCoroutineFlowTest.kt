@@ -72,7 +72,7 @@ class HttpGatewayCoroutineFlowTest : ApiIntegrationTest() {
     }
 
     @Test
-    fun `코루틴 컨슈머 - suspend 뒤 db 스레드에서 연 게이트웨이 호출도 접수 trace 에 (TraceContextElement)`() {
+    fun `코루틴 컨슈머 - suspend 뒤 db 스레드에서 연 게이트웨이 호출도 접수 trace 에 (asContextElement)`() {
         spans.clear()
         val user = fundedUser(100_000)
         val account = verifiedBy(user, "1002123456789")

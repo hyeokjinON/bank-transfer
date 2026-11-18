@@ -20,11 +20,20 @@ class OtlpReceiver : AutoCloseable {
         val attributes: Map<String, String>,
     )
 
+    private val errors = CopyOnWriteArrayList<Exception>()
+
     private val received = CopyOnWriteArrayList<ReceivedSpan>()
 
     private val server: HttpServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
         createContext("/v1/traces") { ex ->
-            val request = ex.requestBody.use { ExportTraceServiceRequest.parseFrom(it) }
+            val request = try {
+                ex.requestBody.use { ExportTraceServiceRequest.parseFrom(it) }
+            } catch (e: Exception) {
+                errors += e   // 조용히 구간이 빠지지 않게: 400 으로 답하고 기록 — 테스트가 errors() 로 본다
+                ex.sendResponseHeaders(400, -1)
+                ex.close()
+                return@createContext
+            }
             request.resourceSpansList.forEach { rs ->
                 val service = rs.resource.attributesList.firstOrNull { it.key == "service.name" }?.value?.stringValue.orEmpty()
                 rs.scopeSpansList.flatMap { it.spansList }.forEach { s ->
@@ -43,7 +52,11 @@ class OtlpReceiver : AutoCloseable {
 
     val endpoint: String get() = "http://127.0.0.1:${server.address.port}/v1/traces"
 
-    fun spans(): List<ReceivedSpan> = received.toList()
+    /** 받은 구간. protobuf 를 읽지 못한 요청이 있었으면 구간이 조용히 빠지지 않고 여기서 던진다. */
+    fun spans(): List<ReceivedSpan> {
+        errors.firstOrNull()?.let { throw AssertionError("OTLP 본문을 읽지 못했다 (${errors.size}건)", it) }
+        return received.toList()
+    }
 
     override fun close() = server.stop(0)
 

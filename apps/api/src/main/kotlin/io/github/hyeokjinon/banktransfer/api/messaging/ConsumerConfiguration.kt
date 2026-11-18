@@ -1,5 +1,6 @@
 package io.github.hyeokjinon.banktransfer.api.messaging
 
+import io.micrometer.observation.ObservationRegistry
 import io.github.hyeokjinon.banktransfer.api.metrics.TransferMetrics
 import io.github.hyeokjinon.banktransfer.api.alert.AlertNotifier
 import io.github.hyeokjinon.banktransfer.api.config.SuspendBankTransferAdapter
@@ -71,6 +72,7 @@ class ConsumerConfiguration {
         props: TransferConsumerProperties,
         metrics: TransferMetrics,
         traceTags: TraceTags,
+        observations: ObservationRegistry,
     ) = SuspendingTransferRequestedListener(
         processor,
         SuspendBankTransferAdapter(client),
@@ -78,5 +80,6 @@ class ConsumerConfiguration {
         alerts = alerts,
         onDeadLetter = metrics::deadLettered,
         onTransferId = traceTags::transferId,
+        observations = observations,
     )
 }

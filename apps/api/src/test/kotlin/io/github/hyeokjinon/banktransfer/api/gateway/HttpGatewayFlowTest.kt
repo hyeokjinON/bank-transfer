@@ -76,8 +76,11 @@ class HttpGatewayFlowTest : ApiIntegrationTest() {
             try {
                 if (proxyHolder.isInitialized()) proxyHolder.value.close()
             } finally {
-                if (gatewayHolder.isInitialized()) gatewayHolder.value.close()   // 프록시 정리가 던져도 게이트웨이 JVM 은 반드시 닫는다
-                otlp.close()
+                try {
+                    if (gatewayHolder.isInitialized()) gatewayHolder.value.close()   // 프록시 정리가 던져도 게이트웨이 JVM 은 반드시 닫는다
+                } finally {
+                    otlp.close()   // 게이트웨이 close 가 던져도 수신기는 닫는다
+                }
             }
         }
     }
