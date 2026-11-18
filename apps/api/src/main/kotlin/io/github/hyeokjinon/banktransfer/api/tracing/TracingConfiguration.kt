@@ -2,7 +2,9 @@ package io.github.hyeokjinon.banktransfer.api.tracing
 
 import io.github.hyeokjinon.banktransfer.tracing.ActuatorSpans
 import io.github.hyeokjinon.banktransfer.tracing.ScrubbingSpanExporter
+import io.micrometer.tracing.Tracer
 import io.micrometer.tracing.exporter.SpanExportingPredicate
+import io.micrometer.tracing.propagation.Propagator
 import io.opentelemetry.sdk.trace.export.SpanExporter
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.micrometer.tracing.opentelemetry.autoconfigure.SpanExporters
@@ -24,4 +26,12 @@ class TracingConfiguration {
 
     @Bean
     fun actuatorSpans(): SpanExportingPredicate = ActuatorSpans()
+
+    /** 아웃박스 traceparent 쓰기 · 복원 (스펙 §4-1). Tracer · Propagator 가 없으면(추적을 뺀 조립) NOOP. */
+    @Bean
+    fun outboxTracing(tracer: ObjectProvider<Tracer>, propagator: ObjectProvider<Propagator>) =
+        OutboxTracing(tracer.getIfAvailable { Tracer.NOOP }, propagator.getIfAvailable { Propagator.NOOP })
+
+    @Bean
+    fun traceTags(tracer: ObjectProvider<Tracer>) = TraceTags(tracer.getIfAvailable { Tracer.NOOP })
 }

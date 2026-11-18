@@ -13,6 +13,7 @@ import io.github.hyeokjinon.banktransfer.api.persistence.OutboxEventJpaRepositor
 import io.github.hyeokjinon.banktransfer.api.persistence.TransferJpaRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletDebit
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletLedger
+import io.github.hyeokjinon.banktransfer.api.tracing.OutboxTracing
 import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
@@ -202,7 +203,8 @@ class AppConfiguration {
         tx: TransactionTemplate,
         wallets: WalletLedger,
         debit: WalletDebit,
-    ): TransferStore = JpaTransferStore(transfers, outbox, tx, wallets, debit)
+        outboxTracing: OutboxTracing,
+    ): TransferStore = JpaTransferStore(transfers, outbox, tx, wallets, debit, traceParent = outboxTracing::currentTraceParent)
 
     /** transfer 모듈은 account 모듈을 모른다. "인증된 계좌인가?"를 1원인증 저장소에 연결하는 곳은 여기뿐이다. */
     @Bean

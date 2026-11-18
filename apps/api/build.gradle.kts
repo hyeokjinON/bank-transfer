@@ -57,6 +57,7 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
     testImplementation("org.testcontainers:testcontainers")   // GenericContainer (Redis 전용 모듈이 없다)
     testImplementation("io.opentelemetry:opentelemetry-sdk-testing")   // InMemorySpanExporter (P9b, 버전은 Boot BOM → OTel BOM)
+    testImplementation("io.micrometer:micrometer-tracing-bridge-otel")   // OutboxTracingTest 가 실제 브리지(OtelTracer · OtelPropagator)를 직접 만든다 (P9b, 버전은 Boot BOM) — 스타터는 런타임 범위로만 준다
     // 별도 JVM 게이트웨이가 보내는 OTLP(protobuf)를 테스트가 받아 읽는다 (P9b). BOM 밖 — micrometer-registry-otlp 1.17.1 이 런타임에 끌어오는 버전과 같게 고정
     testImplementation("io.opentelemetry.proto:opentelemetry-proto:1.10.0-alpha")
 }

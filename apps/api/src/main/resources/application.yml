@@ -189,7 +189,7 @@ alert:
 banktransfer:
   metrics:                     # P9a 상태 Gauge (스펙 §4-2). 조회 주기 · 켜기만 둔다 (Prometheus 노출은 kind 매니페스트에서)
     db-poll-enabled: true      # 테스트는 끈다 (ApiIntegrationTest — refresh() 를 직접 부른다)
-    db-poll-interval: 10s      # 조회 시간이 50ms 를 넘으면 V7 인덱스를 검토 (위험 B1, docs/perf/p9a-metrics.md)
+    db-poll-interval: 10s      # 조회 시간이 50ms 를 넘으면 다음 마이그레이션 인덱스를 검토 (위험 B1, docs/perf/p9a-metrics.md)
 
 info:
   instance: ${INFO_INSTANCE:local}   # 어느 api 인가 (P8-2). Compose 가 api-1 · api-2 를 넣는다 — nginx 뒤 분배 확인 · ShedLock locked_by

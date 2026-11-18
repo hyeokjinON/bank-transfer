@@ -50,8 +50,10 @@ class SuspendingTransferRequestedListener(
     alerts: AlertNotifier = AlertNotifier { },
     /** DLT 지표 (P9a). */
     onDeadLetter: (DltKind) -> Unit = {},
+    /** 소비 구간에 transfer.id (P9b). `on` 의 첫 suspend 전 — 리스너 스레드 · 소비 구간 범위 안에서 불린다. */
+    onTransferId: (UUID) -> Unit = {},
 ) {
-    private val handling = TransferRequestedHandling(alerts, LoggerFactory.getLogger(javaClass), onDeadLetter)
+    private val handling = TransferRequestedHandling(alerts, LoggerFactory.getLogger(javaClass), onDeadLetter, onTransferId)
 
     @RetryableTopic(
         attempts = TransferListenerSettings.ATTEMPTS,
