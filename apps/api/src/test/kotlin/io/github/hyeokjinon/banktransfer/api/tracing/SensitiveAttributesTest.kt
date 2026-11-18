@@ -29,6 +29,7 @@ class SensitiveAttributesTest : ApiIntegrationTest() {
     @Autowired private lateinit var spans: TestSpans
     @Autowired private lateinit var relay: OutboxRelay
     @Autowired private lateinit var store: TransferStore
+    @Autowired private lateinit var tracer: io.micrometer.tracing.Tracer
 
     private val mapType = object : ParameterizedTypeReference<Map<String, Any?>>() {}
 
@@ -83,10 +84,19 @@ class SensitiveAttributesTest : ApiIntegrationTest() {
             assertTrue(spans.all().any { it.kind == SpanKind.CONSUMER && it.attr(TraceKeys.TRANSFER_ID) == id.toString() })
         }
 
+        // 전제 (E9 가 헛돌지 않게): 지울 것이 실제로 있었다. MVC 예외 처리기(ApiExceptionHandler)가 받은 422 · 400 은 구간에 예외로 남지 않는다
+        // (구간은 정상 종료 + 상태 코드만) — 그래서 지우개가 일할 길을 직접 연다: 잔고 부족 · 검증 실패 메시지와 같은 모양의 예외를 구간에 남긴다.
+        val probe = tracer.nextSpan().name("e9.probe").start()
+        probe.error(IllegalStateException("balance of '$payer' is less than 7777771 / account SECRET778899"))
+        probe.end()
+        val rawProbe = spans.raw().filter { it.name == "e9.probe" }.flatMap(::strings)
+        assertTrue(rawProbe.any { payer in it && "7777771" in it && "SECRET778899" in it }, "지우기 전 구간에 민감값이 없다 — 지울 것이 없었다: $rawProbe")
+
         val all = spans.all().flatMap(::strings)
         listOf("7777771", "1002123456789", "SECRET778899", "홍길동", "홍길순비밀", okKey, poorKey, payer, verifier).forEach { secret ->
             assertTrue(all.none { secret in it }, "구간에 민감값 '$secret' 이 있다")
         }
-        assertTrue(all.none { it == code || "BT$code" in it }, "구간에 1원인증 코드가 있다")
+        // 코드는 짧은 숫자라 다른 숫자 속성값과 우연히 같을 수 있다 — 코드가 실린 적요 모양("BT" + 코드)과, 코드가 든 지우기 전 구간이 있다면 그 문자열만 본다
+        assertTrue(all.none { "BT$code" in it }, "구간에 1원인증 코드(적요)가 있다")
     }
 }
