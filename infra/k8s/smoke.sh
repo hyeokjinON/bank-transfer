@@ -198,10 +198,14 @@ done
 [ "$CONNECTED" = 1 ] || fail "max(banktransfer_gateway_bank_connected) = '${CONNECTED:-없음}' (1 이어야)"
 
 # [2] 의 스모크 출금이 지표에 남았나 — 카운터는 기동 때 0 으로 만들어 두어 increase 가 첫 증가를 본다 (마지막 수집을 기다린다)
+# 막 뜬 Pod 는 Prometheus 의 첫 수집이 [2] 보다 늦을 수 있다 — 그러면 첫 표본이 이미 1 이라 increase 가 0 이다 (CI 에서 실제로 걸림).
+# 그래서 원값 합 > 0 도 받는다: 카운터는 Pod 기동 때 0 이니 원값 > 0 은 "이 Pod 들이 출금을 셌다" 다 (오래 떠 있던 로컬 Pod 면 약해지지만 increase 가 그 경우를 본다)
 gt0() { awk -v x="${1:-0}" 'BEGIN { exit !(x > 0) }'; }
 for _ in $(seq 15); do
   ACC=$(prom_value 'sum(increase(banktransfer_transfer_accepted_total{result="created"}[15m]))')
   DONE=$(prom_value 'sum(increase(banktransfer_transfer_completed_seconds_count{status="COMPLETED"}[15m]))')
+  gt0 "$ACC" || ACC=$(prom_value 'sum(banktransfer_transfer_accepted_total{result="created"})')
+  gt0 "$DONE" || DONE=$(prom_value 'sum(banktransfer_transfer_completed_seconds_count{status="COMPLETED"})')
   gt0 "$ACC" && gt0 "$DONE" && break
   sleep 2
 done
