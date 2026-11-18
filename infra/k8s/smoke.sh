@@ -249,21 +249,30 @@ Q="{ span.transfer.id = \"$TID\" } && { resource.service.name = \"bank-gateway\"
 TRACE_ID=
 for _ in $(seq 30); do
   NOW=$(date +%s)
-  TRACE_ID=$({ tempo_get "/api/search?q=$(urlenc "$Q")&limit=5&start=$((NOW - 3600))&end=$NOW" 2>/dev/null || true; } | { grep -o '"traceID":"[0-9a-f]*"' || true; } | head -1 | cut -d'"' -f4)
+  TRACE_ID=$({ tempo_get "/api/search?q=$(urlenc "$Q")&limit=5&start=$((NOW - 3600))&end=$((NOW + 60))" 2>/dev/null || true; } | { grep -o '"traceID":"[0-9a-f]*"' || true; } | head -1 | cut -d'"' -f4)
   [ -n "$TRACE_ID" ] && break
   sleep 2
 done
 [ -n "$TRACE_ID" ] || fail "60초 동안 Tempo 에서 스모크 출금 $TID 의 게이트웨이 구간이 든 trace 를 찾지 못했다 (디버그: kubectl -n monitoring logs deploy/tempo · kubectl -n bank-transfer logs -l app=api | grep 'Failed to export' — OPERATION §18-4)"
 TRACE_ID=$(printf '%32s' "$TRACE_ID" | tr ' ' 0)   # Tempo 검색은 앞의 0 을 뗄 수 있다 — 로그의 32자와 맞춘다
-TRACE=$(tempo_get "/api/traces/$TRACE_ID" | tr -d '\r')
+TRACE=
+for _ in $(seq 5); do
+  TRACE=$({ tempo_get "/api/traces/$TRACE_ID" 2>/dev/null || true; } | tr -d '\r')
+  [ -n "$TRACE" ] && break
+  sleep 2
+done
+[ -n "$TRACE" ] || fail "Tempo 에서 trace $TRACE_ID 를 ID 로 읽지 못했다 (kubectl -n monitoring logs deploy/tempo)"
 SPANS=$({ grep -o '"spanId":"' <<<"$TRACE" || true; } | wc -l | tr -d ' ')
 SVCS=$({ grep -o '"key":"service.name","value":{"stringValue":"[^"]*"' <<<"$TRACE" || true; } | sed 's/.*"stringValue":"//; s/"$//' | sort -u | tr '\n' ' ')
 [ "$SPANS" -ge 5 ] || fail "trace $TRACE_ID 의 구간이 ${SPANS}개 (5 이상 — 접수 · 발행 · Kafka · 게이트웨이 · bank.request)"
 [ "$SVCS" = "bank-gateway bank-transfer " ] || fail "trace $TRACE_ID 의 서비스가 '$SVCS' (bank-gateway · bank-transfer 둘 다여야)"
-LOGHITS=$({ k logs -l app=api --tail=-1 2>/dev/null || true; } | { grep -c "$TRACE_ID" || true; })   # grep -q 는 pipefail + SIGPIPE 로 거짓 실패한다
+LOGS=$(k logs -l app=api --tail=-1 2>/dev/null) || fail "api 로그를 읽지 못했다 (kubectl -n bank-transfer logs -l app=api)"
+LOGHITS=$({ grep -c "$TRACE_ID" <<<"$LOGS" || true; })   # grep -q 는 pipefail + SIGPIPE 로 거짓 실패한다
 [ "${LOGHITS:-0}" -gt 0 ] || fail "api 로그에 traceId $TRACE_ID 가 없다 (로그 상관 — OPERATION §18-4)"
+# 양성 대조: 같은 속성(uri)이 서버 구간에 실제로 붙어 있어야 아래 actuator 0 이 속성 이름 오류로 헛통과하지 않는다
+grep -q '"key":"uri","value":{"stringValue":"/api/v1/transfers"}' <<<"$TRACE" || fail "trace $TRACE_ID 의 서버 구간에 uri=/api/v1/transfers 속성이 없다 (actuator 검사 속성 이름 확인)"
 NOW=$(date +%s)
-ACT=$({ tempo_get "/api/search?q=$(urlenc '{ span.uri =~ "/actuator.*" }')&limit=5&start=$((NOW - 3600))&end=$NOW" 2>/dev/null || true; } | { grep -o '"traceID"' || true; } | wc -l | tr -d ' ')
+ACT=$({ tempo_get "/api/search?q=$(urlenc '{ span.uri =~ "/actuator.*" }')&limit=5&start=$((NOW - 3600))&end=$((NOW + 60))" 2>/dev/null || true; } | { grep -o '"traceID"' || true; } | wc -l | tr -d ' ')
 [ "$ACT" = 0 ] || fail "actuator 요청 구간이 Tempo 에 있다 (${ACT}개 — ActuatorSpans 거름 확인)"
 ok "Tempo Ready, 스모크 출금 trace $TRACE_ID — 구간 $SPANS · 서비스 ${SVCS% } · api 로그에 traceId, actuator 구간 0"
 
