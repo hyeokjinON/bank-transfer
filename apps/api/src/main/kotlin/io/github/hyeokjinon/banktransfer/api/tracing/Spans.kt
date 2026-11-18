@@ -8,12 +8,18 @@ import io.micrometer.tracing.Tracer
  * 범위가 새지 않게(위험 C1) 구간을 여는 곳은 이 함수 하나를 쓴다.
  */
 internal inline fun <T> Tracer.inSpan(span: Span, block: () -> T): T {
+    // E10: 추적 호출(범위 열기 · 닫기 · 오류 · 끝)이 던져도 block 은 정확히 한 번, 그 결과 · 예외는 그대로
+    val scope = runCatching { withSpan(span) }.getOrNull()
     try {
-        return withSpan(span).use { block() }
+        try {
+            return block()
+        } finally {
+            runCatching { scope?.close() }
+        }
     } catch (e: Throwable) {
-        span.error(e)
+        runCatching { span.error(e) }
         throw e
     } finally {
-        span.end()
+        runCatching { span.end() }
     }
 }

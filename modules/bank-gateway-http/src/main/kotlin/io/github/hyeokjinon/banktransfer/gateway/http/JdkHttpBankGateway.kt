@@ -47,30 +47,44 @@ class JdkHttpBankGateway(
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(GatewayJson.write(body)))
         val context = RequestReplySenderContext<HttpRequest.Builder, HttpResponse<String>>({ carrier, key, value -> carrier?.setHeader(key, value) }, Kind.CLIENT)   // CLIENT 를 꼭 준다 — 기본은 구간이 INTERNAL 로 나간다
-        context.setCarrier(builder)
-        context.remoteServiceName = REMOTE_SERVICE
-        val observation = Observation.createNotStarted(OBSERVATION, { context }, observations)
-            .contextualName("http post")
-            .lowCardinalityKeyValue("uri", path)
-            .lowCardinalityKeyValue("client", "jdk")
-            .start()
+        // E10: 추적 호출만 감싼다 — 추적 처리기가 던져도 HTTP 호출 · 예외 분류는 그대로. 시작이 실패하면 추적 없이(NOOP) 보낸다.
+        val observation = runCatching {
+            context.setCarrier(builder)
+            context.remoteServiceName = REMOTE_SERVICE
+            Observation.createNotStarted(OBSERVATION, { context }, observations)
+                .contextualName("http post")
+                .lowCardinalityKeyValue("uri", path)
+                .lowCardinalityKeyValue("client", "jdk")
+                .start()
+        }.onFailure { warnOnce("start", it) }.getOrDefault(Observation.NOOP)
         val sent = try {
             http.sendAsync(builder.build(), HttpResponse.BodyHandlers.ofString())
         } catch (e: RuntimeException) {
-            observation.error(e)
-            observation.stop()
+            guarded { observation.error(e); observation.stop() }
             throw e
         }
         return sent
             .whenComplete { response, error ->
-                if (error != null) observation.error(error) else context.setResponse(response)
-                observation.stop()
+                guarded { if (error != null) observation.error(error) else context.setResponse(response) }
+                guarded { observation.stop() }
             }
             .handle { response, error ->
                 if (error != null) throw HttpFailures.fromTransport(error)
                 HttpFailures.parse(response.statusCode(), response.body(), parse)
             }
     }
+
+    /** 추적 호출 하나 — 던지면 삼키고 처음 한 번만 WARN (돈 흐름을 바꾸지 않는다, E10). */
+    private inline fun guarded(block: () -> Unit) {
+        runCatching(block).onFailure { warnOnce("call", it) }
+    }
+
+    private fun warnOnce(what: String, e: Throwable) {
+        if (warned.compareAndSet(false, true)) LOG.log(System.Logger.Level.WARNING, "jdk gateway tracing $what failed — 추적 없이 계속한다 (이후 실패는 DEBUG)", e)
+        else LOG.log(System.Logger.Level.DEBUG, "jdk gateway tracing $what failed: $e")
+    }
+
+    private val warned = java.util.concurrent.atomic.AtomicBoolean(false)
 
     override fun close() {
         http.close()   // Java 21: HttpClient 는 AutoCloseable
@@ -80,5 +94,6 @@ class JdkHttpBankGateway(
         /** JDK 판 클라이언트 관측 이름 (P9b). 관측이 지표도 만든다 — 이름 규칙(banktransfer.)을 따르고, WebClient 의 http.client.requests 와 태그 모양을 섞지 않는다. */
         const val OBSERVATION = "banktransfer.gateway.http.client"
         private const val REMOTE_SERVICE = "bank-gateway"
+        private val LOG: System.Logger = System.getLogger(JdkHttpBankGateway::class.java.name)
     }
 }
