@@ -234,7 +234,8 @@ km exec deploy/alertmanager -- wget -qO- --header='Content-Type: application/jso
   http://127.0.0.1:9093/api/v2/alerts >/dev/null || fail "Alertmanager 에 시험 알림을 넣지 못했다"
 T_SEND=$(date +%s); GOT=
 for _ in $(seq 15); do
-  if km logs deploy/alert-sink --tail=500 2>/dev/null | grep -q "$SMOKE_NAME"; then GOT=$(( $(date +%s) - T_SEND )); break; fi
+  SINK_LOGS=$(km logs deploy/alert-sink --tail=500 2>/dev/null || true)   # 변수로 받아 here-string 으로 찾는다 (grep -q 파이프는 pipefail + SIGPIPE 로 거짓 실패)
+  if grep -q "$SMOKE_NAME" <<<"$SINK_LOGS"; then GOT=$(( $(date +%s) - T_SEND )); break; fi
   sleep 2
 done
 [ -n "$GOT" ] || fail "시험 알림 $SMOKE_NAME 이 30초 안에 alert-sink 에 오지 않았다 (kubectl -n monitoring logs deploy/alertmanager · deploy/alert-sink)"
@@ -272,7 +273,10 @@ LOGHITS=$({ grep -c "$TRACE_ID" <<<"$LOGS" || true; })   # grep -q 는 pipefail 
 # 양성 대조: 같은 속성(uri)이 서버 구간에 실제로 붙어 있어야 아래 actuator 0 이 속성 이름 오류로 헛통과하지 않는다
 grep -q '"key":"uri","value":{"stringValue":"/api/v1/transfers"}' <<<"$TRACE" || fail "trace $TRACE_ID 의 서버 구간에 uri=/api/v1/transfers 속성이 없다 (actuator 검사 속성 이름 확인)"
 NOW=$(date +%s)
-ACT=$({ tempo_get "/api/search?q=$(urlenc '{ span.uri =~ "/actuator.*" }')&limit=5&start=$((NOW - 3600))&end=$((NOW + 60))" 2>/dev/null || true; } | { grep -o '"traceID"' || true; } | wc -l | tr -d ' ')
+ACT_RESP=$({ tempo_get "/api/search?q=$(urlenc '{ span.uri =~ "/actuator.*" }')&limit=5&start=$((NOW - 3600))&end=$((NOW + 60))" 2>/dev/null || true; } | tr -d '\r')
+# 검색 자체가 실패했는데 "0개" 로 통과하지 않게: 응답이 {"traces":[...]} JSON 이어야 한다
+grep -q '"traces"' <<<"$ACT_RESP" || fail "Tempo 의 actuator 구간 검색이 유효한 JSON 을 주지 않았다 (kubectl -n monitoring logs deploy/tempo)"
+ACT=$({ grep -o '"traceID"' <<<"$ACT_RESP" || true; } | wc -l | tr -d ' ')
 [ "$ACT" = 0 ] || fail "actuator 요청 구간이 Tempo 에 있다 (${ACT}개 — ActuatorSpans 거름 확인)"
 ok "Tempo Ready, 스모크 출금 trace $TRACE_ID — 구간 $SPANS · 서비스 ${SVCS% } · api 로그에 traceId, actuator 구간 0"
 

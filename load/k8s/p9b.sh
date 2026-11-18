@@ -59,6 +59,10 @@ tempo_search() {
 # 검색 JSON → traceID 줄 (32자로 채운다 — Tempo 는 앞 0 을 뗄 수 있다)
 trace_ids() { { grep -o '"traceID":"[0-9a-f]*"' || true; } | cut -d'"' -f4 | while read -r t; do printf '%32s\n' "$t" | tr ' ' 0; done; }
 count_lines() { grep -c . || true; }
+# 검색 JSON → root 가 접수 요청(http post /api/v1/transfers)인 첫 traceID (정리 작업 root trace 는 거른다). 없으면 빈 값
+pick_accept_trace() {
+  { grep -o '"traceID":"[0-9a-f]*","rootServiceName":"[^"]*","rootTraceName":"http post /api/v1/transfers"' || true; } | head -1 | cut -d'"' -f4 | while read -r t; do printf '%32s\n' "$t" | tr ' ' 0; done
+}
 # 검색 + 못 찾으면 기다렸다 다시 (제한된 횟수) — 결과 JSON 을 그대로 낸다. $3 = 최소 trace 수 (기본 1)
 tempo_search_retry() {
   local i out n want=${3:-1}
@@ -90,13 +94,16 @@ p9b_capture() {
   export_err=$(cat "$WORK/api.log" "$WORK/gateway.log" 2>/dev/null | { grep -ac 'Failed to export' || true; })
 
   # T2 모양 — Tempo 를 내린 회차(tempozero)는 그 동안의 trace 를 잃었으므로 건너뛴다
-  local shape=null tid t doc
+  local shape=null tid t doc res
   : > "$OUT_DIR/$RUN.traces.txt"
   if [ "$TRACING" = on ] && [ "$ACTION" != tempozero ]; then
     sql <<<"SELECT id FROM transfer WHERE $USERS ORDER BY RAND() LIMIT $TRACE_SAMPLE" | tr -d '\r' > "$WORK/trace-sample.txt"
     while read -r tid; do
       [ -n "$tid" ] || continue
-      t=$(tempo_search_retry "{ span.transfer.id = \"$tid\" } && { resource.service.name = \"bank-gateway\" }" 5 | trace_ids | sed -n 1p)
+      # 재발행 건은 정리 작업(transfer.reconcile root) trace 도 걸린다 — T2 표본은 root 가 접수 요청인 trace 를 고른다 (없으면 첫 trace)
+      res=$(tempo_search_retry "{ span.transfer.id = \"$tid\" } && { resource.service.name = \"bank-gateway\" }" 5)
+      t=$(pick_accept_trace <<<"$res")
+      [ -n "$t" ] || t=$(trace_ids <<<"$res" | sed -n 1p)
       doc='{}'
       if [ -n "$t" ]; then
         doc=$(tempo_get "/api/traces/$t" 2>/dev/null | tr -d '\r\n' || true)
