@@ -1,0 +1,23 @@
+$kind: http-request
+name: 9-2 Tempo 에서 그 출금의 trace 찾기 → 접수 root · 두 서비스
+method: GET
+url: 'http://127.0.0.1:3200/api/search?q={ span.transfer.id = "{{p9bTransferId}}" }&limit=20'
+order: 2000
+queryParams:
+  - key: q
+    value: '{ span.transfer.id = "{{p9bTransferId}}" }'
+  - key: limit
+    value: '20'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // 비어 있으면 아직 수집 전 — 몇 초 뒤 다시 Send. 3200 port-forward 창이 꺼져 있으면 연결 오류
+      const traces = pm.response.json().traces || [];
+      const main = traces.find(t => t.rootTraceName === "http post /api/v1/transfers");
+      pm.test("trace 를 찾음 (" + traces.length + "개)", () => pm.expect(traces.length).to.be.above(0));
+      pm.test("접수 요청이 root 인 trace 가 있다", () => pm.expect(main).to.not.equal(undefined));
+      if (main) {
+        pm.collectionVariables.set("p9bTraceId", main.traceID);
+        console.log("traceID = " + main.traceID + " — 9-3 또는 Grafana Explore 에 붙여 넣기");
+      }

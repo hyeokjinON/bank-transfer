@@ -1,0 +1,15 @@
+$kind: http-request
+name: 9-3 trace 전체 가져오기 → 7구간 · bank-transfer + bank-gateway
+method: GET
+url: 'http://127.0.0.1:3200/api/traces/{{p9bTraceId}}'
+order: 3000
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      const body = pm.response.text();
+      const names = (body.match(/"name":"[^"]*"/g) || []).map(s => s.slice(8, -1));
+      const want = ["http post /api/v1/transfers", "outbox.publish", "transfer.requested send", "transfer.requested process", "http post", "http post /internal/v1/bank/transfers", "bank.request"];
+      want.forEach(n => pm.test("구간 " + n, () => pm.expect(names).to.include(n)));
+      pm.test("서비스 두 개", () => { pm.expect(body).to.include("bank-transfer"); pm.expect(body).to.include("bank-gateway"); });
+      pm.test("계좌번호가 trace 에 없다", () => pm.expect(body).to.not.include(pm.collectionVariables.get("accountNo")));
