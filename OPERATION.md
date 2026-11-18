@@ -1001,7 +1001,7 @@ kubectl --context kind-bank-transfer -n monitoring port-forward svc/tempo 3200:3
 | `http post /internal/v1/bank/{transfers,inquiries,name-inquiries}` (SERVER) | 게이트웨이 | 받음 |
 | `bank.request` | 게이트웨이 | 은행 호출 — `bank.request.type` · `bank.outcome`(`ok`·`rejected`·`not_sent`·`unknown`) · `bank.tran_no` · `bank.not_sent.reason` · `transfer.reference` · `error.type` |
 
-정리 작업은 `transfer.reconcile` root 의 **새 trace** (실행 1회 = trace 1개, 건별 `transfer.inquiry` · `transfer.republish`) 이고 `transfer.id` 로 처음 trace 와 같이 찾힌다. 한 trace 에 구간이 수백 개일 수 있다 (재발행 뒤 Kafka · 게이트웨이가 모두 자식). 로그 줄에도 `[서비스][traceId-spanId]` 가 찍히니 로그의 traceId 로 Tempo 에서 trace 를 연다 (`/api/traces/<traceId>`).
+정리 작업은 `transfer.reconcile` root 의 **새 trace** (실행 1회 = trace 1개, 건별 `transfer.inquiry` · `transfer.republish`) 이고 `transfer.id` 로 처음 trace 와 같이 찾힌다. 한 trace 에 구간이 수백 개일 수 있다 (재발행 뒤 Kafka · 게이트웨이가 모두 자식). Boot 기본 로그 상관 패턴이 줄마다 `[서비스 이름] [스레드] [traceId-spanId]` 를 찍는다 (실제 api 로그 줄: `INFO 1 --- [bank-transfer] [ntainer#0-0-C-1] [<32자 traceId>-<16자 spanId>] …TransferRequestedListener : …`). 로그의 traceId 로 Tempo 에서 trace 를 연다 (`/api/traces/<traceId>`).
 
 ### 18-4. 막히는 곳
 - trace 가 없다 → api · 게이트웨이의 `MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT` (`kubectl --context kind-bank-transfer -n bank-transfer get cm app-config`), 앱 로그의 `Failed to export` (`kubectl --context kind-bank-transfer -n bank-transfer logs deploy/api | grep -c "Failed to export"`), Tempo 로그 (`kubectl --context kind-bank-transfer -n monitoring logs deploy/tempo`). 요청 뒤 8초는 기다린다.
@@ -1021,13 +1021,14 @@ kubectl --context kind-bank-transfer -n monitoring port-forward svc/tempo 3200:3
 
 | 실험 | 명령 | 볼 것 |
 |---|---|---|
-| T1 추적 비용 (켬) | `PHASE=p9b bash load/k8s/run.sh steady 1` (40건/s 는 `RATE=40`) | 접수 p95 · `completed_per_s` · CPU |
-| T1 추적 비용 (끔) | `TRACING=off PHASE=p9b bash load/k8s/run.sh steady 3` (**steady 에만**) | 켬과의 차이 (잡음 안인가) |
-| T1d Tempo 0대 60초 | `PHASE=p9b bash load/k8s/run.sh tempozero 1` (Tempo 의 emptyDir 이 비워져 이전 trace 가 사라진다) | 돈 · 접수 p95 그대로, 보내기 실패 로그 |
+| T1 추적 비용 (켬) | `PHASE=p9b bash load/k8s/run.sh steady 1` · `steady 2` / 40건/s 한 쌍: `PHASE=p9b RATE=40 DURATION=30s bash load/k8s/run.sh steady 5` | 접수 p95 · `completed_per_s` · CPU |
+| T1 추적 비용 (끔) | `PHASE=p9b TRACING=off bash load/k8s/run.sh steady 3` · `steady 4` (**steady 에만**) / 40건/s: `PHASE=p9b TRACING=off RATE=40 DURATION=30s bash load/k8s/run.sh steady 6` | 켬과의 차이 (잡음 안인가) |
+| T1d Tempo 0대 60초 | `PHASE=p9b TEMPO_DOWN_S=60 bash load/k8s/run.sh tempozero 1` (Tempo 의 emptyDir 이 비워져 이전 trace 가 사라진다) | 돈 · 접수 p95 그대로, 보내기 실패 로그 |
 | T2 정상 출금 모양 | steady 회차의 `.p9b.json` | 표본 20개가 7구간 완전 · 구간 사이 틈 |
-| T3 모의 은행 끊김 (재시도 · 재발행) | `BANK_DOWN_S=120 PHASE=p9b bash load/k8s/run.sh bank 2` | 재시도 trace 가 접수 trace 에 붙음 · 재발행의 정리 작업 trace |
-| T4 리더 교대 | `PHASE=p9b bash load/k8s/run.sh gwkill 1` · `gwroll 1` | `not_sent` 사유 (`stepping_down`) |
+| T3 모의 은행 끊김 (재시도 · 재발행) | `PHASE=p9b BANK_DOWN_S=120 DURATION=180s SETTLE=900 bash load/k8s/run.sh bank 2` (끊김이 부하 안에 들어와야 하고, SETTLE 이 5분짜리 재발행까지 덮는다) | 재시도 trace 가 접수 trace 에 붙음 · 재발행의 정리 작업 trace |
+| T4 리더 교대 | `PHASE=p9b bash load/k8s/run.sh gwkill 1` · `PHASE=p9b bash load/k8s/run.sh gwroll 1` | `not_sent` 사유 (`stepping_down`) |
 | T5 exemplar | 켬 회차의 `.p9b.json` | exemplar 개수 · Tempo 에서 찾았나 |
 
 - 도구는 인자를 먼저 검사한 뒤에 이전 출력을 지운다. 끝나면 `bash load/k8s/run.sh cleanup` (§15-7).
+- `gwroll` 뒤에는 게이트웨이가 새 이미지 태그(`dev-…-r<epoch>`)에 남아 다음 실험의 사전 확인이 거부한다 (api ≠ 게이트웨이 태그) — 다음 실험 전에 `bash -c '. infra/k8s/lib.sh; apply_overlay local <api 태그>'` 를 먼저 돌린다.
 - 스모크 [11]: `bash infra/k8s/smoke.sh` — Tempo Ready · 스모크 출금의 trace 가 Tempo 에서 검색되고 서비스 둘 · 구간 5개 이상 · api 로그에 그 traceId · `/actuator` 구간 0.
