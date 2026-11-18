@@ -18,6 +18,9 @@ variables:
   baseUrl: http://localhost:8080
   reactiveBaseUrl: http://localhost:8081
   p9aTransferId: ""
+  p9bTransferId: ""
+  p9bTraceId: ""
+  p9bTries: "0"
   userId: user-1
   accountNo: "1002123456789"
   code: ""

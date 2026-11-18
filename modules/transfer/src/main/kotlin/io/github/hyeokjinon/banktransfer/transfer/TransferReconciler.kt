@@ -57,6 +57,8 @@ class TransferReconciler(
     private val onItemError: (Transfer, Exception) -> Unit = { _, _ -> },
     /** P9a 지표 — 저장이 true 로 돌아온 뒤에만 부른다 ([TransferObserver]). */
     private val observer: TransferObserver = TransferObserver.NONE,
+    /** P9b 추적 — 결과조회 · 재발행 한 건을 감싼다 ([ReconcileItemScope]). 기본은 그냥 실행. */
+    private val itemScope: ReconcileItemScope = ReconcileItemScope.NONE,
 ) {
 
     fun reconcile(): ReconcileResult {
@@ -74,7 +76,7 @@ class TransferReconciler(
         var errors = sweep.errors
         inquiries@ for (transfer in store.findUnknownForInquiry(maxInquiries, cutoff, batchSize)) {
             val outcome = try {
-                bank.inquire(transfer.reference)
+                itemScope.inquiry(transfer) { bank.inquire(transfer.reference) }
             } catch (e: Exception) {
                 InquiryOutcome.Unknown   // 포트가 분류하지 못한 예외도 "모름" — 다음 주기에 다시 묻는다
             }
@@ -124,7 +126,7 @@ class TransferReconciler(
         for (transfer in store.findRepublishable(now.minus(republishAfter), batchSize)) {
             try {
                 if (transfer.republishCount < maxRepublish) {
-                    if (store.republish(transfer.id, transfer.republishCount, now)) {
+                    if (itemScope.republish(transfer) { store.republish(transfer.id, transfer.republishCount, now) }) {
                         republished++
                         observer.republished()
                     }

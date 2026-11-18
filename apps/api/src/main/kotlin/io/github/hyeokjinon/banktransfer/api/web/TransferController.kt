@@ -1,6 +1,7 @@
 package io.github.hyeokjinon.banktransfer.api.web
 
 import io.github.hyeokjinon.banktransfer.api.metrics.TransferMetrics
+import io.github.hyeokjinon.banktransfer.api.tracing.TraceTags
 import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceGuard
 import io.github.hyeokjinon.banktransfer.transfer.RequestTransfer
 import io.github.hyeokjinon.banktransfer.transfer.Transfer
@@ -55,6 +56,7 @@ class TransferController(
     private val service: TransferService,
     private val maintenance: BankMaintenanceGuard,
     private val metrics: TransferMetrics,
+    private val traceTags: TraceTags,
 ) {
 
     /**
@@ -75,6 +77,7 @@ class TransferController(
             RequestTransfer(user.id, idempotencyKey.orEmpty(), body.bankCode, body.accountNo, body.amount, body.memo),
         )
         metrics.accepted(result.created)   // 돌아왔다 = 저장(커밋)이 끝났다. 예외(422 · 503 ...)는 세지 않는다 (P9a)
+        traceTags.transferId(result.transfer.id)   // P9b: 접수 server 구간에 출금 id — 멱등 재응답(200)도 같은 id
         val response = TransferResponse.from(result.transfer)
         return if (result.created) {
             ResponseEntity.accepted().location(URI.create("/api/v1/transfers/${response.id}")).body(response)

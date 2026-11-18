@@ -949,7 +949,7 @@ kubectl --context kind-bank-transfer -n monitoring get secret grafana-admin -o j
 | M1b 리더 노드 SIGKILL | `NODE_KILL=1 PHASE=p9a bash load/k8s/run.sh gwnode 1` | `bank_gap_diff_s` · `bank_gap_diff_raw_s`, 리더 0 구간, 죽은 Pod 시계열 끝 |
 | M2 모의 은행 0대 120초 | `BANK_DOWN_S=120 PHASE=p9a bash load/k8s/run.sh bank 1` | BankDisconnected 도착(약 50초) · 해제 |
 | M3 게이트웨이 0대 60초 | `PHASE=p9a bash load/k8s/run.sh gwzero 1` | GatewayNoLeader 도착, BankDisconnected 억제 |
-| M4 모의 은행 10분 끊김 | `BANK_DOWN_S=600 DURATION=640s SETTLE=1800 PHASE=p9a bash load/k8s/run.sh bank 4` (부하가 끊김보다 길어야 1만 2천 건이 쌓이고, 재발행까지 정산하려면 SETTLE 30분) | 상태 조회 시간(50ms 넘으면 V7 인덱스) · 시계열 수 · 카운터 vs DB |
+| M4 모의 은행 10분 끊김 | `BANK_DOWN_S=600 DURATION=640s SETTLE=1800 PHASE=p9a bash load/k8s/run.sh bank 4` (부하가 끊김보다 길어야 1만 2천 건이 쌓이고, 재발행까지 정산하려면 SETTLE 30분) | 상태 조회 시간(50ms 넘으면 다음 마이그레이션 인덱스) · 시계열 수 · 카운터 vs DB |
 | M5 점검 창 = 지금 | `PHASE=p9a bash load/k8s/run.sh maint 1` | 울린 알림 없음 (`app-config` 를 고쳐 재시작 — 끝나면 도구가 되돌린다) |
 - 카운터 차이는 `increase()` 로 잰다 (Pod 재시작이 카운터를 0 으로 되돌려 단순 차이는 음수가 나온다 — M1b 에서 −420).
 - 은행 공백의 지표 값은 두 가지다: `bank_gap_diff_s`(5초 격자 — 대시보드가 보는 값, 5.0 ~ 8.2초) · `bank_gap_diff_raw_s`(Prometheus 원 표본, 2.4 ~ 4.5초). 성공 기준(차이 ≤ 5초)은 원 표본으로 판정한다.
@@ -964,3 +964,71 @@ kubectl --context kind-bank-transfer -n monitoring get secret grafana-admin -o j
 - Prometheus 는 Recreate + emptyDir — 규칙 · 설정 ConfigMap 이 바뀌면 TSDB 가 비어 점검 뒤 30분 제외 창도 사라진다. 점검 창 끝 30분 안에는 감시 설정을 바꾸지 않는다.
 - 알림이 alert-sink 에 안 온다 → ① Alertmanager 로그의 `notify` 오류 (`kubectl --context kind-bank-transfer -n monitoring logs deploy/alertmanager | grep -i notify`), ② `kubectl --context kind-bank-transfer -n monitoring get svc,pods` 에서 alert-sink Service · Pod 가 Ready 인지, ③ 웹훅 주소가 `http://alert-sink.monitoring.svc.cluster.local:8080/cgi-bin/sink` (경로 `/cgi-bin/sink`) 인지. 억제된 알림(`suppressed`)은 일부러 안 온다.
 - 옛 `nc` 방식 alert-sink 는 본문을 잃었다 — 응답은 200 인데 알림 절반이 빈 줄이었다. 지금은 busybox `httpd` + CGI 로 고쳤다 ([측정 결과 B7](docs/perf/p9a-metrics.md)).
+
+## 18. 분산 추적 — Tempo (P9b)
+> [ADR-0021](docs/adr/0021-distributed-tracing.md) (제안, 2026-11-18). 설계 [스펙](docs/superpowers/specs/2026-11-18-p9b-tracing-design.md) (§14 계획 단계에서 고친 점), 실험 숫자 [측정 결과](docs/perf/p9b-tracing.md). kind(K8s) 에만 있다 — Compose · IntelliJ 실행은 trace 를 보내지 않는다 (구간 · 전파 · 로그의 traceId 는 어디서나 켜져 있다). 출금 한 건 = trace 하나, 앱이 Tempo 로 직접 보낸다 (5초 묶음 · Collector 없음).
+
+### 18-1. 열기
+```bash
+kubectl --context kind-bank-transfer -n monitoring port-forward svc/grafana 3000:3000   # Explore → 데이터 소스 Tempo
+kubectl --context kind-bank-transfer -n monitoring port-forward svc/tempo 3200:3200     # API: /api/search?q=… · /api/traces/<traceID>
+```
+요청 뒤 trace 가 검색에 나오기까지 약 8초 걸린다 (보내기 묶음 5초 + Tempo 수집). 검색 API 는 `start` · `end`(초 단위 시각)를 같이 준다.
+
+### 18-2. 찾는 법 (TraceQL — Grafana Explore → Tempo → TraceQL)
+| 무엇 | 질의 |
+|---|---|
+| 출금 한 건 (접수 · 정리 작업 trace 모두) | `{ span.transfer.id = "<출금 id>" }` |
+| 게이트웨이까지 간 trace 만 | `{ span.transfer.id = "<id>" } && { resource.service.name = "bank-gateway" }` |
+| 거래번호로 (은행 쪽 문의) | `{ span.transfer.reference = "<T…>" }` |
+| 은행에 못 보낸 호출 · 사유 | `{ name = "bank.request" && span.bank.outcome = "not_sent" } \| select(span.bank.not_sent.reason)` |
+| 재시도 토픽을 거친 출금 | `{ name =~ "transfer.requested-retry-.* process" }` |
+| 1원인증 | `{ span.verification.id = "<id>" }` |
+| 느린 은행 호출 | `{ name = "bank.request" && duration > 1s }` |
+
+정리 작업 1회의 건수(`reconcile.republished` · `reconcile.completed` …)와 연 건별 구간 수(`reconcile.items`)는 숫자 속성이라 `{ name = "transfer.reconcile" && span.reconcile.republished > 0 }` 처럼 비교한다. 건수 · `reconcile.items` 가 모두 0 인 실행(할 일이 없던 10초 주기)은 Tempo 로 보내지 않는다 — 은행이 끊겨 결과조회만 하고 아무것도 못 바꾼 실행은 `items` 가 0 이 아니라 남는다.
+
+### 18-3. trace 읽는 법
+위에서 아래로, 아래로 갈수록 자식 구간이다.
+
+| 구간 | 서비스 | 무엇 |
+|---|---|---|
+| `http post /api/v1/transfers` (SERVER) | api | 접수 — 속성 `transfer.id` (멱등 재응답도 같은 속성, 짧은 trace) |
+| `outbox.publish` | api | 발행기가 행마다 연다 (부모 = 접수 때 저장한 `trace_parent`). 접수 구간과의 **틈 = 발행 주기 0.5초 근처면 정상**, 길면 발행기 · 락을 본다 |
+| `transfer.requested send` (PRODUCER) | api | Kafka 발행 |
+| `transfer.requested process` (CONSUMER) | api | 컨슈머. 재시도면 `transfer.requested-retry-N process` 가 **같은 trace** 에, DLT 는 `…-dlt process` |
+| `http post` (CLIENT) | api | 게이트웨이로 HTTP |
+| `http post /internal/v1/bank/{transfers,inquiries,name-inquiries}` (SERVER) | 게이트웨이 | 받음 |
+| `bank.request` | 게이트웨이 | 은행 호출 — `bank.request.type` · `bank.outcome`(`ok`·`rejected`·`not_sent`·`unknown`) · `bank.tran_no` · `bank.not_sent.reason` · `transfer.reference` · `error.type` |
+
+정리 작업은 `transfer.reconcile` root 의 **새 trace** (실행 1회 = trace 1개, 건별 `transfer.inquiry` · `transfer.republish`) 이고 `transfer.id` 로 처음 trace 와 같이 찾힌다. 한 trace 에 구간이 수백 개일 수 있다 (재발행 뒤 Kafka · 게이트웨이가 모두 자식). Boot 기본 로그 상관 패턴이 줄마다 `[서비스 이름] [스레드] [traceId-spanId]` 를 찍는다 (실제 api 로그 줄: `INFO 1 --- [bank-transfer] [ntainer#0-0-C-1] [<32자 traceId>-<16자 spanId>] …TransferRequestedListener : …`). 로그의 traceId 로 Tempo 에서 trace 를 연다 (`/api/traces/<traceId>`).
+
+### 18-4. 막히는 곳
+- trace 가 없다 → api · 게이트웨이의 `MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT` (`kubectl --context kind-bank-transfer -n bank-transfer get cm app-config`), 앱 로그의 `Failed to export` (`kubectl --context kind-bank-transfer -n bank-transfer logs deploy/api | grep -c "Failed to export"`), Tempo 로그 (`kubectl --context kind-bank-transfer -n monitoring logs deploy/tempo`). 요청 뒤 8초는 기다린다.
+- 게이트웨이 구간이 따로 떨어진다 → traceparent 가 안 넘어간 것: api 의 WebClient 관측(`HttpBankGateway.create` 의 관측 인자) · 리액터 문맥 설정(`spring.reactor.context-propagation=auto`). traceparent 끝 플래그는 `-03`(샘플링 0 이면 `-02`)이라 `-01` 로 비교하지 않는다.
+- 로그에 traceId 가 없다 → 로그 상관 패턴 (Boot 기본). 요청 밖(스케줄러) 로그는 비어 있는 게 정상.
+- 구간에 민감값이 의심된다 → 지우개(`ScrubbingSpanExporter`)는 예외 메시지 · 스택 · 상태 설명만 지운다. 우리가 붙이는 속성(금액 · 계좌번호 · 예금주 · 코드 · Idempotency-Key · 사용자 id 는 금지)은 붙이는 코드를 고친다.
+- Tempo 재시작 뒤 옛 trace 가 없다 → emptyDir 이라 정상 (보관 2일도 Pod 가 살아 있을 때만).
+- Grafana 에서 Explore 가 안 열린다 → 익명 보기 사용자는 `GF_USERS_VIEWERS_CAN_EDIT=true` 가 있어야 연다 (kind 만, 저장은 못 한다).
+
+### 18-5. 끄기 · 켜기
+- 샘플링: `MANAGEMENT_TRACING_SAMPLING_PROBABILITY` (`app-config`, 앱 재시작 필요 — `kubectl --context kind-bank-transfer -n bank-transfer rollout restart deploy/api deploy/bank-gateway`). 0 이면 보내지 않고 구간 · 전파는 그대로 (비용 측정의 "끔").
+- 보내기만 끄려면 `MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT` 를 지운다 (주소가 없으면 보내기 자체가 안 생긴다 — 구간 · 전파 · 로그 상관은 남는다). `management.tracing.export.enabled=false` 는 전파까지 끄므로 쓰지 않는다.
+- 추적 실패는 돈 흐름에 영향이 없다 (Tempo 가 죽어도 접수 · 출금은 그대로, 앱 로그에 `Failed to export` 만).
+
+### 18-6. 실험 재현 (T1 ~ T5, 도구 `PHASE=p9b`)
+먼저 `bash infra/k8s/up.sh`. 결과는 `docs/perf/raw/p9b/<동작>-<회차>.json`(판정) · `.p9b.json`(추적 요약) · `.traces.txt`(표본 trace 20개 원문) · `.tempo-search-*.json`. 숫자 · 해석은 [측정 결과](docs/perf/p9b-tracing.md).
+
+| 실험 | 명령 | 볼 것 |
+|---|---|---|
+| T1 추적 비용 (켬) | `PHASE=p9b bash load/k8s/run.sh steady 1` · `steady 2` / 40건/s 한 쌍: `PHASE=p9b RATE=40 DURATION=30s bash load/k8s/run.sh steady 5` | 접수 p95 · `completed_per_s` · CPU |
+| T1 추적 비용 (끔) | `PHASE=p9b TRACING=off bash load/k8s/run.sh steady 3` · `steady 4` (**steady 에만**) / 40건/s: `PHASE=p9b TRACING=off RATE=40 DURATION=30s bash load/k8s/run.sh steady 6` | 켬과의 차이 (잡음 안인가) |
+| T1d Tempo 0대 60초 | `PHASE=p9b TEMPO_DOWN_S=60 bash load/k8s/run.sh tempozero 1` (Tempo 의 emptyDir 이 비워져 이전 trace 가 사라진다) | 돈 · 접수 p95 그대로, 보내기 실패 로그 |
+| T2 정상 출금 모양 | steady 회차의 `.p9b.json` | 표본 20개가 7구간 완전 · 구간 사이 틈 |
+| T3 모의 은행 끊김 (재시도 · 재발행) | `PHASE=p9b BANK_DOWN_S=120 DURATION=180s SETTLE=900 bash load/k8s/run.sh bank 2` (끊김이 부하 안에 들어와야 하고, SETTLE 이 5분짜리 재발행까지 덮는다) | 재시도 trace 가 접수 trace 에 붙음 · 재발행의 정리 작업 trace |
+| T4 리더 교대 | `PHASE=p9b bash load/k8s/run.sh gwkill 1` · `PHASE=p9b bash load/k8s/run.sh gwroll 1` | `not_sent` 사유 (`stepping_down`) |
+| T5 exemplar | 켬 회차의 `.p9b.json` | exemplar 개수 · Tempo 에서 찾았나 |
+
+- 도구는 인자를 먼저 검사한 뒤에 이전 출력을 지운다. 끝나면 `bash load/k8s/run.sh cleanup` (§15-7).
+- `gwroll` 뒤에는 게이트웨이가 새 이미지 태그(`dev-…-r<epoch>`)에 남아 다음 실험의 사전 확인이 거부한다 (api ≠ 게이트웨이 태그) — 다음 실험 전에 `bash -c '. infra/k8s/lib.sh; apply_overlay local <api 태그>'` 를 먼저 돌린다.
+- 스모크 [11]: `bash infra/k8s/smoke.sh` — Tempo Ready · 스모크 출금의 trace 가 Tempo 에서 검색되고 서비스 둘 · 구간 5개 이상 · api 로그에 그 traceId · `/actuator` 구간 0.

@@ -16,6 +16,8 @@ spring:
   threads:
     virtual:
       enabled: false   # 가상 스레드 (P7): 켜면 Tomcat 요청 · 앱 실행기 · @Scheduled · Kafka 리스너가 가상 스레드. 기본은 끔 — 켤지는 ADR-0014, 측정은 VT=1 (OPERATION §13)
+  reactor:
+    context-propagation: auto  # P9b: 리액터 연산자 · WebClient 신호 사이에서 ThreadLocal 문맥을 되살린다 (기본 limited). 코루틴 컨슈머는 이것으로 이어지지 않는다 — 리스너가 asContextElement 로 따로 싣는다 (스펙 §14-23)
   mvc:
     problemdetails:
       enabled: true   # ApiExceptionHandler 가 ResponseEntityExceptionHandler 를 상속하므로 표준 오류도 ProblemDetail + code 로 응답한다 (Boot 기본 핸들러는 물러난다. 설정은 명시용으로 유지)
@@ -38,6 +40,8 @@ spring:
       properties:
         enable.idempotence: true   # 프로듀서 재시도가 브로커에 중복 기록되지 않게
         max.block.ms: 5000         # 브로커에 닿지 않으면 send() 가 기본 60초 대신 5초만 기다린다 → 발행기 트랜잭션이 빨리 끝난다
+    template:
+      observation-enabled: true    # P9b: 발행 구간 + traceparent 헤더 (Boot 4.1 기본 false). 재시도 토픽 · DLT 발행도 이 자동 구성 템플릿을 쓴다
     consumer:
       group-id: transfer-processor
       auto-offset-reset: earliest
@@ -46,6 +50,7 @@ spring:
     listener:
       ack-mode: manual_immediate
       concurrency: 3               # 컨테이너마다 컨슈머 3개 (파티션 3). 재시도 · DLT 컨테이너도 같다. 그룹 · 동시성은 여기서만 정한다
+      observation-enabled: true    # P9b: 소비 구간 (재시도 · DLT 컨테이너도 같은 팩토리). 오류 처리기(재시도 발행)는 이 구간 범위 안에서 돈다
   jpa:
     open-in-view: false        # 트랜잭션 밖(뷰 렌더링)에서 지연 로딩하지 않는다
     hibernate:
@@ -97,6 +102,16 @@ management:
   info:
     env:
       enabled: true   # info.* 설정을 /actuator/info 에 보인다 (P4-2: 차감 전략)
+  tracing:                     # P9b 분산 추적 (스펙 §3). 구간 · 전파 · 로그 상관은 어디서나 켜져 있고, 보내기는 주소가 있을 때만 — kind 의 app-config 만 준다 (결정 E3)
+    sampling:
+      probability: 1.0         # Boot 기본 0.1 — 테스트 · 실험이 모든 출금을 본다. T1 "끔" 은 0.0 (app-config 로 덮는다)
+  otlp:
+    metrics:
+      export:
+        enabled: false         # 스타터가 OTLP 지표 레지스트리도 끌어온다 — 지표는 Prometheus 가 읽는다 (P9a). 켜 두면 1분마다 localhost:4318 로 밀어 넣으려 한다
+  observations:
+    enable:
+      "[tasks.scheduled.execution]": false   # @Scheduled 실행마다 root trace 를 만들지 않는다 (발행기 0.5초 · 정리 10초). 이 지표는 대시보드 · 규칙에서 쓰지 않는다. 정리 작업 root 는 코드가 연다
   metrics:
     tags:
       application: ${spring.application.name}   # P9a 공통 태그. Pod · 노드는 Prometheus 가 붙인다 (relabel)
@@ -174,7 +189,7 @@ alert:
 banktransfer:
   metrics:                     # P9a 상태 Gauge (스펙 §4-2). 조회 주기 · 켜기만 둔다 (Prometheus 노출은 kind 매니페스트에서)
     db-poll-enabled: true      # 테스트는 끈다 (ApiIntegrationTest — refresh() 를 직접 부른다)
-    db-poll-interval: 10s      # 조회 시간이 50ms 를 넘으면 V7 인덱스를 검토 (위험 B1, docs/perf/p9a-metrics.md)
+    db-poll-interval: 10s      # 조회 시간이 50ms 를 넘으면 다음 마이그레이션 인덱스를 검토 (위험 B1, docs/perf/p9a-metrics.md)
 
 info:
   instance: ${INFO_INSTANCE:local}   # 어느 api 인가 (P8-2). Compose 가 api-1 · api-2 를 넣는다 — nginx 뒤 분배 확인 · ShedLock locked_by

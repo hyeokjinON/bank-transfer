@@ -23,6 +23,9 @@ dependencies {
     runtimeOnly("io.fabric8:kubernetes-httpclient-jdk:8.0.0")
     // P9a 지표 노출 /actuator/prometheus (버전은 Boot BOM)
     runtimeOnly("io.micrometer:micrometer-registry-prometheus")
+    // P9b 분산 추적 (api 와 같은 스타터 — OTLP 지표 레지스트리는 application.yml 에서 끈다)
+    implementation("org.springframework.boot:spring-boot-starter-opentelemetry")
+    implementation(project(":modules:tracing"))
 
     testImplementation(project(":apps:mock-bank"))
     testImplementation(testFixtures(project(":modules:bank-gateway-http")))   // TcpCutProxy
@@ -32,6 +35,8 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
     testImplementation("eu.rekawek.toxiproxy:toxiproxy-java:2.1.7")    // Toxiproxy 제어 클라이언트 (BOM 밖 — 버전 고정)
     testImplementation("io.fabric8:kubernetes-server-mock:8.0.0")   // 가짜 API 서버 (CRUD 모드) — Lease · ConfigMap · Pod 라벨
+    testImplementation("io.opentelemetry:opentelemetry-sdk-testing")   // InMemorySpanExporter (P9b)
+    testImplementation("io.micrometer:micrometer-tracing-test")        // SimpleTracer — bank.request 단위 테스트 (P9b)
 }
 
 tasks.withType<Test> {

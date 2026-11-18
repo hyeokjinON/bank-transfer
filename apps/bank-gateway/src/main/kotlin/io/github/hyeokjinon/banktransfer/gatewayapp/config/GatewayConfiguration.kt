@@ -17,7 +17,9 @@ import io.github.hyeokjinon.banktransfer.gatewayapp.leader.GatewayLeaderElection
 import io.github.hyeokjinon.banktransfer.gatewayapp.leader.LeaderLabel
 import io.github.hyeokjinon.banktransfer.gatewayapp.metrics.GatewayGauges
 import io.github.hyeokjinon.banktransfer.gatewayapp.metrics.GatewayMetrics
+import io.github.hyeokjinon.banktransfer.gatewayapp.tracing.BankRequestTracing
 import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.tracing.Tracer
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.ConfigurationProperties
@@ -123,9 +125,10 @@ class GatewayConfiguration {
         clock: Clock,
         tranNoSource: TranNoSource,
         metrics: GatewayMetrics,
+        tracer: ObjectProvider<Tracer>,
     ): BankConnectionOwner {
         val config = BankGatewayConfig(host = props.host, port = props.port, responseTimeout = props.responseTimeout, pollInterval = props.pollInterval)
-        return BankConnectionOwner(tranNoSource, metrics) {
+        return BankConnectionOwner(tranNoSource, metrics, BankRequestTracing(tracer.getIfAvailable { Tracer.NOOP })) {
             BankGatewayClient(
                 config,
                 clock,

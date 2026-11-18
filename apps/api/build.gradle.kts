@@ -40,6 +40,11 @@ dependencies {
     runtimeOnly("com.mysql:mysql-connector-j")
     // P9a 지표 노출 /actuator/prometheus (버전은 Boot BOM — Micrometer 1.17.x). 코드는 Micrometer API 만 쓴다
     runtimeOnly("io.micrometer:micrometer-registry-prometheus")
+    // P9b 분산 추적 — Micrometer Tracing + OpenTelemetry 브리지 + OTLP 내보내기 (버전은 Boot BOM: Micrometer Tracing 1.7.1 · OTel 1.62.0).
+    // 이 스타터는 OTLP 지표 레지스트리(micrometer-registry-otlp)도 끌어온다 — 지표는 Prometheus(P9a)라 application.yml 에서 끈다.
+    // spring-boot-micrometer-tracing-test 는 넣지 않는다: @AutoConfigureTracing 이 없는 테스트마다 export.enabled=false 를 넣어 전파까지 꺼진다
+    implementation("org.springframework.boot:spring-boot-starter-opentelemetry")
+    implementation(project(":modules:tracing"))   // 내보내기 앞 지우개 · actuator 거름 (P9b)
 
     testImplementation(project(":apps:mock-bank"))
     testImplementation(testFixtures(project(":modules:bank-gateway-http")))   // TcpCutProxy · GatewayProcess (P8-1)
@@ -51,6 +56,10 @@ dependencies {
     testImplementation("org.awaitility:awaitility-kotlin")
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
     testImplementation("org.testcontainers:testcontainers")   // GenericContainer (Redis 전용 모듈이 없다)
+    testImplementation("io.opentelemetry:opentelemetry-sdk-testing")   // InMemorySpanExporter (P9b, 버전은 Boot BOM → OTel BOM)
+    testImplementation("io.micrometer:micrometer-tracing-bridge-otel")   // OutboxTracingTest 가 실제 브리지(OtelTracer · OtelPropagator)를 직접 만든다 (P9b, 버전은 Boot BOM) — 스타터는 런타임 범위로만 준다
+    // 별도 JVM 게이트웨이가 보내는 OTLP(protobuf)를 테스트가 받아 읽는다 (P9b). BOM 밖 — micrometer-registry-otlp 1.17.1 이 런타임에 끌어오는 버전과 같게 고정
+    testImplementation("io.opentelemetry.proto:opentelemetry-proto:1.10.0-alpha")
 }
 
 // http 모드 흐름 테스트가 게이트웨이 앱을 별도 JVM 으로 띄운다 (P8-1). 같은 JVM 에 올리면 이 앱의 JPA · Kafka 자동 설정이

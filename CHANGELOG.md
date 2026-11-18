@@ -9,6 +9,29 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
+## [P9b] 분산 추적 — Micrometer Tracing · OpenTelemetry · Tempo — 2026-11-18 (PR 번호는 PR 을 만든 뒤 채운다)
+### Added
+- 추적 스타터(`spring-boot-starter-opentelemetry`) · 공용 모듈 `modules/tracing`(내보내기 앞 지우개 `ScrubbingSpanExporter` — 예외 메시지 · 스택 · 상태 설명 제거, `/actuator` 구간 거름). 보내기는 주소가 있을 때만 (kind 의 app-config).
+- V7 `outbox_event.trace_parent`(`VARCHAR(55)`) · 발행기 행마다 `outbox.publish` 구간 (저장한 traceparent 를 부모로, 틀린 값은 새 trace) · 정리 작업 1회 = 새 trace `transfer.reconcile` (건별 `transfer.inquiry` · `transfer.republish`, 도메인 포트 `ReconcileItemScope`) · 게이트웨이 `bank.request` 구간 (Tracer, `bank.outcome` · `bank.not_sent.reason` · `bank.tran_no` …).
+- 비교 판: JDK HttpClient 전파(CLIENT 구간, `JdkClientPropagationTest`) · 코루틴 컨슈머(`ObservationRegistry.asContextElement()`) · 1원인증 실행기 넘김(`ContextSnapshot`).
+- kind: Tempo 2.10.10 (`monitoring/tempo.yaml` · `tempo/tempo.yml`, 제어 노드 · emptyDir · 보관 2일) · Grafana Tempo 데이터 소스 · `versions.env` `TEMPO_VERSION` · 스모크 [11] (Tempo 검색으로 api · 게이트웨이 구간 확인).
+- 실험 도구 `PHASE=p9b` (`load/k8s/p9b.sh` · `traceshape.py`, `tempozero` 동작, `TRACING=on|off`) · [측정 결과](docs/perf/p9b-tracing.md) · 원자료 `docs/perf/raw/p9b/`.
+- (덤) Prometheus exemplar → Grafana "접수 → 확정 시간" 패널 점에서 Tempo 로.
+- [ADR-0021](docs/adr/0021-distributed-tracing.md) (제안 — 정리 PR 에서 채택), OPERATION §18, ARCHITECTURE 추적 절, 구성도 두 장 갱신 (`runtime-k8s.svg` 에 Tempo · 보내기 선, `app-architecture.svg` 에 ● T), `docs/database.md` V7.
+### Changed
+- Kafka 관측(template · listener) 켬 · 샘플링 1.0 · `spring.reactor.context-propagation=auto` · `@Scheduled` 관측 끔 · OTLP 지표 끔 · Grafana 익명 보기 사용자도 Explore (`GF_USERS_VIEWERS_CAN_EDIT=true`, kind 만).
+- `HttpBankGateway.create(kind, settings, observations)` (관측 레지스트리 인자) · `BankConnectionOwner` 인자 · `TransferReconciler` 건별 범위.
+- 돈 흐름 위의 모든 추적 호출은 `runCatching` 으로 감쌌다 (E10 — 추적 실패는 업무를 바꾸지 않는다).
+- "V7 인덱스" 문구 → "다음 마이그레이션 인덱스" (새 V7 = `trace_parent` 와 혼동 방지: `docs/perf/p9a-metrics.md` B1 · OPERATION §17-6 · `load/k8s/p9a.sh` · api `application.yml` 주석).
+### 측정 요약 (이 PC · kind 3노드 기준 — 운영 수치가 아니다, 돈은 11회 중 10회 통과 · 1회는 판정 규칙상 실패지만 정확)
+- 추적 비용 (T1, 20건/s): 접수 p95 켬 **25.25ms** / 끔 25.39ms (**−0.6%**, 잡음 안), 완료 /s 같음, api CPU **+1.7%**. 40건/s 한 쌍은 **+5.8%** (한 쌍뿐 — 관찰). Tempo 0대: 돈 · 접수 p95 · 처리량 그대로, 보내기 실패 로그 12줄.
+- trace 모양 (T2): steady · gwkill · gwroll 표본 100개는 모두 정확히 7구간 · 출금 1건 · 두 서비스 (bank 표본 40개 중 6개는 여러 출금이 든 정리 작업 root trace — 설계, 누수 아님). 끝까지 p50 230 ~ 360ms 중 130 ~ 210ms 가 접수 → 발행 틈 (발행기 0.5초 주기).
+- 은행 2분 끊김 (T3): 재시도 trace 1000/1000 이 접수 trace 에 이어 붙음, 재발행은 `transfer.id` 한 번 검색으로 접수 + 정리 작업 trace. `bank-1` 은 은행을 끄는 순간 보낸 3건이 환불로 끝나 판정 규칙상 실패 (돈은 정확).
+- 리더 교대 (T4): 안 보냄 사유는 모두 `stepping_down`. exemplar (T5): 회차마다 26 ~ 119개, Tempo 에서 trace 확인.
+- 발견: 코루틴은 설정 한 줄로 부족(→ `asContextElement()`), JDK 판 INTERNAL → CLIENT, traceparent 플래그 `-03`, 스모크 `grep -q` SIGPIPE 거짓 실패(→ `grep -c`), 실험 도구가 잘못된 인자로 원자료를 지우던 것(인자 검사를 삭제 앞으로).
+### CI · 사람 확인
+- CI `k8s-smoke` 시간 · Postman 직접 확인: PR CI 에서 기록.
+
 ## [P9a] 관측성 — 지표 · 대시보드 · 알림 — 2026-11-17 ([#35](https://github.com/hyeokjinON/bank-transfer/pull/35), 머지 후 정리 PR #36)
 ### Added
 - 업무 지표 (`banktransfer.*`): api — 접수 · 은행 결과(`ok|rejected|not_sent|unknown|maintenance`) · 완료 시간(접수 → 확정) · 포기 · DLT(`kind`) · 재발행 · 결과조회 · 아웃박스 발행, 게이트웨이 — 은행 호출 시간 · 안 보냄 사유 · 리더 · 은행 연결 · 번호 구간. 두 앱 `/actuator/prometheus` 노출. 지표 이름 표는 OPERATION §17-4.

@@ -1,0 +1,32 @@
+$kind: http-request
+name: 9-1 출금 1만 원 → 202 (출금 id 저장 — 15초 뒤 9-2)
+method: POST
+url: 'http://127.0.0.1:8000/api/v1/transfers'
+order: 1000
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: X-User-Id
+    value: '{{userId}}'
+  - key: Idempotency-Key
+    value: '{{$guid}}'
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "{{accountNo}}",
+      "amount": 10000,
+      "memo": "P9b"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // 422 ACCOUNT_NOT_VERIFIED 면 userId 가 kind 에서 계좌 인증을 안 한 사용자 — 8. 관측 폴더 설명 참고
+      pm.test("202 RECEIVED", () => pm.response.to.have.status(202));
+      if (pm.response.code === 202) {
+        pm.collectionVariables.set("p9bTransferId", pm.response.json().id);
+        pm.collectionVariables.set("p9bTries", 0);
+        console.log("transfer.id = " + pm.response.json().id + " — 15초쯤 뒤 9-2");
+      }

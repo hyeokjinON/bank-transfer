@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1300 900" width="1300" height="900" font-family="'Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',sans-serif">
-  <title>bank-transfer 애플리케이션 구조 — 출금 · 1원인증 흐름 · P9a 기준</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1300 950" width="1300" height="950" font-family="'Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',sans-serif">
+  <title>bank-transfer 애플리케이션 구조 — 출금 · 1원인증 흐름 · P9b 기준</title>
   <defs>
     <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker>
     <marker id="arrR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b91c1c"/></marker>
@@ -16,10 +16,10 @@
       .ln{fill:none;stroke:#334155;stroke-width:1.6}
     </style>
   </defs>
-  <rect x="0" y="0" width="1300" height="900" fill="#ffffff"/>
+  <rect x="0" y="0" width="1300" height="950" fill="#ffffff"/>
 
-  <text class="t" x="20" y="34">bank-transfer 애플리케이션 구조 — 출금이체 · 1원인증 흐름 (P9a 기준)</text>
-  <text class="st" x="20" y="56">2026-11-17 · ①~⑥ = 출금 한 건이 지나가는 순서 / 빨간 선 = 은행에 "안 보냄" 일 때 재시도 경로 / 원칙: 돈이 걸린 외부 호출은 한 번만 보내고, 모르면 묻는다 / ● M = 지표를 세는 곳</text>
+  <text class="t" x="20" y="34">bank-transfer 애플리케이션 구조 — 출금이체 · 1원인증 흐름 (P9b 기준)</text>
+  <text class="st" x="20" y="56">2026-11-18 · ①~⑥ = 출금 한 건이 지나가는 순서 / 빨간 선 = 은행에 "안 보냄" 일 때 재시도 경로 / 원칙: 돈이 걸린 외부 호출은 한 번만 보내고, 모르면 묻는다 / ● M = 지표를 세는 곳 / ● T = 추적을 손으로 잇는 곳</text>
 
   <!-- 클라이언트 -->
   <rect class="box" x="20" y="110" width="155" height="70" rx="10"/>
@@ -121,4 +121,17 @@
   <text class="s" x="20" y="856" fill="#065f46">● M = 지표를 세는 곳 (P9a, 이름 앞 banktransfer.) — REST 접수: transfer.accepted · ② 발행기: outbox.published · ③ 컨슈머: transfer.bank.result · transfer.completed · transfer.dlt{kind}</text>
   <text class="s" x="20" y="872" fill="#065f46">④ 정리 작업: transfer.reconciled · republished · gave_up · completed (저장이 커밋된 뒤에만 — 관찰 포트) · MySQL: 상태 Gauge 10초 조회 (open · oldest · outbox, 나이는 SQL NOW(6))</text>
   <text class="s" x="20" y="888" fill="#065f46">게이트웨이: gateway.bank.request · not_sent{reason} (withClient 한 점) · leader · bank.connected · tran_no — 노출 /actuator/prometheus (Prometheus 만, 입구 404)</text>
+  <!-- P9b 추적 지점 (● T) — ● M 왼쪽 -->
+  <g font-size="10" font-weight="700" text-anchor="middle">
+    <circle cx="706" cy="122" r="9" fill="#be185d"/><text x="706" y="126" fill="#ffffff">T</text>
+    <circle cx="458" cy="322" r="9" fill="#be185d"/><text x="458" y="326" fill="#ffffff">T</text>
+    <circle cx="706" cy="322" r="9" fill="#be185d"/><text x="706" y="326" fill="#ffffff">T</text>
+    <circle cx="706" cy="415" r="9" fill="#be185d"/><text x="706" y="419" fill="#ffffff">T</text>
+    <circle cx="436" cy="415" r="9" fill="#be185d"/><text x="436" y="419" fill="#ffffff">T</text>
+    <circle cx="728" cy="546" r="9" fill="#be185d"/><text x="728" y="550" fill="#ffffff">T</text>
+    <circle cx="1246" cy="540" r="9" fill="#be185d"/><text x="1246" y="544" fill="#ffffff">T</text>
+  </g>
+  <text class="s" x="20" y="906" fill="#9d174d">● T = 추적을 손으로 잇는 곳 (P9b) — REST: 접수 구간에 transfer.id · ① 접수: outbox_event.trace_parent 저장 · ② 발행기: 행마다 outbox.publish (저장한 부모) → Kafka 헤더 traceparent</text>
+  <text class="s" x="20" y="922" fill="#9d174d">③ 컨슈머: transfer.id (소비 구간 · 재시도 · DLT 는 자동) · ④ 정리 작업: 실행 1회 = 새 trace transfer.reconcile, 건별 transfer.inquiry · republish · ⑥ HTTP: WebClient 관측 · JDK 판 손코드 · 1원인증 실행기 넘김</text>
+  <text class="s" x="20" y="938" fill="#9d174d">게이트웨이: withClient 에서 bank.request (type · outcome · tran_no · reason · reference) · 내보내기 앞 지우개(예외 메시지 · 스택) · actuator 제외 → Tempo (OTLP HTTP)</text>
 </svg>

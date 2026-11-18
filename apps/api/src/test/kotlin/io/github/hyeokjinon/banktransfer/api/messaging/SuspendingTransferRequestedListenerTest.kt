@@ -167,6 +167,20 @@ class SuspendingTransferRequestedListenerTest {
         runBlocking { withContext(Dispatchers.Unconfined) { listener.on(record) } }
 
     @Test
+    fun `관측 레지스트리가 던져도 본문은 정확히 한 번 돌고 결과는 그대로다 (E10 - asContextElement 실패)`() {
+        val throwingRegistry = java.lang.reflect.Proxy.newProxyInstance(
+            javaClass.classLoader, arrayOf(io.micrometer.observation.ObservationRegistry::class.java),
+        ) { _, m, _ -> if (m.name == "toString") "throwing" else throw IllegalStateException("관측 고장 ${m.name}") } as io.micrometer.observation.ObservationRegistry
+        val t = received()
+        val bank = LoopBank(BankTransferOutcome.Completed)
+
+        consume(SuspendingTransferRequestedListener(processor, bank, Semaphore(64), db, AlertNotifier { }, observations = throwingRegistry), record(t.id))
+
+        assertEquals(1, bank.calls.get())
+        assertEquals(TransferStatus.COMPLETED, store.transfers.getValue(t.id).status)
+    }
+
+    @Test
     fun `완료 · 거절 · 모름은 블로킹 판과 같은 상태로 기록하고 정상으로 끝난다 (예외 없음 = 프레임워크가 ack)`() {
         val cases = mapOf(
             BankTransferOutcome.Completed to TransferStatus.COMPLETED,

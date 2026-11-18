@@ -28,9 +28,11 @@ class TransferRequestedListener(
     alerts: AlertNotifier = AlertNotifier { },
     /** DLT 지표 (P9a). 기본은 아무것도 하지 않는다. */
     onDeadLetter: (DltKind) -> Unit = {},
+    /** 소비 구간에 transfer.id (P9b). 기본은 아무것도 하지 않는다. */
+    onTransferId: (UUID) -> Unit = {},
     private val process: (UUID) -> ProcessResult,
 ) {
-    private val handling = TransferRequestedHandling(alerts, LoggerFactory.getLogger(javaClass), onDeadLetter)
+    private val handling = TransferRequestedHandling(alerts, LoggerFactory.getLogger(javaClass), onDeadLetter, onTransferId)
 
     @RetryableTopic(
         attempts = TransferListenerSettings.ATTEMPTS,

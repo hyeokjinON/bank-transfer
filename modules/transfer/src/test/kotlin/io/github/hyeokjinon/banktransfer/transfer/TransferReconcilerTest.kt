@@ -401,4 +401,29 @@ class TransferReconcilerTest {
         assertEquals(1, itemErrors.size)
         assertEquals(emptyList(), observer.events)
     }
+
+    @Test
+    fun `건별 범위(P9b) - 재발행 · 결과조회 한 건마다 그 이체로 감싼다`() {
+        val unknown = transfer(UNKNOWN)
+        inquiry.outcomes[unknown.reference] = { InquiryOutcome.Processed }
+        val stale = transfer(RECEIVED, sendingAt = now.minusSeconds(600), updatedAt = now.minusSeconds(600))
+        val scoped = mutableListOf<Pair<String, UUID>>()
+        val scope = object : ReconcileItemScope {
+            override fun <T> inquiry(transfer: Transfer, block: () -> T): T {
+                scoped += "inquiry" to transfer.id
+                return block()
+            }
+
+            override fun <T> republish(transfer: Transfer, block: () -> T): T {
+                scoped += "republish" to transfer.id
+                return block()
+            }
+        }
+
+        val result = TransferReconciler(store, inquiry, Clock.fixed(now, ZoneOffset.UTC), itemScope = scope).reconcile()
+
+        assertEquals(listOf("republish" to stale.id, "inquiry" to unknown.id), scoped)
+        assertEquals(1, result.republished)
+        assertEquals(1, result.completed)
+    }
 }

@@ -41,15 +41,19 @@ internal class TransferRequestedHandling(
     private val log: Logger,
     /** DLT 로 온 메시지 하나마다 (P9a 지표 transfer.dlt{kind}). 로그 · 알림보다 먼저 - 그쪽이 실패해도 센다. */
     private val onDeadLetter: (DltKind) -> Unit = {},
+    /** key 를 이체 id 로 읽은 직후 (P9b — 소비 구간에 transfer.id). 리스너 스레드 · 소비 구간 범위 안에서 불린다. */
+    private val onTransferId: (UUID) -> Unit = {},
 ) {
 
     fun transferIdOf(key: String?): UUID {
         if (key == null) throw InvalidTransferKeyException()
-        return try {
+        val id = try {
             UUID.fromString(key)
         } catch (e: IllegalArgumentException) {
             throw InvalidTransferKeyException()
         }
+        onTransferId(id)
+        return id
     }
 
     /**

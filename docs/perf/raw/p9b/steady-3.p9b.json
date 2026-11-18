@@ -1,0 +1,5 @@
+{"run":"steady-3","tracing":"off","rate":20,"duration_s":60,"settle_s":1,"transfers":1200,
+ "completed_per_s":19.67,"accept_p95_ms":26.677851599999993,"complete_p95_s":0.47564021185936817,"api_cpu_avg":0.04616243106241487,"gw_cpu_avg":0.008102839147140686,"export_errors":0,
+ "trace_shape":null,
+ "retry_traces":null,"retry_traces_rooted":null,"republished":null,"republished_found":null,"republished_reconcile_root":null,
+ "not_sent_traces":null,"not_sent_reasons":"","exemplars":0,"exemplar_trace_found":false}

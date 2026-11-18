@@ -2,6 +2,7 @@ package io.github.hyeokjinon.banktransfer.api.messaging
 
 import io.github.hyeokjinon.banktransfer.api.alert.AlertNotifier
 import io.github.hyeokjinon.banktransfer.api.metrics.TransferMetrics
+import io.github.hyeokjinon.banktransfer.api.tracing.TraceTags
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
 import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceWindow
@@ -13,6 +14,7 @@ import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.ApplicationContext
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import io.micrometer.observation.ObservationRegistry
 import java.lang.reflect.Proxy
 import java.time.Clock
 import java.time.LocalTime
@@ -42,6 +44,8 @@ class ConsumerConfigurationTest {
         .withBean(TransferMetrics::class.java, Supplier {
             TransferMetrics(SimpleMeterRegistry(), BankMaintenanceWindow(LocalTime.of(23, 50), LocalTime.of(0, 10), ZoneId.of("Asia/Seoul")), Clock.systemUTC())
         })
+        .withBean(TraceTags::class.java, Supplier { TraceTags.NOOP })
+        .withBean(ObservationRegistry::class.java, Supplier { ObservationRegistry.NOOP })
 
     private fun ApplicationContext.listenerCounts() =
         getBeanNamesForType(TransferRequestedListener::class.java).size to getBeanNamesForType(SuspendingTransferRequestedListener::class.java).size

@@ -1,6 +1,6 @@
 # ARCHITECTURE — 구조와 흐름
 
-> 기준: P9a 관측 — 지표 · 대시보드 · 알림 (2026-11-18, [#35](https://github.com/hyeokjinON/bank-transfer/pull/35) 머지 — [ADR-0020](docs/adr/0020-observability-metrics-alerts.md), 아래 관측 절). 그 앞: P8-3c 게이트웨이 필수 분산 (2026-11-17, [#33](https://github.com/hyeokjinON/bank-transfer/pull/33) 머지 — [ADR-0019](docs/adr/0019-gateway-required-spread.md), 두 게이트웨이는 반드시 다른 워커 · 구성도 두 장 `docs/diagrams/`). 그 앞: P8-3b 게이트웨이 이중화 (2026-11-16, [#31](https://github.com/hyeokjinON/bank-transfer/pull/31) 머지 — [ADR-0018](docs/adr/0018-gateway-ha-leader-election.md), 아래 §1 의 "게이트웨이 이중화"). 그 앞: P8-3a Kubernetes(kind) 로 옮기기 (2026-11-16, [#29](https://github.com/hyeokjinON/bank-transfer/pull/29) 머지 — [ADR-0017](docs/adr/0017-kubernetes-kind.md), 실행 그림은 아래 §1 의 "Kubernetes 실행"). 그 앞: P8-2 앱 이미지 · Compose 전체 실행 · api 2대 (2026-11-11, [#27](https://github.com/hyeokjinON/bank-transfer/pull/27) 머지 — [ADR-0016](docs/adr/0016-app-images-compose.md) — 기본 `bank.gateway.mode` 가 `http` 로 바뀌었고, 컨테이너 실행은 아래 §1 의 "컨테이너 실행" 그림). 그 앞: P8-1 은행 게이트웨이 서비스 분리 (2026-11-10, [#25](https://github.com/hyeokjinON/bank-transfer/pull/25) 머지 — [ADR-0015](docs/adr/0015-bank-gateway-service.md), P8-2 전에는 기본이 `direct` 라 아래 그림의 직결 경로가 평소 모양이었다). P5-1 일마감 대사 · 점검 시간 · 알림 완료 (2026-10-30, PR #15 머지). P4-2 잔고 차감 락 전략 완료 (2026-10-28, PR #13 머지). P4-1 원화 잔고 완료 (2026-10-26, PR #11 머지). P3 완료(P3-3b PR #9 머지). P3 ~ P5 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p5)에 적는다.
+> 기준: P9b 분산 추적 — Micrometer Tracing · OpenTelemetry · Tempo (2026-11-18, 제안 — [ADR-0021](docs/adr/0021-distributed-tracing.md), 아래 추적 절). 그 앞: P9a 관측 — 지표 · 대시보드 · 알림 (2026-11-18, [#35](https://github.com/hyeokjinON/bank-transfer/pull/35) 머지 — [ADR-0020](docs/adr/0020-observability-metrics-alerts.md), 아래 관측 절). 그 앞: P8-3c 게이트웨이 필수 분산 (2026-11-17, [#33](https://github.com/hyeokjinON/bank-transfer/pull/33) 머지 — [ADR-0019](docs/adr/0019-gateway-required-spread.md), 두 게이트웨이는 반드시 다른 워커 · 구성도 두 장 `docs/diagrams/`). 그 앞: P8-3b 게이트웨이 이중화 (2026-11-16, [#31](https://github.com/hyeokjinON/bank-transfer/pull/31) 머지 — [ADR-0018](docs/adr/0018-gateway-ha-leader-election.md), 아래 §1 의 "게이트웨이 이중화"). 그 앞: P8-3a Kubernetes(kind) 로 옮기기 (2026-11-16, [#29](https://github.com/hyeokjinON/bank-transfer/pull/29) 머지 — [ADR-0017](docs/adr/0017-kubernetes-kind.md), 실행 그림은 아래 §1 의 "Kubernetes 실행"). 그 앞: P8-2 앱 이미지 · Compose 전체 실행 · api 2대 (2026-11-11, [#27](https://github.com/hyeokjinON/bank-transfer/pull/27) 머지 — [ADR-0016](docs/adr/0016-app-images-compose.md) — 기본 `bank.gateway.mode` 가 `http` 로 바뀌었고, 컨테이너 실행은 아래 §1 의 "컨테이너 실행" 그림). 그 앞: P8-1 은행 게이트웨이 서비스 분리 (2026-11-10, [#25](https://github.com/hyeokjinON/bank-transfer/pull/25) 머지 — [ADR-0015](docs/adr/0015-bank-gateway-service.md), P8-2 전에는 기본이 `direct` 라 아래 그림의 직결 경로가 평소 모양이었다). P5-1 일마감 대사 · 점검 시간 · 알림 완료 (2026-10-30, PR #15 머지). P4-2 잔고 차감 락 전략 완료 (2026-10-28, PR #13 머지). P4-1 원화 잔고 완료 (2026-10-26, PR #11 머지). P3 완료(P3-3b PR #9 머지). P3 ~ P5 의 진행 상황은 아래 [§6](#6-진행-상황-p3--p5)에 적는다.
 
 ## 1. 한눈에 보기
 
@@ -155,6 +155,16 @@ flowchart LR
 - **수집 경로**: Prometheus 는 Operator 없이 Deployment + 설정 파일이고 `kubernetes_sd`(pod, `bank-transfer` namespace)로 Service 를 거치지 않고 Pod 를 직접 읽는다 (어노테이션 `prometheus.io/*` 인 Pod 만). 권한은 Role + RoleBinding(`base/rbac-prometheus.yaml`), 네트워크는 NetworkPolicy `metrics-from-prometheus-*` 로 Prometheus 만 api:8080 · 게이트웨이:8082 에 닿는다. 입구 HTTPRoute 는 허용 목록(`/api/v1` · `/admin` · `/actuator/health` · `/actuator/info`)이라 `/actuator/prometheus` 는 입구로 404 다. 관측 4개는 제어 노드에 있어 워커를 죽여도 산다. 받아들인 위험: Prometheus 가 닿는 게이트웨이 8082 는 송신 API 와 같은 포트다 (관리 포트 분리는 다음 — ADR-0020 B5).
 - **알림 경로**: 규칙(`alerts.yml` 11개, 점검 시간은 `banktransfer_bank_maintenance` 로 제외) → Alertmanager(묶기 · 억제 · 해제 알림) → alert-sink(웹훅 수신기, 받은 알림 = 로그. 운영이면 Slack · 텔레그램 자리). 기존 P5 `AlertNotifier`(일마감 대사 결과)와 별개이고 Alertmanager 는 api 를 거치지 않는다 — 감시 대상이 죽어도 알림 경로가 산다 (ADR-0020 D9).
 - 카운터는 근사치(Pod 재시작 · Kafka 최소 한 번 전달)이고 돈의 정답은 DB 다. 성공 기준 · 숫자는 측정 결과 문서.
+
+### 추적 (P9b, 제안)
+> [ADR-0021](docs/adr/0021-distributed-tracing.md), [스펙](docs/superpowers/specs/2026-11-18-p9b-tracing-design.md) (§14 계획 단계에서 고친 점), [측정 결과](docs/perf/p9b-tracing.md), 사용법 [OPERATION §18](OPERATION.md#18-분산-추적--tempo-p9b). kind 에만 있다 (구성도의 ● T).
+
+출금 한 건 = trace 하나 — 접수(api) → `outbox.publish` → Kafka → 컨슈머 → 게이트웨이 → `bank.request`. 앱이 Tempo 로 OTLP HTTP 를 **직접** 보낸다 (5초 묶음 · 대기열 2048, Collector 없음). 보내기는 비동기라 Tempo 가 죽어도 돈 흐름은 그대로다.
+- **자동 구간**: 서버(MVC · WebFlux) · Kafka producer / consumer(재시도 · DLT 포함 — 같은 trace) · WebClient. Kafka 관측은 yml 두 줄.
+- **손으로 잇는 넷**: ① 아웃박스 `trace_parent` (접수 때 저장 → 발행기가 행마다 `outbox.publish` 구간의 부모로 되살림) ② 정리 작업 root (`transfer.reconcile`, 실행 1회 = 새 trace · 건별 구간에 `transfer.id`) ③ `bank.request` (게이트웨이 `withClient` 한 점, Tracer) ④ 실행기 넘김 (1원인증 `ContextSnapshot` · JDK 판 CLIENT 구간 · 코루틴 `asContextElement`).
+- **내보내기 앞 거름**: 지우개(`ScrubbingSpanExporter`)가 예외 메시지 · 스택 · 상태 설명을 지우고 `exception.type` 만 남긴다. `/actuator` 구간은 내보내지 않는다. 구간 속성에 금액 · 계좌번호 · 예금주 · 코드 · Idempotency-Key · 사용자 id 는 없다.
+- **보내기 켬 · 끔 = 주소의 유무** (kind 의 app-config 만 주소를 준다). 샘플링은 실험용 1.0.
+- 은행 전문에는 추적을 싣지 않는다 — trace 는 `bank.request` 에서 끝난다 (모의 은행은 계측 안 함).
 
 ## 2. 모듈
 
@@ -521,3 +531,4 @@ flowchart TB
 | [0018](docs/adr/0018-gateway-ha-leader-election.md) | 게이트웨이 2대 active-standby — K8s Lease 리더 선출, 리더 라벨 + 둘 다 Ready, 전문번호 ConfigMap 구간 예약, 정상 교대 순서(종료 훅), 규격 v0.4 `3001` |
 | [0019](docs/adr/0019-gateway-required-spread.md) | 게이트웨이 두 복제본 필수 분산 — `DoNotSchedule` + `matchLabelKeys`(롤링 교착 방지) + `nodeTaintsPolicy Ignore`(빠진 워커로 복귀) |
 | [0020](docs/adr/0020-observability-metrics-alerts.md) | 관측 — 사건 Counter · Timer + DB 를 읽는 상태 Gauge, Prometheus 는 Operator 없이 Pod 직접 수집, 알림 규칙 11개 → Alertmanager → alert-sink(대역), 입구 HTTPRoute 허용 목록, 점검 시간은 앱 설정 한 곳 |
+| [0021](docs/adr/0021-distributed-tracing.md) | 분산 추적 — Micrometer Tracing + OpenTelemetry → Tempo(앱이 직접 보냄), 아웃박스 `trace_parent` 로 접수 → 발행 잇기, 정리 작업은 새 trace + `transfer.id`, 내보내기 앞 지우개 (제안) |

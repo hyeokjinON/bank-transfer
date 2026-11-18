@@ -67,6 +67,10 @@ spec:
               valueFrom: {configMapKeyRef: {name: app-config, key: BANK_MAINTENANCE_START}}
             - name: BANK_MAINTENANCE_END
               valueFrom: {configMapKeyRef: {name: app-config, key: BANK_MAINTENANCE_END}}
+            - name: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT   # P9b 추적 보내기 (api 와 같은 값 — 한 곳)
+              valueFrom: {configMapKeyRef: {name: app-config, key: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT}}
+            - name: MANAGEMENT_TRACING_SAMPLING_PROBABILITY
+              valueFrom: {configMapKeyRef: {name: app-config, key: MANAGEMENT_TRACING_SAMPLING_PROBABILITY}}
           ports:
             - {name: http, containerPort: 8082}
           # preStop 없음 (결정 12): 호출자(api)는 "안 보냄"(503 · 연결 거부)을 안전하게 재시도한다 — SIGTERM 에 바로 물러나는 편이 교대 공백이 짧다

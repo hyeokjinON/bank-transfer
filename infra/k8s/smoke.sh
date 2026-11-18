@@ -10,6 +10,8 @@
 #      두 게이트웨이가 서로 다른 워커 (P8-3c 필수 분산 — 깨지면 매니페스트가 바뀐 것)
 #  10) 관측 (P9a): monitoring 4개 Ready, 수집 api ×2 · bank-gateway ×2 up (pod · app 라벨), 리더 합 1 · 은행 연결 1, 스모크 출금이 지표에,
 #      입구 /actuator/prometheus 404, 규칙 11개 · 울리는 알림 0, 대시보드 2장, 시험 알림 → alert-sink 30초 안
+#  11) 추적 (P9b): tempo Ready, [2] 스모크 출금의 transfer.id 로 Tempo 검색 → 게이트웨이 구간이 있는 trace 하나 —
+#      서비스 bank-transfer · bank-gateway 둘 다 · 구간 5개 이상, api 로그에 그 traceId, actuator 구간 0
 # 사용 (Git Bash · Linux): bash infra/k8s/smoke.sh
 # 클러스터 DB 에는 사용자 load-p83a-smoke-<시각> 의 행만 쓰고 끝에서 지운다.
 set -euo pipefail
@@ -38,7 +40,7 @@ post() {   # $1 = 경로, $2 = JSON 본문(표준입력으로 — 한글이 셸 
   printf '%s' "$data" | curl -s -w '\n%{http_code}' -X POST "$BASE$path" -H 'Content-Type: application/json' -H "X-User-Id: $USER_ID" "$@" --data-binary @-
 }
 
-echo "[0/10] 준비"
+echo "[0/11] 준비"
 # 롤아웃 직후 옛 api Pod 가 Terminating 으로 남아 있으면 [4] 의 Pod 목록이 어긋난다 — 사라질 때까지 기다린다 (최대 90초)
 terminating_api() {   # 종료 중인 api Pod 수를 출력. kubectl 이 실패하면 실패로 돌려준다 (0 으로 위장하지 않는다)
   local out
@@ -62,7 +64,7 @@ done
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/actuator/health")" = 200 ] || fail "입구 $BASE/actuator/health 가 200 이 아니다"
 ok "종료 중인 api Pod 없음, 워크로드 준비, Gateway Programmed, 입구 200"
 
-echo "[1/10] 1원인증"
+echo "[1/11] 1원인증"
 R=$(post /api/v1/account-verifications "{\"bankCode\":\"090\",\"accountNo\":\"$ACCOUNT\",\"holderName\":\"홍길동\"}")
 [ "$(code "$R")" = 201 ] || fail "1원인증 요청 $(code "$R"): $(body "$R")"
 VID=$(body "$R" | json id)
@@ -72,7 +74,7 @@ R=$(post "/api/v1/account-verifications/$VID/confirm" "{\"code\":\"$VCODE\"}")
 [ "$(body "$R" | json status)" = VERIFIED ] || fail "확인 $(code "$R"): $(body "$R")"
 ok "1원인증 → VERIFIED"
 
-echo "[2/10] 충전 → 출금 → COMPLETED"
+echo "[2/11] 충전 → 출금 → COMPLETED"
 R=$(post /api/v1/wallet/deposits '{"amount":10000}')
 [ "$(code "$R")" = 200 ] || fail "충전 $(code "$R"): $(body "$R")"
 KEY="smoke-$USER_ID"
@@ -89,24 +91,24 @@ done
 [ "$S" = COMPLETED ] || fail "60초 안에 COMPLETED 가 아니다 (지금 $S)"
 ok "출금 $TID → COMPLETED"
 
-echo "[3/10] 같은 멱등키로 다시"
+echo "[3/11] 같은 멱등키로 다시"
 R=$(post /api/v1/transfers "$TRANSFER" -H "Idempotency-Key: $KEY")
 [ "$(code "$R")" = 200 ] || fail "같은 키 재요청 $(code "$R"): $(body "$R")"
 [ "$(body "$R" | json id)" = "$TID" ] || fail "다른 출금 id: $(body "$R")"
 ok "같은 출금 id, 200"
 
-echo "[4/10] 분배"
+echo "[4/11] 분배"
 PODS=$(k get pods -l app=api -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort | tr '\n' ' ')
 INST=$(for _ in $(seq 20); do curl -s "$BASE/actuator/info" | json instance; done | sort -u | tr '\n' ' ')
 [ "$INST" = "$PODS" ] || fail "instance 가 api Pod 두 개가 아니다: [$INST] (Pod: [$PODS])"
 ok "instance $INST"
 
-echo "[5/10] 분산 배치"
+echo "[5/11] 분산 배치"
 NODES=$(k get pods -l app=api -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | sort -u | tr '\n' ' ')
 [ "$(wc -w <<<"$NODES" | tr -d ' ')" = 2 ] || fail "api 두 Pod 가 한 노드에 있다: $NODES (ScheduleAnyway 라 생길 수 있다 — kubectl rollout restart deploy/api)"
 ok "api 노드 $NODES"
 
-echo "[6/10] 게이트웨이 · 포트"
+echo "[6/11] 게이트웨이 · 포트"
 GW_LEADER=$(gw_leader)
 [ -n "$GW_LEADER" ] || fail "리더 라벨(bank-transfer/gateway-role=leader) 이 붙은 게이트웨이 Pod 가 없다"
 k exec "$GW_LEADER" -- wget -qO- http://127.0.0.1:8082/actuator/health/readiness | grep -q '"status":"UP"' || fail "리더 게이트웨이 readiness 가 UP 이 아니다"
@@ -117,14 +119,14 @@ if [ "${CI:-false}" = true ]; then
 fi
 ok "리더 게이트웨이($GW_LEADER) readiness UP, Service 전부 ClusterIP (앱 입구는 127.0.0.1:8000 하나 — kind API 서버도 127.0.0.1 의 임의 포트에 열린다, kubectl 용)"
 
-echo "[7/10] 비root"
+echo "[7/11] 비root"
 for dpl in mock-bank bank-gateway api; do
   u=$(k exec "deploy/$dpl" -- id -u | tr -d '\r')
   [ "$u" != 0 ] || fail "$dpl 가 root 로 돈다"
 done
 ok "세 앱 모두 root 아님"
 
-echo "[8/10] NetworkPolicy"
+echo "[8/11] NetworkPolicy"
 [ -n "$(k get networkpolicy default-deny-ingress -o name 2>/dev/null)" ] || fail "기본 거부 정책이 없다"
 # 양성 대조: API 서버(443)에는 정책이 걸리지 않는다. 여기 못 붙으면 probe 자체가 고장 — 아래 "0" 을 막힘으로 읽으면 안 된다
 # np_probe 출력 = "<time_connect> <curl 종료 코드>". 양성 대조는 time_connect > 0 (종료 코드는 telnet:// 이 -m 으로 끊겨 28 이라 보지 않는다)
@@ -145,7 +147,7 @@ for hp in "bank-gateway.bank-transfer.svc.cluster.local 8082" "mysql.bank-transf
 done
 ok "양성 대조(API 서버 443 연결) 뒤, 허용 안 된 Pod 는 bank-gateway:8082 · mysql:3306 에 못 붙는다"
 
-echo "[9/10] 게이트웨이 이중화"
+echo "[9/11] 게이트웨이 이중화"
 # 리더 · 라벨 · 엔드포인트 · 세션이 자리 잡기까지 잠깐 걸릴 수 있다 (기동 · 롤아웃 직후) — 전부 맞을 때까지 최대 30초
 gw_state() {
   LEADERS=$(k get pods -l app=bank-gateway,bank-transfer/gateway-role=leader -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
@@ -169,7 +171,7 @@ GW_NODES=$(k get pods -l app=bank-gateway -o jsonpath='{range .items[?(@.status.
 [ "$(wc -w <<<"$GW_NODES" | tr -d ' ')" = 2 ] || fail "게이트웨이 두 대가 서로 다른 워커가 아니다: $GW_NODES (P8-3c 는 DoNotSchedule 이라 한 노드에 놓일 수 없다 — 분산 규칙이 바뀌었는지 base/bank-gateway.yaml 확인)"
 ok "게이트웨이 Ready 2/2, 리더 $HOLDER = Lease holder = Service 엔드포인트, 모의 은행 세션 1, 노드 $GW_NODES"
 
-echo "[10/10] 관측 (P9a)"
+echo "[10/11] 관측 (P9a)"
 for dpl in prometheus alertmanager alert-sink grafana; do
   r=$(km get deploy "$dpl" -o jsonpath='{.status.readyReplicas}')
   [ "${r:-0}" = 1 ] || fail "monitoring/$dpl 준비 ${r:-0}/1 — bash infra/k8s/up.sh"
@@ -196,10 +198,14 @@ done
 [ "$CONNECTED" = 1 ] || fail "max(banktransfer_gateway_bank_connected) = '${CONNECTED:-없음}' (1 이어야)"
 
 # [2] 의 스모크 출금이 지표에 남았나 — 카운터는 기동 때 0 으로 만들어 두어 increase 가 첫 증가를 본다 (마지막 수집을 기다린다)
+# 막 뜬 Pod 는 Prometheus 의 첫 수집이 [2] 보다 늦을 수 있다 — 그러면 첫 표본이 이미 1 이라 increase 가 0 이다 (CI 에서 실제로 걸림).
+# 그래서 원값 합 > 0 도 받는다: 카운터는 Pod 기동 때 0 이니 원값 > 0 은 "이 Pod 들이 출금을 셌다" 다 (오래 떠 있던 로컬 Pod 면 약해지지만 increase 가 그 경우를 본다)
 gt0() { awk -v x="${1:-0}" 'BEGIN { exit !(x > 0) }'; }
 for _ in $(seq 15); do
   ACC=$(prom_value 'sum(increase(banktransfer_transfer_accepted_total{result="created"}[15m]))')
   DONE=$(prom_value 'sum(increase(banktransfer_transfer_completed_seconds_count{status="COMPLETED"}[15m]))')
+  gt0 "$ACC" || ACC=$(prom_value 'sum(banktransfer_transfer_accepted_total{result="created"})')
+  gt0 "$DONE" || DONE=$(prom_value 'sum(banktransfer_transfer_completed_seconds_count{status="COMPLETED"})')
   gt0 "$ACC" && gt0 "$DONE" && break
   sleep 2
 done
@@ -232,10 +238,50 @@ km exec deploy/alertmanager -- wget -qO- --header='Content-Type: application/jso
   http://127.0.0.1:9093/api/v2/alerts >/dev/null || fail "Alertmanager 에 시험 알림을 넣지 못했다"
 T_SEND=$(date +%s); GOT=
 for _ in $(seq 15); do
-  if km logs deploy/alert-sink --tail=500 2>/dev/null | grep -q "$SMOKE_NAME"; then GOT=$(( $(date +%s) - T_SEND )); break; fi
+  SINK_LOGS=$(km logs deploy/alert-sink --tail=500 2>/dev/null || true)   # 변수로 받아 here-string 으로 찾는다 (grep -q 파이프는 pipefail + SIGPIPE 로 거짓 실패)
+  if grep -q "$SMOKE_NAME" <<<"$SINK_LOGS"; then GOT=$(( $(date +%s) - T_SEND )); break; fi
   sleep 2
 done
 [ -n "$GOT" ] || fail "시험 알림 $SMOKE_NAME 이 30초 안에 alert-sink 에 오지 않았다 (kubectl -n monitoring logs deploy/alertmanager · deploy/alert-sink)"
 ok "감시 4개 Ready, 수집 api ×2 · bank-gateway ×2 up (pod 라벨 프로세스 ${STARTS}), 리더 합 1 · 연결 1, 스모크 출금 지표(접수 +${ACC} · 완료 +${DONE}), 입구 /actuator/prometheus 404, 규칙 11 · 울림 0, 대시보드 2장, 시험 알림 ${GOT}초"
+
+echo "[11/11] 추적 (P9b)"
+r=$(km get deploy tempo -o jsonpath='{.status.readyReplicas}')
+[ "${r:-0}" = 1 ] || fail "monitoring/tempo 준비 ${r:-0}/1 — bash infra/k8s/up.sh"
+# [2] 의 스모크 출금 — 게이트웨이 구간이 든 trace 만 (같은 멱등키 재요청 [3] 은 서버 구간 하나짜리 다른 trace 라 거른다).
+# 앱은 5초마다 묶어 보내고 Tempo 가 색인하기까지 더 걸린다 — 최대 60초. 시간 범위(최근 1시간)를 꼭 준다.
+Q="{ span.transfer.id = \"$TID\" } && { resource.service.name = \"bank-gateway\" }"
+TRACE_ID=
+for _ in $(seq 30); do
+  NOW=$(date +%s)
+  TRACE_ID=$({ tempo_get "/api/search?q=$(urlenc "$Q")&limit=5&start=$((NOW - 3600))&end=$((NOW + 60))" 2>/dev/null || true; } | { grep -o '"traceID":"[0-9a-f]*"' || true; } | head -1 | cut -d'"' -f4)
+  [ -n "$TRACE_ID" ] && break
+  sleep 2
+done
+[ -n "$TRACE_ID" ] || fail "60초 동안 Tempo 에서 스모크 출금 $TID 의 게이트웨이 구간이 든 trace 를 찾지 못했다 (디버그: kubectl -n monitoring logs deploy/tempo · kubectl -n bank-transfer logs -l app=api | grep 'Failed to export' — OPERATION §18-4)"
+TRACE_ID=$(printf '%32s' "$TRACE_ID" | tr ' ' 0)   # Tempo 검색은 앞의 0 을 뗄 수 있다 — 로그의 32자와 맞춘다
+TRACE=
+for _ in $(seq 5); do
+  TRACE=$({ tempo_get "/api/traces/$TRACE_ID" 2>/dev/null || true; } | tr -d '\r')
+  [ -n "$TRACE" ] && break
+  sleep 2
+done
+[ -n "$TRACE" ] || fail "Tempo 에서 trace $TRACE_ID 를 ID 로 읽지 못했다 (kubectl -n monitoring logs deploy/tempo)"
+SPANS=$({ grep -o '"spanId":"' <<<"$TRACE" || true; } | wc -l | tr -d ' ')
+SVCS=$({ grep -o '"key":"service.name","value":{"stringValue":"[^"]*"' <<<"$TRACE" || true; } | sed 's/.*"stringValue":"//; s/"$//' | sort -u | tr '\n' ' ')
+[ "$SPANS" -ge 5 ] || fail "trace $TRACE_ID 의 구간이 ${SPANS}개 (5 이상 — 접수 · 발행 · Kafka · 게이트웨이 · bank.request)"
+[ "$SVCS" = "bank-gateway bank-transfer " ] || fail "trace $TRACE_ID 의 서비스가 '$SVCS' (bank-gateway · bank-transfer 둘 다여야)"
+LOGS=$(k logs -l app=api --tail=-1 2>/dev/null) || fail "api 로그를 읽지 못했다 (kubectl -n bank-transfer logs -l app=api)"
+LOGHITS=$({ grep -c "$TRACE_ID" <<<"$LOGS" || true; })   # grep -q 는 pipefail + SIGPIPE 로 거짓 실패한다
+[ "${LOGHITS:-0}" -gt 0 ] || fail "api 로그에 traceId $TRACE_ID 가 없다 (로그 상관 — OPERATION §18-4)"
+# 양성 대조: 같은 속성(uri)이 서버 구간에 실제로 붙어 있어야 아래 actuator 0 이 속성 이름 오류로 헛통과하지 않는다
+grep -q '"key":"uri","value":{"stringValue":"/api/v1/transfers"}' <<<"$TRACE" || fail "trace $TRACE_ID 의 서버 구간에 uri=/api/v1/transfers 속성이 없다 (actuator 검사 속성 이름 확인)"
+NOW=$(date +%s)
+ACT_RESP=$({ tempo_get "/api/search?q=$(urlenc '{ span.uri =~ "/actuator.*" }')&limit=5&start=$((NOW - 3600))&end=$((NOW + 60))" 2>/dev/null || true; } | tr -d '\r')
+# 검색 자체가 실패했는데 "0개" 로 통과하지 않게: 응답이 {"traces":[...]} JSON 이어야 한다
+grep -q '"traces"' <<<"$ACT_RESP" || fail "Tempo 의 actuator 구간 검색이 유효한 JSON 을 주지 않았다 (kubectl -n monitoring logs deploy/tempo)"
+ACT=$({ grep -o '"traceID"' <<<"$ACT_RESP" || true; } | wc -l | tr -d ' ')
+[ "$ACT" = 0 ] || fail "actuator 요청 구간이 Tempo 에 있다 (${ACT}개 — ActuatorSpans 거름 확인)"
+ok "Tempo Ready, 스모크 출금 trace $TRACE_ID — 구간 $SPANS · 서비스 ${SVCS% } · api 로그에 traceId, actuator 구간 0"
 
 echo "k8s smoke 통과"

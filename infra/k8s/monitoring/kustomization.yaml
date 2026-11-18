@@ -9,6 +9,7 @@ resources:
   - alertmanager.yaml
   - alert-sink.yaml
   - grafana.yaml
+  - tempo.yaml   # P9b 추적
 configMapGenerator:
   - name: prometheus-config
     files:
@@ -30,3 +31,6 @@ configMapGenerator:
   - name: alert-sink-cgi
     files:
       - sink=alert-sink/sink.sh
+  - name: tempo-config
+    files:
+      - tempo/tempo.yml

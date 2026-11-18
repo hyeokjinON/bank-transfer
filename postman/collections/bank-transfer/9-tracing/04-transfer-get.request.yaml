@@ -1,0 +1,15 @@
+$kind: http-request
+name: 9-4 그 출금 조회 → 상태 (은행 끊기 확인용)
+method: GET
+url: 'http://127.0.0.1:8000/api/v1/transfers/{{p9bTransferId}}'
+order: 4000
+headers:
+  - key: X-User-Id
+    value: '{{userId}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // 은행이 끊긴 동안은 RECEIVED (재시도 대기), 은행을 되살리고 1 ~ 2분 뒤 COMPLETED. COMPLETED 가 된 뒤 9-2 → 9-3 을 다시 Send
+      pm.test("200", () => pm.response.to.have.status(200));
+      console.log("상태 = " + pm.response.json().status);

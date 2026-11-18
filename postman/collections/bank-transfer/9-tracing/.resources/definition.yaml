@@ -1,0 +1,9 @@
+$kind: collection
+name: 9. 추적 (P9b, kind)
+description: |-
+  P9b 머지 전 Postman 직접 확인. kind 전용 — 주소는 요청에 직접 적었다 (입구 http://127.0.0.1:8000 · Tempo http://127.0.0.1:3200).
+  먼저 Git Bash 창에 port-forward 를 켜 둔다:
+    kubectl --context kind-bank-transfer -n monitoring port-forward svc/tempo 3200:3200
+    kubectl --context kind-bank-transfer -n monitoring port-forward svc/grafana 3000:3000
+  9-1 출금 → 약 15초 기다림 (보내기 묶음 5초 + Tempo 검색 반영) → 9-2 · 9-3. 9-2 가 비어 있으면 몇 초 뒤 다시 Send (Run folder 로 돌리면 5초 간격 최대 6번 스스로 다시 묻는다).
+order: 9000

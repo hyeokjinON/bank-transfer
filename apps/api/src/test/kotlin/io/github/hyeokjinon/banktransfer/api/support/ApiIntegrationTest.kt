@@ -6,6 +6,7 @@ import io.github.hyeokjinon.banktransfer.account.VerificationStatus
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletLedger
 import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
+import io.github.hyeokjinon.banktransfer.api.web.USER_ID_HEADER
 import io.github.hyeokjinon.banktransfer.mockbank.MockBankServer
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -13,6 +14,8 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
+import org.springframework.core.ParameterizedTypeReference
+import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -55,7 +58,7 @@ import kotlin.random.Random
         "management.endpoints.web.exposure.include=health,info,prometheus",
     ],
 )
-@Import(MySqlTestContainer::class, KafkaTestContainer::class, RedisTestContainer::class, TestClockConfiguration::class, AlertTestConfiguration::class)
+@Import(MySqlTestContainer::class, KafkaTestContainer::class, RedisTestContainer::class, TestClockConfiguration::class, AlertTestConfiguration::class, TracingTestConfiguration::class)
 abstract class ApiIntegrationTest {
 
     companion object {
@@ -127,6 +130,19 @@ abstract class ApiIntegrationTest {
      * 나중에 다른 테스트의 발행 · 정리 작업이 처리해도 공용 계좌(1002123456789)에 입금이 생기지 않는다.
      */
     protected fun unregisteredAccount(): String = "55" + Random.nextLong(10_000_000_000, 99_999_999_999)
+
+    private val postTransferBodyType = object : ParameterizedTypeReference<Map<String, Any?>>() {}
+
+    /** 출금을 접수(POST /api/v1/transfers)하고 이체 id 를 돌려준다. 키 · 적요는 매번 새로 만든다 (적요로 모의 은행 입금 내역에서 이 건만 센다). */
+    protected fun postTransfer(userId: String, accountNo: String, amount: Long = 10_000, memo: String = "T" + Random.nextInt(100_000, 999_999)): UUID {
+        val body = client.post().uri("/api/v1/transfers")
+            .contentType(MediaType.APPLICATION_JSON)
+            .header(USER_ID_HEADER, userId)
+            .header("Idempotency-Key", UUID.randomUUID().toString())
+            .body(mapOf("bankCode" to "090", "accountNo" to accountNo, "amount" to amount, "memo" to memo))
+            .retrieve().body(postTransferBodyType)!!
+        return UUID.fromString(body["id"] as String)
+    }
 
     /** 이 출금의 원장 종류(WITHDRAW, REFUND …)를 기록 순서대로. */
     protected fun ledgerTypes(transferId: UUID): List<String> =

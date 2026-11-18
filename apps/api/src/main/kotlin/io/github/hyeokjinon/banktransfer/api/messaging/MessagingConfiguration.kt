@@ -2,6 +2,7 @@ package io.github.hyeokjinon.banktransfer.api.messaging
 
 import io.github.hyeokjinon.banktransfer.api.metrics.TransferMetrics
 import io.github.hyeokjinon.banktransfer.api.config.BankTransferAdapter
+import io.github.hyeokjinon.banktransfer.api.tracing.OutboxTracing
 import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.transfer.TransferProcessor
 import io.github.hyeokjinon.banktransfer.transfer.TransferStore
@@ -60,11 +61,12 @@ class MessagingConfiguration {
         transactionManager: PlatformTransactionManager,
         kafka: KafkaTemplate<String, String>,
         props: OutboxRelayProperties,
+        tracing: OutboxTracing,
     ): OutboxRelay {
         val readCommitted = TransactionTemplate(transactionManager).apply {
             isolationLevel = TransactionDefinition.ISOLATION_READ_COMMITTED
         }
-        return OutboxRelay(jdbc, readCommitted, kafka, props.batchSize)
+        return OutboxRelay(jdbc, readCommitted, kafka, props.batchSize, tracing)
     }
 
     @Bean

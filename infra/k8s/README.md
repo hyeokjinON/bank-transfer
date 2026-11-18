@@ -1,4 +1,4 @@
-# Kubernetes (kind) — P8-3a · P8-3b · P9a
+# Kubernetes (kind) — P8-3a · P8-3b · P9a · P9b
 
 kind 클러스터(제어 1 + 워커 2)에 인프라 · 모의 은행 · 게이트웨이 · api 2대 · Envoy Gateway 입구를 띄운다. 이유 · 결정은 [ADR-0017](../../docs/adr/0017-kubernetes-kind.md), 설계는 [스펙](../../docs/superpowers/specs/2026-11-12-p8-3a-k8s-design.md), 실험 숫자는 [측정 결과](../../docs/perf/p8-3a-k8s.md), 운영 절차는 [OPERATION §15](../../OPERATION.md#15-kubernetes-실행-p8-3a), 게이트웨이 2대(P8-3b — [ADR-0018](../../docs/adr/0018-gateway-ha-leader-election.md) · [측정](../../docs/perf/p8-3b-gateway-ha.md))는 [OPERATION §16](../../OPERATION.md#16-게이트웨이-이중화-p8-3b), 설치는 [SETUP §2-9](../../SETUP.md). 관측(P9a — `monitoring` namespace: Prometheus · Alertmanager · alert-sink · Grafana)은 [ADR-0020](../../docs/adr/0020-observability-metrics-alerts.md) · [측정](../../docs/perf/p9a-metrics.md) · [OPERATION §17](../../OPERATION.md#17-관측--지표--대시보드--알림-p9a). 모든 명령은 저장소 루트의 Git Bash(또는 Linux bash)에서.
 
@@ -6,7 +6,7 @@ kind 클러스터(제어 1 + 워커 2)에 인프라 · 모의 은행 · 게이�
 ```bash
 # 먼저: Docker Desktop 켜기, IntelliJ 의 API · 게이트웨이 · 모의 은행 끄기, Compose app 프로필 내리기 (둘 다 127.0.0.1:8000)
 bash infra/k8s/up.sh            # 클러스터 + Envoy Gateway + 이미지 빌드 · kind load + Secret + 매니페스트 + 준비 대기 (클러스터가 있을 때 재실행 약 2분 7초 — 이미지 빌드 · `kind load` 포함. 처음 생성 시간은 재지 않았다)
-bash infra/k8s/smoke.sh         # [0] ~ [10] 입구로 1원인증 · 출금 · 멱등 · 분배 · 분산 배치 · 게이트웨이 · 비root · NetworkPolicy · 리더 1개 · 관측(지표 · 입구 404 · 규칙 · 시험 알림)
+bash infra/k8s/smoke.sh         # [0] ~ [11] 입구로 1원인증 · 출금 · 멱등 · 분배 · 분산 배치 · 게이트웨이 · 비root · NetworkPolicy · 리더 1개 · 관측(지표 · 입구 404 · 규칙 · 시험 알림) · 추적(Tempo 에서 출금 trace 검색)
 kubectl --context kind-bank-transfer -n bank-transfer get pods -o wide
 bash infra/k8s/down.sh          # 클러스터 삭제 (PV · 데이터까지)
 ```
@@ -15,6 +15,7 @@ bash infra/k8s/down.sh          # 클러스터 삭제 (PV · 데이터까지)
 kubectl --context kind-bank-transfer -n monitoring port-forward svc/grafana 3000:3000        # http://127.0.0.1:3000 (익명 보기)
 kubectl --context kind-bank-transfer -n monitoring port-forward svc/prometheus 9090:9090     # Targets · Alerts · Graph
 kubectl --context kind-bank-transfer -n monitoring port-forward svc/alertmanager 9093:9093   # 울리는 알림 · 억제
+kubectl --context kind-bank-transfer -n monitoring port-forward svc/tempo 3200:3200            # P9b 추적 API (/api/search · /api/traces/<id>) — 화면은 Grafana Explore → Tempo
 kubectl --context kind-bank-transfer -n monitoring logs deploy/alert-sink --timestamps        # 받은 알림
 bash infra/k8s/monitoring/check.sh   # 알림 규칙 단위 테스트 · 설정 · 대시보드 검사 (컨테이너로 — 설치 없음)
 ```
@@ -25,11 +26,11 @@ bash infra/k8s/monitoring/check.sh   # 알림 규칙 단위 테스트 · 설정 
 ## 파일
 | 경로 | 역할 |
 |---|---|
-| `versions.env` | 버전 · 이름 고정 한 곳 (kind · 노드 이미지(digest) · kubectl · Envoy Gateway · curl · k6 · 클러스터 · namespace) |
+| `versions.env` | 버전 · 이름 고정 한 곳 (kind · 노드 이미지(digest) · kubectl · Envoy Gateway · Tempo(`TEMPO_VERSION`) · curl · k6 · 클러스터 · namespace) |
 | `kind.yaml` | 클러스터 설정: 제어 노드(라벨 `bank-transfer/role=infra`, NodePort 30080 → `127.0.0.1:8000`) + 워커 2(`role=app`) |
 | `lib.sh` | 스크립트 공통: 저장소 루트로 `cd`, 래퍼 `k`(namespace) · `ka`(전체) · `d` · `kindc`(여기에만 `MSYS_NO_PATHCONV`), `sql`, `image_tag`, `apply_overlay`, `wait_ready`, `pin_patch`, `np_probe` |
 | `up.sh` · `down.sh` | 올리기 · 삭제 |
-| `smoke.sh` | 입구 기준 확인 [0] ~ [10] — [10] 은 관측 4개 Ready · 수집 대상 4개 `up` · 리더 1 · 은행 연결 1 · 스모크 출금이 지표에 남음 · 입구 `/actuator/prometheus` 404 · 규칙 11 · 시험 알림이 alert-sink 에 30초 안 도착, [9] 는 게이트웨이 2대 Ready · 리더 라벨 Pod 정확히 1개 = Lease 보유자 · Service 엔드포인트 = 그 Pod · 모의 은행 동시 세션 1 (CI `k8s-smoke` 도 같은 파일) |
+| `smoke.sh` | 입구 기준 확인 [0] ~ [11] — [10] 은 관측 4개 Ready · 수집 대상 4개 `up` · 리더 1 · 은행 연결 1 · 스모크 출금이 지표에 남음 · 입구 `/actuator/prometheus` 404 · 규칙 11 · 시험 알림이 alert-sink 에 30초 안 도착, [9] 는 게이트웨이 2대 Ready · 리더 라벨 Pod 정확히 1개 = Lease 보유자 · Service 엔드포인트 = 그 Pod · 모의 은행 동시 세션 1 (CI `k8s-smoke` 도 같은 파일), [11] (P9b) 은 Tempo Ready · 스모크 출금의 `transfer.id` 로 Tempo 검색(최대 60초 재시도) → 서비스 둘 (api · 게이트웨이) · 구간 5개 이상 · api 로그에 그 traceId · `/actuator` 구간 0 |
 | `cluster/` | 클러스터 범위: `namespace.yaml` · `gatewayclass.yaml` (Kustomize namespace 변환 밖에서 `up.sh` 가 apply) |
 | `base/config.yaml` | ConfigMap `app-config` (주소 · 점검 설정 — 비밀번호 없음) |
 | `base/{mysql,kafka,redis}.yaml` | 인프라: MySQL · Kafka(KRaft) StatefulSet + PVC + headless Service, Redis Deployment |
@@ -38,6 +39,7 @@ bash infra/k8s/monitoring/check.sh   # 알림 규칙 단위 테스트 · 설정 
 | `base/networkpolicy.yaml` | ingress 기본 거부 + 허용 6개 (api ← Envoy · 게이트웨이 ← api · 모의 은행 ← 게이트웨이 · MySQL · Redis · Kafka ← api) + P9a `metrics-from-prometheus-api` · `-gateway` (`monitoring` 의 Prometheus → api:8080 · 게이트웨이:8082) |
 | `base/rbac-prometheus.yaml` | Prometheus ServiceAccount · Role(`bank-transfer` namespace Pod get · list · watch 만) · RoleBinding (P9a) |
 | `monitoring/` | P9a 관측 (namespace `monitoring`, 제어 노드): `prometheus.yaml` · `alertmanager.yaml` · `alert-sink.yaml` · `grafana.yaml` + 설정 `prometheus/`(`prometheus.yml` · 규칙 `alerts.yml` 11개 · 규칙 테스트 `alerts-test.yml`) · `alertmanager/alertmanager.yml` · `alert-sink/sink.sh`(busybox httpd CGI) · `grafana/`(데이터소스 · 대시보드 2장 JSON) · `check.sh` · `check-dashboards.sh` |
+| `monitoring/tempo.yaml` · `monitoring/tempo/tempo.yml` | P9b 추적 백엔드 Tempo (단일 바이너리 · emptyDir · 보관 2일 · 제어 노드 고정, OTLP HTTP 4318 · 조회 3200). 앱이 `app-config` 의 주소로 직접 보낸다. 버전은 `versions.env` 의 `TEMPO_VERSION` |
 | `base/gateway.yaml` | `EnvoyProxy`(NodePort 30080 패치 · 제어 노드) + `Gateway` + `HTTPRoute` (재시도 없음). P9a 부터 HTTPRoute 는 허용 목록 — `/api/v1` · `/admin` · `/actuator/health` · `/actuator/info` 만, 나머지 404 |
 | `base/pdb.yaml` | api · 게이트웨이 `minAvailable: 1` |
 | `overlays/local` · `ci` | 평소 · CI (`ci` 는 점검 시간 503 을 끈다) |

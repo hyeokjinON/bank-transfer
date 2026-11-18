@@ -1,6 +1,7 @@
 package io.github.hyeokjinon.banktransfer.api.messaging
 
 import io.github.hyeokjinon.banktransfer.api.metrics.TransferMetrics
+import io.github.hyeokjinon.banktransfer.api.tracing.OutboxTracing
 import org.slf4j.LoggerFactory
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.jdbc.core.JdbcTemplate
@@ -33,6 +34,8 @@ class OutboxRelay(
     internal val tx: TransactionTemplate,
     private val kafka: KafkaTemplate<String, String>,
     private val batchSize: Int,
+    /** P9b: 행마다 저장된 traceparent 를 부모로 outbox.publish 구간 — 그 안의 send 가 Kafka 헤더를 만든다. 기본 NOOP */
+    private val tracing: OutboxTracing = OutboxTracing.NOOP,
 ) {
 
     /** 최대 batchSize 건을 발행하고, 발행한 건수를 돌려준다. */
@@ -40,11 +43,13 @@ class OutboxRelay(
         tx.execute {
             val events = jdbc.query(
                 SELECT_PENDING_SQL,
-                { rs, _ -> PendingEvent(rs.getLong("id"), rs.getString("aggregate_id"), rs.getString("message")) },
+                { rs, _ -> PendingEvent(rs.getLong("id"), rs.getString("aggregate_id"), rs.getString("message"), rs.getString("trace_parent")) },
                 batchSize,
             )
-            // 전부 보내 놓고 나서 기다린다: 대기가 건마다 쌓이지 않고 묶음 전체에 5초 안팎으로 끝난다
-            val futures = events.map { kafka.send(TransferTopics.REQUESTED, it.aggregateId, it.message) }
+            // 전부 보내 놓고 나서 기다린다: 대기가 건마다 쌓이지 않고 묶음 전체에 5초 안팎으로 끝난다. 구간은 행마다 열고 닫는다 (P9b)
+            val futures = events.map { e ->
+                tracing.publishing(e.traceParent, e.aggregateId, e.id) { kafka.send(TransferTopics.REQUESTED, e.aggregateId, e.message) }
+            }
             futures.forEach { it.get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS) }
             jdbc.batchUpdate(
                 "UPDATE outbox_event SET published_at = NOW(6) WHERE id = ?",
@@ -53,14 +58,14 @@ class OutboxRelay(
             events.size
         }!!
 
-    private data class PendingEvent(val id: Long, val aggregateId: String, val message: String)
+    private data class PendingEvent(val id: Long, val aggregateId: String, val message: String, val traceParent: String?)
 
     companion object {
         private const val SEND_TIMEOUT_SECONDS = 5L
 
         /** 발행기가 행을 잡는 SELECT. 테스트가 같은 문장으로 락을 재현한다 (접수가 막히지 않는지 확인). */
         internal const val SELECT_PENDING_SQL = """
-SELECT id, aggregate_id, JSON_SET(payload, '$.eventId', id) AS message
+SELECT id, aggregate_id, JSON_SET(payload, '$.eventId', id) AS message, trace_parent
   FROM outbox_event
  WHERE published_at IS NULL
  ORDER BY id

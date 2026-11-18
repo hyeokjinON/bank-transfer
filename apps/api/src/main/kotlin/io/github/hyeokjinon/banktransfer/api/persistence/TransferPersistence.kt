@@ -84,6 +84,8 @@ class OutboxEventEntity(
     @JdbcTypeCode(SqlTypes.JSON) var payload: String = "{}",
     var createdAt: Instant = Instant.EPOCH,
     var publishedAt: Instant? = null,
+    /** 이 행을 쓴 구간의 W3C traceparent (P9b, V7). NULL = 구간 없음 → 발행 구간은 새 trace. */
+    var traceParent: String? = null,
 )
 
 interface TransferJpaRepository : JpaRepository<TransferEntity, String> {
@@ -212,6 +214,8 @@ class JpaTransferStore(
     private val wallets: WalletLedger,
     private val debit: WalletDebit,
     private val payloadOf: (TransferEvent) -> String = ::outboxPayload,
+    /** 지금 구간의 traceparent (P9b). 접수 · 재발행이 같은 [outboxRow] 로 쓴다. 기본 = 없음 (단위 테스트 · 추적 없는 조립). */
+    private val traceParent: () -> String? = { null },
 ) : TransferStore {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -338,11 +342,12 @@ class JpaTransferStore(
         }!!
     }
 
-    /** 아웃박스 한 줄. 접수(saveWithEvent)와 재발행(republish)이 같은 모양을 쓰도록 한곳에서 만든다. */
+    /** 아웃박스 한 줄. 접수(saveWithEvent)와 재발행(republish)이 같은 모양을 쓰도록 한곳에서 만든다. trace_parent 는 이 메서드를 부른 스레드의 구간 (P9b). */
     private fun outboxRow(event: TransferEvent) = OutboxEventEntity(
         aggregateId = event.transferId.toString(),
         eventType = event::class.simpleName!!,
         payload = payloadOf(event),
         createdAt = event.occurredAt.toDbPrecision(),
+        traceParent = traceParent(),
     )
 }

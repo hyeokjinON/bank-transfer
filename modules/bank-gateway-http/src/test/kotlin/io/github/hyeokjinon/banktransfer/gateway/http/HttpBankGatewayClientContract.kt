@@ -5,6 +5,12 @@ import io.github.hyeokjinon.banktransfer.gateway.BankNotSentException
 import io.github.hyeokjinon.banktransfer.gateway.BankTimeoutException
 import io.github.hyeokjinon.banktransfer.gateway.BankUnavailableException
 import io.github.hyeokjinon.banktransfer.gateway.http.fixture.TcpCutProxy
+import io.micrometer.observation.Observation
+import io.micrometer.observation.ObservationHandler
+import io.micrometer.observation.ObservationRegistry
+import io.micrometer.observation.transport.SenderContext
+import org.awaitility.kotlin.await
+import org.awaitility.kotlin.untilAsserted
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.time.Duration
@@ -23,10 +29,12 @@ abstract class HttpBankGatewayClientContract {
     private val requests = AtomicInteger()
     @Volatile private var reply: Pair<Int, String> = 200 to ok()
     @Volatile private var replyDelay: Duration = Duration.ZERO
+    @Volatile private var lastTraceparent: String? = null
 
     private val server: HttpServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
         createContext(GatewayPaths.TRANSFERS) { ex ->
             requests.incrementAndGet()
+            lastTraceparent = ex.requestHeaders.getFirst("traceparent")
             ex.requestBody.readAllBytes()
             Thread.sleep(replyDelay.toMillis())
             val (status, body) = reply
@@ -43,10 +51,13 @@ abstract class HttpBankGatewayClientContract {
     @AfterTest
     fun tearDown() { closeables.asReversed().forEach { it.close() }; server.stop(0) }
 
-    protected abstract fun newGateway(settings: HttpGatewaySettings): HttpBankGateway
+    protected abstract fun newGateway(settings: HttpGatewaySettings, observations: ObservationRegistry): HttpBankGateway
 
-    private fun gateway(baseUrl: String = "http://127.0.0.1:${server.address.port}", responseTimeout: Duration = Duration.ofSeconds(2)) =
-        newGateway(HttpGatewaySettings(baseUrl = baseUrl, responseTimeout = responseTimeout)).also { closeables += it }
+    private fun gateway(
+        baseUrl: String = "http://127.0.0.1:${server.address.port}",
+        responseTimeout: Duration = Duration.ofSeconds(2),
+        observations: ObservationRegistry = ObservationRegistry.NOOP,
+    ) = newGateway(HttpGatewaySettings(baseUrl = baseUrl, responseTimeout = responseTimeout), observations).also { closeables += it }
 
     private fun transferFailure(gw: HttpBankGateway): Throwable =
         (runCatching { gw.transfer("090", "1002123456789", 1_000, "M", REF).get(5, TimeUnit.SECONDS) }.exceptionOrNull() as ExecutionException).cause!!
@@ -97,7 +108,37 @@ abstract class HttpBankGatewayClientContract {
         assertEquals(1, requests.get())
     }
 
+    @Test
+    fun `관측 레지스트리를 주면 보내는 쪽 문맥으로 요청 헤더를 채울 수 있고, 응답 뒤 관측이 끝난다 (P9b 전파 자리)`() {
+        val handler = HeaderInjectingHandler()
+        val registry = ObservationRegistry.create().apply { observationConfig().observationHandler(handler) }
+
+        val res = gateway(observations = registry).transfer("090", "1002123456789", 1_000, "M", REF).get(5, TimeUnit.SECONDS)
+
+        assertEquals("0000", res.header.responseCode)
+        assertEquals(TRACEPARENT, lastTraceparent)   // 추적 처리기(PropagatingSenderTracingObservationHandler)가 하는 일과 같은 자리
+        await.atMost(Duration.ofSeconds(2)) untilAsserted { assertEquals(1, handler.stopped.get()) }
+    }
+
+    /** 운영에서는 Micrometer Tracing 의 보내는 쪽 처리기가 setter 로 traceparent 를 넣는다 — 모듈은 추적 라이브러리를 모르므로 같은 자리를 흉내 낸다. */
+    private class HeaderInjectingHandler : ObservationHandler<SenderContext<*>> {
+        val stopped = AtomicInteger()
+
+        @Suppress("UNCHECKED_CAST")
+        override fun onStart(context: SenderContext<*>) {
+            val ctx = context as SenderContext<Any>
+            ctx.setter.set(ctx.carrier, "traceparent", TRACEPARENT)
+        }
+
+        override fun onStop(context: SenderContext<*>) {
+            stopped.incrementAndGet()
+        }
+
+        override fun supportsContext(context: Observation.Context): Boolean = context is SenderContext<*>
+    }
+
     private companion object {
+        const val TRACEPARENT = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
         const val REF = "T261110WCTEST0000001"
         fun ok() = GatewayJson.write(
             TransferResult(HeaderDto(1, LocalDateTime.of(2026, 11, 10, 9, 0), "0000"), "090", "1002123456789", 1_000, "M", REF),

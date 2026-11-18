@@ -13,6 +13,8 @@ import io.github.hyeokjinon.banktransfer.api.persistence.OutboxEventJpaRepositor
 import io.github.hyeokjinon.banktransfer.api.persistence.TransferJpaRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletDebit
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletLedger
+import io.github.hyeokjinon.banktransfer.api.tracing.OutboxTracing
+import io.github.hyeokjinon.banktransfer.api.tracing.TracingFailures
 import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
@@ -25,7 +27,10 @@ import io.github.hyeokjinon.banktransfer.transfer.ReferenceGenerator
 import io.github.hyeokjinon.banktransfer.transfer.TransferService
 import io.github.hyeokjinon.banktransfer.transfer.TransferStore
 import io.github.hyeokjinon.banktransfer.transfer.VerifiedAccounts
+import io.micrometer.context.ContextSnapshotFactory
+import io.micrometer.observation.ObservationRegistry
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.ConfigurationProperties
@@ -128,12 +133,39 @@ class BankGatewayAdapter(
     private val executor: Executor,
     /** 1원인증 이체의 이용기관 거래번호 (V 접두). 결과조회 대상이 아니라 저장하지 않는다. */
     private val references: ReferenceGenerator = RandomReferenceGenerator(prefix = 'V'),
+    /**
+     * P9b: 뒤처리 실행기를 부를 때마다 감싼다. 조립은 [carryContext] — 성명조회 응답 뒤 1원 이체가 실행기 스레드에서 이어져도
+     * 요청(서버 구간)의 문맥이 따라가 같은 trace 에 붙는다. 기본은 그대로.
+     */
+    private val carry: (Executor) -> Executor = { it },
 ) : BankPort {
     override fun inquireHolderName(bankCode: String, accountNo: String): CompletableFuture<String?> =
-        client.inquireName(bankCode, accountNo).thenApplyAsync({ res -> holderNameOf(res) }, executor)
+        client.inquireName(bankCode, accountNo).thenApplyAsync({ res -> holderNameOf(res) }, carry(executor))
 
     override fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String): CompletableFuture<Unit> =
-        client.transfer(bankCode, accountNo, amount, memo, references.next()).thenApplyAsync({ res -> requireOk(res) }, executor)
+        client.transfer(bankCode, accountNo, amount, memo, references.next()).thenApplyAsync({ res -> requireOk(res) }, carry(executor))
+}
+
+private val CONTEXT_SNAPSHOTS: ContextSnapshotFactory = ContextSnapshotFactory.builder().build()
+
+/**
+ * 지금 스레드의 ThreadLocal 문맥(관측 · 추적 — context-propagation 에 등록된 것 모두)을 [executor] 의 작업으로 옮긴다 (P9b).
+ * 부르는 순간 잡는다 — 그래서 future 를 만드는 쪽(요청 스레드)에서 불러야 한다. 완료 콜백 스레드(Netty)에서 잡으면 빈 문맥이다.
+ */
+internal fun carryContext(executor: Executor): Executor {
+    // E10: 문맥을 잡지 못하면 실행기 그대로(추적 없이). 작업마다의 복원 · 되돌림이 던져도 작업은 추적 없이 정확히 한 번 돈다
+    val snapshot = runCatching { CONTEXT_SNAPSHOTS.captureAll() }
+        .onFailure { TracingFailures.report("carryContext.capture", it) }.getOrNull() ?: return executor
+    return Executor { task ->
+        executor.execute {
+            val scope = runCatching { snapshot.setThreadLocals() }.onFailure { TracingFailures.report("carryContext.restore", it) }.getOrNull()
+            try {
+                task.run()
+            } finally {
+                runCatching { scope?.close() }.onFailure { TracingFailures.report("carryContext.close", it) }
+            }
+        }
+    }
 }
 
 @Configuration(proxyBeanMethods = false)
@@ -175,17 +207,18 @@ class AppConfiguration {
      */
     @Bean(destroyMethod = "close")
     @ConditionalOnProperty(prefix = "bank.gateway", name = ["mode"], havingValue = BankGatewayProperties.HTTP, matchIfMissing = true)
-    fun httpBankGateway(props: BankGatewayProperties): HttpBankGateway {
+    fun httpBankGateway(props: BankGatewayProperties, observations: ObjectProvider<ObservationRegistry>): HttpBankGateway {
         if (props.http.responseTimeout < HttpGatewaySettings.RECOMMENDED_MIN_RESPONSE_TIMEOUT) {
             log.warn("bank.gateway.http.response-timeout={} is shorter than {} (gateway bank timeout 3s + margin) — more results will be unknown", props.http.responseTimeout, HttpGatewaySettings.RECOMMENDED_MIN_RESPONSE_TIMEOUT)
         }
         log.info("bank gateway mode=http client={} baseUrl={}", props.http.client, props.http.baseUrl)
-        return HttpBankGateway.create(props.http.client, props.http.toSettings())
+        // P9b: Boot 의 관측 레지스트리 → 클라이언트 구간 + traceparent (WebClient 는 자동, JDK 판은 손코드)
+        return HttpBankGateway.create(props.http.client, props.http.toSettings(), observations.getIfAvailable { ObservationRegistry.NOOP })
     }
 
     @Bean
     fun bankPort(client: BankGateway, @Qualifier("applicationTaskExecutor") executor: Executor, clock: Clock): BankPort =
-        BankGatewayAdapter(client, executor, RandomReferenceGenerator(prefix = 'V', clock = clock))
+        BankGatewayAdapter(client, executor, RandomReferenceGenerator(prefix = 'V', clock = clock), carry = ::carryContext)
 
     @Bean
     fun verificationRepository(jpa: AccountVerificationJpaRepository, tx: TransactionTemplate, clock: Clock): VerificationRepository =
@@ -202,7 +235,8 @@ class AppConfiguration {
         tx: TransactionTemplate,
         wallets: WalletLedger,
         debit: WalletDebit,
-    ): TransferStore = JpaTransferStore(transfers, outbox, tx, wallets, debit)
+        outboxTracing: OutboxTracing,
+    ): TransferStore = JpaTransferStore(transfers, outbox, tx, wallets, debit, traceParent = outboxTracing::currentTraceParent)
 
     /** transfer 모듈은 account 모듈을 모른다. "인증된 계좌인가?"를 1원인증 저장소에 연결하는 곳은 여기뿐이다. */
     @Bean

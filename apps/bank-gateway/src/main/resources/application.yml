@@ -9,6 +9,8 @@ spring:
     timeout-per-shutdown-phase: 20s   # 종료 단계마다 최대 20초 (P8-2). Compose stop_grace_period(30s)보다 짧게 — api 와 같은 규칙 (단계당 상한 — ADR-0016 결정 7)
   main:
     web-application-type: reactive   # reactive = WebFlux 판(기본) | servlet = MVC 비동기 판 (P8-1 비교)
+  reactor:
+    context-propagation: auto  # P9b: WebFlux 판에서 컨트롤러 · withClient 가 서버 구간을 현재 구간으로 본다 (기본 limited)
   mvc:
     async:
       request-timeout: 30s     # servlet 판만. 은행 응답 시간 초과(3s)보다 길게 — 먼저 끊으면 은행 결과를 버린다
@@ -51,6 +53,13 @@ management:
   info:
     env:
       enabled: true
+  tracing:                     # P9b — api 와 같다. 보내기 주소는 kind 의 app-config 에서만
+    sampling:
+      probability: 1.0
+  otlp:
+    metrics:
+      export:
+        enabled: false         # 지표는 Prometheus (P9a)
   metrics:
     tags:
       application: ${spring.application.name}   # P9a 공통 태그

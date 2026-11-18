@@ -54,6 +54,7 @@ images:
   - {name: prom/alertmanager, newTag: "$ALERTMANAGER_VERSION"}
   - {name: grafana/grafana, newTag: "$GRAFANA_VERSION"}
   - {name: busybox, newTag: "$BUSYBOX_VERSION"}
+  - {name: grafana/tempo, newTag: "$TEMPO_VERSION"}
 YAML
   ka apply -k "$dir"
 }
@@ -82,7 +83,7 @@ np_probe() {   # $1 = 호스트, $2 = 포트
 
 # --- P9a 관측 (monitoring namespace) ---
 km() { MSYS_NO_PATHCONV=1 kubectl --context "$CTX" -n monitoring "$@"; }
-wait_monitoring() { local dpl; for dpl in prometheus alertmanager alert-sink grafana; do km rollout status "deploy/$dpl" --timeout=300s; done; }
+wait_monitoring() { local dpl; for dpl in prometheus alertmanager alert-sink grafana tempo; do km rollout status "deploy/$dpl" --timeout=300s; done; }
 # PromQL 을 URL 에 넣는다 (PromQL 은 ASCII — jq · python 없이)
 urlenc() {
   local s=$1 out= c i
@@ -99,3 +100,7 @@ prom_range() { prom_get "/api/v1/query_range?query=$(urlenc "$1")&start=$2&end=$
 # 즉시 질의 결과의 첫 값 (시계열이 없으면 빈 줄)
 # prom_query 실패(일시적 kubectl exec 오류)는 빈 값으로 — pipefail · set -e 로 호출 스크립트가 말없이 끝나지 않게 한다 (재시도 루프 · 판정은 호출 쪽)
 prom_value() { { prom_query "$1" "${2:-}" || true; } | { grep -o '"value":\[[^]]*\]' || true; } | head -1 | sed -E 's/.*,"([^"]*)"\]$/\1/'; }
+
+# --- P9b 추적 ---
+# Tempo HTTP API — Prometheus Pod 의 busybox wget 으로 (PC 포트를 열지 않는다). 검색 결과의 traceID 는 앞 0 이 빠질 수 있다 — 쓰는 쪽이 32자로 채운다
+tempo_get() { km exec deploy/prometheus -- wget -qO- "http://tempo.monitoring.svc.cluster.local:3200$1"; }
