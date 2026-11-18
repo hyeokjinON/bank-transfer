@@ -11,10 +11,12 @@
 #   cleanup 측정 사용자 행 지우기 (끝나면 반드시)
 #   (P9a, PHASE=p9a 만 — 감시 원자료도 남긴다: load/k8s/p9a.sh)
 #   gwzero  게이트웨이 replicas 0 → GW_DOWN_S 뒤 원래 수 (M3)   maint  점검 창을 "지금" 으로 → 점검 중 · 뒤 MAINT_WATCH_S 초 알림 확인 (M5)
+#   (P9b, PHASE=p9b 만 — 추적 원자료: load/k8s/p9b.sh. TRACING=off 면 샘플링 0 으로 다시 시작한 뒤 재고 끝나면 되돌린다)
+#   tempozero Tempo replicas 0 → TEMPO_DOWN_S 뒤 1 (T1 보조 — 추적 백엔드가 죽어도 돈 흐름 · 접수 시간이 그대로인가)
 # 확인 (P8-2 load/compose/run.sh 와 같은 기준): 접수된 키 = 출금 행, 전부 COMPLETED, 은행 거래 기록 = 출금 행(같은 거래번호 두 번 0), 잔고 = 원장 합.
 #   통과 못 하면 요약을 .json.invalid 로. 시간 지표는 timeline.sh(1 ~ 2초 간격) → timeline.awk.
 # 사용 (Git Bash · Linux): bash load/k8s/run.sh <동작> <회차>      먼저: bash infra/k8s/up.sh
-# 환경변수: RATE(20) DURATION(60s, rolling 은 150s) ACTION_AT(20) SETTLE(300) BANK_DOWN_S(60) NODE_DOWN_S(420) NODE(drain · node 대상) OVERLAY(tagtrap, local) PHASE(p8-3a | p8-3b | p8-3c | p9a, 기본 p8-3a) CUT_S(40, gwcut) NODE_KILL(0 | 1, node · gwnode — 1 이면 docker kill) GW_DOWN_S(60, gwzero) MAINT_S(600) MAINT_PREP_S(480) MAINT_LEAD_S(60) MAINT_WATCH_S(1800) (maint)
+# 환경변수: RATE(20) DURATION(60s, rolling 은 150s) ACTION_AT(20) SETTLE(300) BANK_DOWN_S(60) NODE_DOWN_S(420) NODE(drain · node 대상) OVERLAY(tagtrap, local) PHASE(p8-3a | p8-3b | p8-3c | p9a | p9b, 기본 p8-3a) CUT_S(40, gwcut) NODE_KILL(0 | 1, node · gwnode — 1 이면 docker kill) GW_DOWN_S(60, gwzero) MAINT_S(600) MAINT_PREP_S(480) MAINT_LEAD_S(60) MAINT_WATCH_S(1800) (maint) TRACING(on | off) TEMPO_DOWN_S(60) TRACE_SAMPLE(20) (p9b)
 # 결과: docs/perf/raw/<PHASE>/<동작>-<회차>.json · .k6.json · .timeline.txt · .rebalance.txt, 작업 파일 build/load-<PHASE>/<동작>-<회차>/
 set -euo pipefail
 RESTORE=   # 셸 환경의 RESTORE 를 물려받지 않는다 (정상 종료에도 되돌리기가 돌지 않게). maint_prepare(M5)가 이 뒤에 maint 로 세운다
@@ -52,14 +54,15 @@ if [ "${1:-}" = cleanup ]; then
   exit 0
 fi
 
-ACTION=${1:?동작: steady | rolling | podkill | tagtrap | bank | drain | node | gwroll | gwkill | gwnode | gwcut | gwzero | maint | cleanup}
+ACTION=${1:?동작: steady | rolling | podkill | tagtrap | bank | drain | node | gwroll | gwkill | gwnode | gwcut | gwzero | maint | tempozero | cleanup}
 ROUND=${2:?회차: 1, 2 …}
-case "$ACTION" in steady|rolling|podkill|tagtrap|bank|drain|node|gwroll|gwkill|gwnode|gwcut|gwzero|maint) ;; *) die "모르는 동작: $ACTION" ;; esac
+case "$ACTION" in steady|rolling|podkill|tagtrap|bank|drain|node|gwroll|gwkill|gwnode|gwcut|gwzero|maint|tempozero) ;; *) die "모르는 동작: $ACTION" ;; esac
 [[ "$ROUND" =~ ^[0-9]{1,2}$ ]] || die "회차는 숫자 1 ~ 2자리: $ROUND"
-PHASE=${PHASE:-p8-3a}   # 결과 폴더 — P8-3b 실험은 PHASE=p8-3b, P8-3c(필수 분산)는 p8-3c, P9a(관측)는 p9a
-[[ "$PHASE" =~ ^(p8-3[abc]|p9a)$ ]] || die "PHASE 는 p8-3a | p8-3b | p8-3c | p9a: $PHASE"
-case "$ACTION" in gwzero|maint) [ "$PHASE" = p9a ] || die "$ACTION 은 PHASE=p9a 전용" ;; esac
+PHASE=${PHASE:-p8-3a}   # 결과 폴더 — P8-3b 실험은 PHASE=p8-3b, P8-3c(필수 분산)는 p8-3c, P9a(관측)는 p9a, P9b(추적)는 p9b
+[[ "$PHASE" =~ ^(p8-3[abc]|p9a|p9b)$ ]] || die "PHASE 는 p8-3a | p8-3b | p8-3c | p9a | p9b: $PHASE"
+case "$ACTION" in gwzero|maint) [ "$PHASE" = p9a ] || die "$ACTION 은 PHASE=p9a 전용" ;; tempozero) [ "$PHASE" = p9b ] || die "tempozero 는 PHASE=p9b 전용" ;; esac
 if [ "$PHASE" = p9a ]; then . load/k8s/p9a.sh; fi
+if [ "$PHASE" = p9b ]; then . load/k8s/p9b.sh; fi
 RUN="$ACTION-$ROUND"
 OUT_DIR=docs/perf/raw/$PHASE; OUT="$OUT_DIR/$RUN.json"; WORK="build/load-$PHASE/$RUN"
 rm -rf "$WORK"; mkdir -p "$OUT_DIR" "$WORK"; rm -f "$OUT" "$OUT.invalid" "$OUT.tmp" "$OUT_DIR/$RUN.k6.json"
@@ -80,6 +83,9 @@ if [ "$ACTION" = tagtrap ]; then
 fi
 
 GW_DOWN_S=${GW_DOWN_S:-60}
+TEMPO_DOWN_S=${TEMPO_DOWN_S:-60}; TRACE_SAMPLE=${TRACE_SAMPLE:-20}; TRACING=${TRACING:-on}   # P9b
+[[ "$TRACING" =~ ^(on|off)$ ]] || die "TRACING 은 on | off: $TRACING"
+if [ "$TRACING" = off ] && [ "$PHASE" != p9b ]; then die "TRACING=off 는 PHASE=p9b 전용"; fi
 MAINT_S=${MAINT_S:-600}; MAINT_PREP_S=${MAINT_PREP_S:-480}; MAINT_LEAD_S=${MAINT_LEAD_S:-60}; MAINT_WATCH_S=${MAINT_WATCH_S:-1800}
 DEF_DURATION=60s; [ "$ACTION" = rolling ] && DEF_DURATION=150s
 [ "$ACTION" = gwroll ] && DEF_DURATION=150s; [ "$ACTION" = gwcut ] && DEF_DURATION=90s   # 롤링은 서로 이어진 두 번의 교체(새 Pod 준비 → 옛 Pod preStop · 종료)라 부하가 더 길어야 R1 비교가 의미 있다
@@ -90,7 +96,7 @@ CUT_S=${CUT_S:-40}
 NODE_KILL=${NODE_KILL:-0}   # docker stop = SIGTERM → 노드 안 Pod 가 정상 종료(교대) / kill = SIGKILL, 갑작스런 노드 손실 (은행에 FIN 없음 · Lease 만료 · 모의 은행 유휴 정리)
 [[ "$NODE_KILL" =~ ^[01]$ ]] || die "NODE_KILL 은 0 | 1: $NODE_KILL"
 node_down() { if [ "$NODE_KILL" = 1 ]; then d kill "$NODE"; else d stop "$NODE"; fi; }
-for v in RATE ACTION_AT SETTLE BANK_DOWN_S NODE_DOWN_S CUT_S GW_DOWN_S MAINT_S MAINT_PREP_S MAINT_LEAD_S MAINT_WATCH_S; do [[ "${!v}" =~ ^[1-9][0-9]*$ ]] || die "$v 는 양의 정수: ${!v}"; done
+for v in RATE ACTION_AT SETTLE BANK_DOWN_S NODE_DOWN_S CUT_S GW_DOWN_S MAINT_S MAINT_PREP_S MAINT_LEAD_S MAINT_WATCH_S TEMPO_DOWN_S TRACE_SAMPLE; do [[ "${!v}" =~ ^[1-9][0-9]*$ ]] || die "$v 는 양의 정수: ${!v}"; done
 [[ "$DURATION" =~ ^([1-9][0-9]*)s$ ]] || die "DURATION 은 <숫자>s: $DURATION"
 DURATION_S=${BASH_REMATCH[1]}
 if [ "$ACTION" != steady ] && [ "$ACTION_AT" -ge "$DURATION_S" ]; then die "ACTION_AT($ACTION_AT) < DURATION(${DURATION_S}s) 이어야 한다"; fi
@@ -148,6 +154,7 @@ if [ "$ACTION" = gwroll ]; then   # 게이트웨이 같은 이미지 새 태그 
 fi
 
 if [ "$ACTION" = maint ]; then maint_prepare; fi   # 점검 창을 "지금 + MAINT_PREP_S" 로 → api · 게이트웨이 재시작 (M5)
+if [ "$PHASE" = p9b ]; then p9b_prepare; fi   # 추적 켬/끔 → api · 게이트웨이 재시작 (T1 — 회차마다 같은 조건)
 
 # --- 2. 시드 ---
 sql < load/compose/cleanup.sql
@@ -176,6 +183,8 @@ stop_bg() {
     bank)  k scale deploy/mock-bank --replicas=1 >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — mock-bank replicas 1 로 복구" >&2 ;;
     gwzero) k scale deploy/bank-gateway --replicas="${GW_REPLICAS:-2}" >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — bank-gateway replicas ${GW_REPLICAS:-2} 로 복구" >&2 ;;
     maint) restore_maint ;;
+    tracing) restore_tracing ;;
+    tempozero) km scale deploy/tempo --replicas=1 >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — tempo replicas 1 로 복구" >&2 ;;
   esac
 }
 trap stop_bg EXIT
@@ -235,6 +244,9 @@ if [ "$ACTION" != steady ]; then
     gwzero)  RESTORE=gwzero; k scale deploy/bank-gateway --replicas=0 >/dev/null
              rest=$(( GW_DOWN_S - ($(date +%s%3N) - TA_MS) / 1000 )); [ "$rest" -gt 0 ] && sleep "$rest"
              k scale deploy/bank-gateway --replicas="$GW_REPLICAS" >/dev/null; RESTORE= ;;
+    tempozero) RESTORE=tempozero; km scale deploy/tempo --replicas=0 >/dev/null
+             rest=$(( TEMPO_DOWN_S - ($(date +%s%3N) - TA_MS) / 1000 )); [ "$rest" -gt 0 ] && sleep "$rest"
+             km scale deploy/tempo --replicas=1 >/dev/null; RESTORE= ;;
     maint)   sleep "$MAINT_S" ;;   # 점검 창은 시계가 연다 — 동작 시각 = 창 시작 (ACTION_AT = MAINT_LEAD_S)
     drain)   RESTORE=drain; ka drain "$NODE" --ignore-daemonsets --delete-emptydir-data --timeout=240s > "$WORK/drain.txt" 2>&1 \
                || echo "[$RUN] 주의: drain 이 240초 안에 안 끝났다 — $WORK/drain.txt" >&2 ;;
@@ -359,6 +371,10 @@ cp "$WORK/rebalance.txt" "$OUT_DIR/$RUN.rebalance.txt" || true
 if [ "$PHASE" = p9a ]; then
   p9a_capture || echo "[$RUN] 주의: P9a 원자료 일부를 못 남겼다 — $OUT_DIR/$RUN.p9a.json 확인" >&2
   if [ "$ACTION" = maint ]; then restore_maint; RESTORE=; fi
+fi
+if [ "$PHASE" = p9b ]; then
+  p9b_capture || echo "[$RUN] 주의: P9b 원자료 일부를 못 남겼다 — $OUT_DIR/$RUN.p9b.json 확인" >&2
+  if [ "$TRACING" = off ]; then restore_tracing; RESTORE=; fi
 fi
 restore_spread || true
 if [ ${#FAILS[@]} -gt 0 ]; then
