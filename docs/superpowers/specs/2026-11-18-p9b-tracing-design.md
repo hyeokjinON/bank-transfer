@@ -157,3 +157,4 @@ OpenTelemetry Collector · 꼬리 샘플링, JDBC · SQL 구간, Redis 구간, �
 19. **exemplar 는 덤 Task 로 유지** (§6) — Boot 4.1.1 에 Prometheus exemplar 자동 구성이 있다. Prometheus `exemplar-storage` · Grafana 연결 · 패널 13, 안 보이면 되돌린다.
 20. **로그 줄 모양** (위험 C8) — 실험 도구 · 스모크는 kubectl 시각 열과 부분 문자열만 읽는다 (점검함). Boot 기본 상관 패턴은 통합 테스트로 확인, 비어 있으면 `logging.pattern.correlation` 명시.
 21. **`reconcile.*` 건수는 숫자(long) 속성** (§5 표) — "우리가 붙이는 속성 값은 문자열" 규칙의 의도된 예외. TraceQL 이 `span.reconcile.republished > 0` 처럼 비교하게 하려는 것이다.
+22. **스펙 §8 통합 6(추적 끔에서 기존 흐름 그대로)은 대표 흐름 — 출금 · 1원인증 — 으로 갈음 (전체 스위트를 샘플링 0 으로 다시 돌리지 않음: 전파 코드는 샘플링과 무관하게 같은 길).**
