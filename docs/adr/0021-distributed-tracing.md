@@ -1,6 +1,6 @@
 # ADR-0021: 분산 추적 — Micrometer Tracing · OpenTelemetry · Tempo (kind 에만)
 
-- 상태: 제안 (2026-11-18) — 머지 뒤 정리 PR 에서 `채택`
+- 상태: 채택 (2026-11-19, [#37](https://github.com/hyeokjinON/bank-transfer/pull/37) 머지 · 정리 PR #38 — 제안 2026-11-18)
 - 관련: [ADR-0005](0005-kafka-delivery-and-consumer-idempotency.md) (아웃박스 · 적어도 한 번 전달) · [ADR-0012](0012-consumer-coroutines.md) (코루틴 비교 판) · [ADR-0015](0015-bank-gateway-service.md) (게이트웨이 분리) · [ADR-0020](0020-observability-metrics-alerts.md) (지표 · Grafana) · [스펙](../superpowers/specs/2026-11-18-p9b-tracing-design.md) (§14 계획 단계에서 고친 점 포함) · [측정 결과](../perf/p9b-tracing.md) · [OPERATION §18](../../OPERATION.md#18-분산-추적--tempo-p9b)
 
 ## 맥락
