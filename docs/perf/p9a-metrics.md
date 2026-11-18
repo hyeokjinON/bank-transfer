@@ -11,7 +11,7 @@
 | 2 | 지표로 본 은행 복구 시각 vs 모의 은행 로그 차이 ≤ 5초 | **통과 (원 표본 기준)** · 격자 기준은 5.0 ~ 8.2초 | 원 표본 2.4 ~ 4.5초. 대시보드처럼 5초 격자로 읽으면 최대 약 8초 늦게 보인다 (아래 "기준 2 를 어떻게 쟀나") |
 | 3 | 알림 도착이 계산값 50초 ±10 안, 억제 동작 | **통과** | BankDisconnected 49 · 50초 (M2 `bank-2` · M4), GatewayNoLeader 47초 (M3), M3 에서 BankDisconnected 는 Alertmanager 에서 `suppressed` · alert-sink 에 오지 않음 |
 | 4 | 점검 시간 중 · 뒤 30분 거짓 알림 0 | **통과** | M5 `prom_firing_alerts` = "" (Prometheus 에서 울린 알림 자체가 없다) · Alertmanager 표본 0 |
-| 5 | `k8s-smoke` 20분 안 · 스모크 [10] · 입구 404 | 로컬 **통과** (입구 `/actuator/prometheus` 404) · CI 시간은 PR 에서 기록 | 이 문서 끝 "CI" |
+| 5 | `k8s-smoke` 20분 안 · 스모크 [10] · 입구 404 | **통과** — CI `k8s-smoke` 8분 7초 · 5분 59초 (20분 제한), 입구 `/actuator/prometheus` 404 (스모크 [10] · Postman 8-4) | 이 문서 끝 "CI" |
 
 **실험 중에 찾은 결함 하나 — alert-sink 가 알림을 조용히 잃었다.** 첫 회차(아래 `bank-1` 등)에서 받은 알림의 절반쯤이 본문 없이 빈 줄로만 남았다. 고친 뒤(`9fc4b45` · `b8bde54`) M2 를 `bank-2` 로 다시 돌렸다 → "위험 B7" 절.
 
@@ -71,4 +71,12 @@
 - `bank-1` · `bank-4` · `gwnode-1` · `gwzero-1` 의 원 표본 열은 사후 재측정 (도구를 고친 뒤 Prometheus 에 남은 표본으로) — 같은 정의, 같은 저장소.
 
 ## CI
-`k8s-smoke` 시간 (스모크 [10] 포함, 20분 제한) — PR CI 결과로 채운다.
+`k8s-smoke` 시간 (스모크 [10] 포함, 20분 제한) — [#35](https://github.com/hyeokjinON/bank-transfer/pull/35) 의 PR CI:
+
+| 커밋 | `build` | `infra-smoke` | `app-smoke` | `k8s-smoke` |
+|---|---|---|---|---|
+| `c936b08` (첫 실행) | 9분 13초 | 49초 | 3분 56초 | **8분 7초** |
+| `ba2f5b0` (머지 직전) | 9분 19초 | 47초 | 4분 30초 | **5분 59초** |
+
+P8-3c(#33) 의 `k8s-smoke` 3분 53초보다 2 ~ 4분 늘었다 — 감시 이미지 4개(약 330MB)를 kind 노드가 받고 감시 4개가 Ready 가 되기를 기다리는 몫 (추정 — 단계별 시간은 나누어 재지 않았다). 20분 제한까지 여유가 크다 (위험 B6).
+Postman 직접 확인 (2026-11-18, `8. 관측 (P9a, kind)` 폴더 8-1 ~ 8-9 + 은행 끊기): 입구 `/actuator/prometheus` 404 · 출금 202 → `COMPLETED` · 리더 1 · 은행 연결 1 → 끊김 중 0 · BankDisconnected pending → firing → 해제 — 통과.

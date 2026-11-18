@@ -1,6 +1,6 @@
 # ADR-0020: 관측 — 업무 지표 · 상태 Gauge · Prometheus · Alertmanager · Grafana (kind 에만)
 
-- 상태: 제안 (2026-11-17) — 머지 뒤 정리 PR 에서 `채택`
+- 상태: 채택 (2026-11-18, [#35](https://github.com/hyeokjinON/bank-transfer/pull/35) 머지 · 정리 PR #36 — 제안 2026-11-17)
 - 관련: [ADR-0017](0017-kubernetes-kind.md) (kind · 제어 노드 배치) · [ADR-0018](0018-gateway-ha-leader-election.md) (리더 · 은행 연결 — 지표로 보는 대상) · [ADR-0019](0019-gateway-required-spread.md) · [스펙](../superpowers/specs/2026-11-17-p9a-metrics-design.md) (끝의 "§16 실험 뒤 정정" 포함) · [측정 결과](../perf/p9a-metrics.md) · [OPERATION §17](../../OPERATION.md)
 
 ## 맥락

@@ -949,7 +949,7 @@ kubectl --context kind-bank-transfer -n monitoring get secret grafana-admin -o j
 | M1b 리더 노드 SIGKILL | `NODE_KILL=1 PHASE=p9a bash load/k8s/run.sh gwnode 1` | `bank_gap_diff_s` · `bank_gap_diff_raw_s`, 리더 0 구간, 죽은 Pod 시계열 끝 |
 | M2 모의 은행 0대 120초 | `BANK_DOWN_S=120 PHASE=p9a bash load/k8s/run.sh bank 1` | BankDisconnected 도착(약 50초) · 해제 |
 | M3 게이트웨이 0대 60초 | `PHASE=p9a bash load/k8s/run.sh gwzero 1` | GatewayNoLeader 도착, BankDisconnected 억제 |
-| M4 모의 은행 10분 끊김 | `BANK_DOWN_S=600 PHASE=p9a bash load/k8s/run.sh bank 1` | 상태 조회 시간(50ms 넘으면 V7 인덱스) · 시계열 수 · 카운터 vs DB |
+| M4 모의 은행 10분 끊김 | `BANK_DOWN_S=600 DURATION=640s SETTLE=1800 PHASE=p9a bash load/k8s/run.sh bank 4` (부하가 끊김보다 길어야 1만 2천 건이 쌓이고, 재발행까지 정산하려면 SETTLE 30분) | 상태 조회 시간(50ms 넘으면 V7 인덱스) · 시계열 수 · 카운터 vs DB |
 | M5 점검 창 = 지금 | `PHASE=p9a bash load/k8s/run.sh maint 1` | 울린 알림 없음 (`app-config` 를 고쳐 재시작 — 끝나면 도구가 되돌린다) |
 - 카운터 차이는 `increase()` 로 잰다 (Pod 재시작이 카운터를 0 으로 되돌려 단순 차이는 음수가 나온다 — M1b 에서 −420).
 - 은행 공백의 지표 값은 두 가지다: `bank_gap_diff_s`(5초 격자 — 대시보드가 보는 값, 5.0 ~ 8.2초) · `bank_gap_diff_raw_s`(Prometheus 원 표본, 2.4 ~ 4.5초). 성공 기준(차이 ≤ 5초)은 원 표본으로 판정한다.
