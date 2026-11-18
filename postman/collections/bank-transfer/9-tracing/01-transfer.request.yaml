@@ -27,5 +27,6 @@ scripts:
       pm.test("202 RECEIVED", () => pm.response.to.have.status(202));
       if (pm.response.code === 202) {
         pm.collectionVariables.set("p9bTransferId", pm.response.json().id);
+        pm.collectionVariables.set("p9bTries", 0);
         console.log("transfer.id = " + pm.response.json().id + " — 15초쯤 뒤 9-2");
       }
