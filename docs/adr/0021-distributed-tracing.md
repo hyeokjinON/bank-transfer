@@ -31,7 +31,7 @@
 - **T4 리더 교대**: `bank.request` 의 안 보냄 사유가 trace 에 남는다 — 모두 `stepping_down` (`gwkill-1` 3 trace · `gwroll-1` 14 trace), `not_leader` 0.
 - **T5 (덤) exemplar**: 켬 회차마다 Prometheus 가 exemplar 26 ~ 119개를 저장했고 그 `trace_id` 를 Tempo 에서 찾았다.
 - **실험 · 구현 중에 찾은 것**: 코루틴 설정 한 줄 부족(결정 11), JDK 판 INTERNAL(결정 10), OTel 1.62 의 traceparent 플래그 `-03`, Grafana 익명 사용자 Explore 불가, 스모크 [11] 의 Tempo 검색 지연(약 8초)과 `grep -q` SIGPIPE 거짓 실패(→ `grep -c`), 실험 도구가 잘못된 인자로 추적되는 원자료를 지우던 것(인자 검사를 삭제 앞으로).
-- CI `k8s-smoke` 시간 · PR 번호는 PR CI 에서 기록.
+- **CI** ([#37](https://github.com/hyeokjinON/bank-transfer/pull/37)): `k8s-smoke` **4분 13초 · 4분 49초** (20분 제한, 스모크 [11] 포함). 첫 실행은 P9a 스모크 [10] 의 출금 카운터 `increase()` 가 새 Pod 에서 0 이라 실패 → 원래 합계로 한 번 더 보게 고침. `build` 는 시간에 민감한 기존 테스트 두 개(가상 스레드 pinning 2ms · 게이트웨이 리더 반납 2초)가 한 번씩 흔들려 다시 돌려 통과 — P9b 코드와 무관. Postman 직접 확인 `9. 추적 (P9b, kind)` 통과 (2026-11-19). 자세히는 [측정 결과](../perf/p9b-tracing.md) "CI".
 
 ## 위험 · 다음
 - **코루틴 비동기 실패 경로**: 재시도 발행이 소비 구간 밖에서 일어나면 새 trace 일 수 있다 — 시험하지 않았다.
