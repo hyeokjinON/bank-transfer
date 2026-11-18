@@ -7,6 +7,7 @@ import io.github.hyeokjinon.banktransfer.gateway.NotSentReason
 import io.github.hyeokjinon.banktransfer.gateway.TranNoSource
 import io.github.hyeokjinon.banktransfer.gatewayapp.metrics.BankRequestType
 import io.github.hyeokjinon.banktransfer.gatewayapp.metrics.GatewayMetrics
+import io.github.hyeokjinon.banktransfer.gatewayapp.tracing.BankRequestTracing
 import io.github.hyeokjinon.banktransfer.protocol.InquiryResponse
 import io.github.hyeokjinon.banktransfer.protocol.NameInquiryResponse
 import io.github.hyeokjinon.banktransfer.protocol.TransferResponse
@@ -27,6 +28,8 @@ class BankConnectionOwner(
     private val tranNoSource: TranNoSource,
     /** P9a 지표 — 은행 호출 · 안 보냄 사유 · 임기 수를 여기 한 곳에서 센다. */
     private val metrics: GatewayMetrics = GatewayMetrics.noop(),
+    /** P9b 추적 — 은행 호출 구간 bank.request 를 여기 한 곳에서 연다. */
+    private val tracing: BankRequestTracing = BankRequestTracing.NOOP,
     private val newClient: () -> BankGatewayClient,
 ) : BankGateway, AutoCloseable {
 
@@ -74,22 +77,28 @@ class BankConnectionOwner(
     }
 
     override fun inquireName(bankCode: String, accountNo: String): CompletableFuture<NameInquiryResponse> =
-        withClient(BankRequestType.NAME) { it.inquireName(bankCode, accountNo) }
+        withClient(BankRequestType.NAME, reference = null) { it.inquireName(bankCode, accountNo) }
 
     override fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String, reference: String): CompletableFuture<TransferResponse> =
-        withClient(BankRequestType.TRANSFER) { it.transfer(bankCode, accountNo, amount, memo, reference) }
+        withClient(BankRequestType.TRANSFER, reference) { it.transfer(bankCode, accountNo, amount, memo, reference) }
 
     override fun inquire(reference: String): CompletableFuture<InquiryResponse> =
-        withClient(BankRequestType.INQUIRY) { it.inquire(reference) }
+        withClient(BankRequestType.INQUIRY, reference) { it.inquire(reference) }
 
     /**
-     * 은행 호출은 모두 여기를 지난다 — 지표도 여기 한 곳 (P9a). 돌려주는 future 는 원래 것 그대로다:
+     * 은행 호출은 모두 여기를 지난다 — 지표(P9a) · 추적 구간(P9b)도 여기 한 곳. 돌려주는 future 는 원래 것 그대로다:
      * whenComplete 는 옆가지라 취소 · 완료 의미를 바꾸지 않는다 (GatewayEndpoints 의 "취소가 원본으로 번지지 않는다" 그대로).
+     * 구간은 지금 구간(서버 요청)의 자식으로 열고, 완료 콜백(은행 Netty 이벤트 루프)에서 객체를 직접 들고 닫는다.
+     * 추적 호출은 BankRequestTracing 안에서 던지지 않게 막혀 있다 (E10) — 은행 호출은 정확히 한 번, 결과 그대로.
      */
-    private fun <T> withClient(type: BankRequestType, call: (BankGatewayClient) -> CompletableFuture<T>): CompletableFuture<T> {
+    private fun <T> withClient(type: BankRequestType, reference: String?, call: (BankGatewayClient) -> CompletableFuture<T>): CompletableFuture<T> {
         val startedAt = System.nanoTime()
+        val span = tracing.start(type, reference)
         val result = dispatch(call)
-        result.whenComplete { value, error -> metrics.recordBankCall(type, System.nanoTime() - startedAt, value, error) }
+        result.whenComplete { value, error ->
+            metrics.recordBankCall(type, System.nanoTime() - startedAt, value, error)
+            tracing.end(span, value, error)
+        }
         return result
     }
 
