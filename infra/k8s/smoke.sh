@@ -260,7 +260,8 @@ SPANS=$({ grep -o '"spanId":"' <<<"$TRACE" || true; } | wc -l | tr -d ' ')
 SVCS=$({ grep -o '"key":"service.name","value":{"stringValue":"[^"]*"' <<<"$TRACE" || true; } | sed 's/.*"stringValue":"//; s/"$//' | sort -u | tr '\n' ' ')
 [ "$SPANS" -ge 5 ] || fail "trace $TRACE_ID 의 구간이 ${SPANS}개 (5 이상 — 접수 · 발행 · Kafka · 게이트웨이 · bank.request)"
 [ "$SVCS" = "bank-gateway bank-transfer " ] || fail "trace $TRACE_ID 의 서비스가 '$SVCS' (bank-gateway · bank-transfer 둘 다여야)"
-k logs -l app=api --tail=-1 --prefix 2>/dev/null | grep -q "$TRACE_ID" || fail "api 로그에 traceId $TRACE_ID 가 없다 (로그 상관 — OPERATION §18-4)"
+LOGHITS=$({ k logs -l app=api --tail=-1 2>/dev/null || true; } | { grep -c "$TRACE_ID" || true; })   # grep -q 는 pipefail + SIGPIPE 로 거짓 실패한다
+[ "${LOGHITS:-0}" -gt 0 ] || fail "api 로그에 traceId $TRACE_ID 가 없다 (로그 상관 — OPERATION §18-4)"
 NOW=$(date +%s)
 ACT=$({ tempo_get "/api/search?q=$(urlenc '{ span.uri =~ "/actuator.*" }')&limit=5&start=$((NOW - 3600))&end=$NOW" 2>/dev/null || true; } | { grep -o '"traceID"' || true; } | wc -l | tr -d ' ')
 [ "$ACT" = 0 ] || fail "actuator 요청 구간이 Tempo 에 있다 (${ACT}개 — ActuatorSpans 거름 확인)"
