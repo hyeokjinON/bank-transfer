@@ -15,6 +15,9 @@ import io.github.hyeokjinon.banktransfer.gatewayapp.leader.BankConnectionOwner
 import io.github.hyeokjinon.banktransfer.gatewayapp.leader.ConfigMapTranNoSource
 import io.github.hyeokjinon.banktransfer.gatewayapp.leader.GatewayLeaderElection
 import io.github.hyeokjinon.banktransfer.gatewayapp.leader.LeaderLabel
+import io.github.hyeokjinon.banktransfer.gatewayapp.metrics.GatewayGauges
+import io.github.hyeokjinon.banktransfer.gatewayapp.metrics.GatewayMetrics
+import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.ConfigurationProperties
@@ -91,11 +94,19 @@ class GatewayConfiguration {
         return KubernetesClientBuilder().withConfig(config).build()
     }
 
+    /** 점검 창 하나 (송신 보류 · 점검 Gauge 가 같이 본다). */
+    @Bean
+    fun gatewayMaintenanceWindow(maintenance: GatewayMaintenanceProperties): BankMaintenanceWindow = maintenance.toWindow()
+
+    /** P9a 사건 지표. MeterRegistry 는 actuator 자동 구성 (Prometheus 레지스트리는 Task 6). */
+    @Bean
+    fun gatewayMetrics(registry: MeterRegistry) = GatewayMetrics(registry)
+
     /** 전문번호 발급: 선출 켜짐 = ConfigMap 구간 예약(게이트웨이 여러 대 사이 유일), 꺼짐 = 메모리 카운터 (지금과 같다). */
     @Bean
-    fun tranNoSource(election: LeaderElectionProperties, k8s: ObjectProvider<KubernetesClient>, clock: Clock): TranNoSource =
+    fun tranNoSource(election: LeaderElectionProperties, k8s: ObjectProvider<KubernetesClient>, clock: Clock, metrics: GatewayMetrics): TranNoSource =
         if (election.enabled) {
-            ConfigMapTranNoSource(k8s.getObject(), election.namespace, election.tranNoConfigMap, clock, election.tranNoBlockSize)
+            ConfigMapTranNoSource(k8s.getObject(), election.namespace, election.tranNoConfigMap, clock, election.tranNoBlockSize, metrics = metrics)
         } else {
             InMemoryTranNoSource()
         }
@@ -107,14 +118,14 @@ class GatewayConfiguration {
     @Bean(destroyMethod = "close")
     fun bankConnectionOwner(
         props: GatewayBankProperties,
-        maintenance: GatewayMaintenanceProperties,
+        window: BankMaintenanceWindow,
         election: LeaderElectionProperties,
         clock: Clock,
         tranNoSource: TranNoSource,
+        metrics: GatewayMetrics,
     ): BankConnectionOwner {
-        val window = maintenance.toWindow()
         val config = BankGatewayConfig(host = props.host, port = props.port, responseTimeout = props.responseTimeout, pollInterval = props.pollInterval)
-        return BankConnectionOwner(tranNoSource) {
+        return BankConnectionOwner(tranNoSource, metrics) {
             BankGatewayClient(
                 config,
                 clock,
@@ -123,6 +134,11 @@ class GatewayConfiguration {
             )
         }.apply { if (!election.enabled) startLeading() }
     }
+
+    /** P9a 상태 Gauge 4개 (리더 · 연결 · 남은 번호 · 점검). */
+    @Bean
+    fun gatewayGauges(owner: BankConnectionOwner, tranNoSource: TranNoSource, window: BankMaintenanceWindow, clock: Clock) =
+        GatewayGauges(owner, tranNoSource, window, clock)
 
     /** 종료 훅 + (켜짐이면) 선출. 둘 다 웹 서버 graceful 종료보다 먼저 멈춘다. */
     @Bean

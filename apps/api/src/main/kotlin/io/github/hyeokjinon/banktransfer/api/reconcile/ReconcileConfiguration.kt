@@ -1,5 +1,6 @@
 package io.github.hyeokjinon.banktransfer.api.reconcile
 
+import io.github.hyeokjinon.banktransfer.api.metrics.TransferMetrics
 import io.github.hyeokjinon.banktransfer.api.alert.Alert
 import io.github.hyeokjinon.banktransfer.api.alert.AlertLevel
 import io.github.hyeokjinon.banktransfer.api.alert.AlertNotifier
@@ -72,7 +73,7 @@ class ReconcileConfiguration {
     private val log = LoggerFactory.getLogger(javaClass)
 
     @Bean
-    fun transferReconciler(store: TransferStore, client: BankGateway, props: ReconcileProperties, clock: Clock, alerts: AlertNotifier) =
+    fun transferReconciler(store: TransferStore, client: BankGateway, props: ReconcileProperties, clock: Clock, alerts: AlertNotifier, metrics: TransferMetrics) =
         TransferReconciler(
             store = store,
             bank = BankInquiryAdapter(client),
@@ -92,6 +93,7 @@ class ReconcileConfiguration {
             },
             // 한 건이 깨져도 나머지는 계속 돈다. 건너뛴 건은 매 주기 다시 여기로 온다 — 손으로 고칠 때까지 ERROR 가 반복된다
             onItemError = { transfer, e -> log.error("reconcile skipped transfer {}: {}", transfer, e.toString(), e) },
+            observer = metrics,   // P9a: 재발행 · 포기 · 결과조회 · 확정 (저장이 true 로 돌아온 뒤에만)
         )
 
     @Bean

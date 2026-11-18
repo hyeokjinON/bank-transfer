@@ -3,7 +3,10 @@ package io.github.hyeokjinon.banktransfer.gatewayapp.leader
 import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankNotSentException
+import io.github.hyeokjinon.banktransfer.gateway.NotSentReason
 import io.github.hyeokjinon.banktransfer.gateway.TranNoSource
+import io.github.hyeokjinon.banktransfer.gatewayapp.metrics.BankRequestType
+import io.github.hyeokjinon.banktransfer.gatewayapp.metrics.GatewayMetrics
 import io.github.hyeokjinon.banktransfer.protocol.InquiryResponse
 import io.github.hyeokjinon.banktransfer.protocol.NameInquiryResponse
 import io.github.hyeokjinon.banktransfer.protocol.TransferResponse
@@ -22,6 +25,8 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class BankConnectionOwner(
     private val tranNoSource: TranNoSource,
+    /** P9a 지표 — 은행 호출 · 안 보냄 사유 · 임기 수를 여기 한 곳에서 센다. */
+    private val metrics: GatewayMetrics = GatewayMetrics.noop(),
     private val newClient: () -> BankGatewayClient,
 ) : BankGateway, AutoCloseable {
 
@@ -41,6 +46,7 @@ class BankConnectionOwner(
         if (steppingDown || client != null) return
         tranNoSource.prepare()
         client = newClient().start()
+        metrics.leaderTermStarted()
         log.info("bank connection term started — connecting")
     }
 
@@ -68,19 +74,30 @@ class BankConnectionOwner(
     }
 
     override fun inquireName(bankCode: String, accountNo: String): CompletableFuture<NameInquiryResponse> =
-        withClient { it.inquireName(bankCode, accountNo) }
+        withClient(BankRequestType.NAME) { it.inquireName(bankCode, accountNo) }
 
     override fun transfer(bankCode: String, accountNo: String, amount: Long, memo: String, reference: String): CompletableFuture<TransferResponse> =
-        withClient { it.transfer(bankCode, accountNo, amount, memo, reference) }
+        withClient(BankRequestType.TRANSFER) { it.transfer(bankCode, accountNo, amount, memo, reference) }
 
     override fun inquire(reference: String): CompletableFuture<InquiryResponse> =
-        withClient { it.inquire(reference) }
+        withClient(BankRequestType.INQUIRY) { it.inquire(reference) }
 
-    private fun <T> withClient(call: (BankGatewayClient) -> CompletableFuture<T>): CompletableFuture<T> {
+    /**
+     * 은행 호출은 모두 여기를 지난다 — 지표도 여기 한 곳 (P9a). 돌려주는 future 는 원래 것 그대로다:
+     * whenComplete 는 옆가지라 취소 · 완료 의미를 바꾸지 않는다 (GatewayEndpoints 의 "취소가 원본으로 번지지 않는다" 그대로).
+     */
+    private fun <T> withClient(type: BankRequestType, call: (BankGatewayClient) -> CompletableFuture<T>): CompletableFuture<T> {
+        val startedAt = System.nanoTime()
+        val result = dispatch(call)
+        result.whenComplete { value, error -> metrics.recordBankCall(type, System.nanoTime() - startedAt, value, error) }
+        return result
+    }
+
+    private fun <T> dispatch(call: (BankGatewayClient) -> CompletableFuture<T>): CompletableFuture<T> {
         inFlight.incrementAndGet()   // 먼저 올린다 — stepDown 이 steppingDown 을 세운 뒤 이 값을 보면, 이 요청의 대기 표 등록까지 기다린다
         try {
-            if (steppingDown) return CompletableFuture.failedFuture(BankNotSentException("gateway is stepping down"))
-            val c = client ?: return CompletableFuture.failedFuture(BankNotSentException("not the bank connection leader"))
+            if (steppingDown) return CompletableFuture.failedFuture(BankNotSentException("gateway is stepping down", reason = NotSentReason.STEPPING_DOWN))
+            val c = client ?: return CompletableFuture.failedFuture(BankNotSentException("not the bank connection leader", reason = NotSentReason.NOT_LEADER))
             return call(c)   // 전문은 send 가 돌아오기 전에 대기 표에 오른다
         } finally {
             inFlight.decrementAndGet()

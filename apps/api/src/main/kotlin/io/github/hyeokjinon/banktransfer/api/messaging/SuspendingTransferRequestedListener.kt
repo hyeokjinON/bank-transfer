@@ -48,8 +48,10 @@ class SuspendingTransferRequestedListener(
     /** DB · 알림처럼 스레드를 막는 호출을 돌릴 곳. 기본 Dispatchers.IO, 테스트는 이름 붙인 스레드로 바꿔 어디서 돌았는지 본다. */
     private val db: CoroutineDispatcher = Dispatchers.IO,
     alerts: AlertNotifier = AlertNotifier { },
+    /** DLT 지표 (P9a). */
+    onDeadLetter: (DltKind) -> Unit = {},
 ) {
-    private val handling = TransferRequestedHandling(alerts, LoggerFactory.getLogger(javaClass))
+    private val handling = TransferRequestedHandling(alerts, LoggerFactory.getLogger(javaClass), onDeadLetter)
 
     @RetryableTopic(
         attempts = TransferListenerSettings.ATTEMPTS,
@@ -77,13 +79,14 @@ class SuspendingTransferRequestedListener(
         // UNKNOWN → 결과조회 "미처리" → FAILED + 환불로 확정한 뒤에 이 코루틴이 자리를 잡아 송금한다 → 환불과 입금이 둘 다 일어난다 (CONFLICT).
         // 블로킹 판은 begin 과 송금 사이가 거의 0 이다. 기다리는 동안은 RECEIVED 로 두고, 자리를 잡은 뒤에야 SENDING 으로 바꾼다.
         // 자리가 begin 의 짧은 DB 호출 하나를 함께 덮는 값을 치른다. finish · conclude 는 자리 밖(자리를 오래 잡지 않는다).
-        val outcome = bankCalls.withPermit {
+        // P9a: finish 가 Transfer(createdAt — 접수 → 확정 시간)를 받으므로 자리 안에서 Transfer 와 결과를 함께 꺼낸다
+        val (transfer, outcome) = bankCalls.withPermit {
             val transfer = when (val begun = withContext(db) { processor.begin(transferId) }) {
                 TransferProcessor.Begin.NotFound -> return ProcessResult.NOT_FOUND
                 TransferProcessor.Begin.AlreadyHandled -> return ProcessResult.ALREADY_HANDLED
                 is TransferProcessor.Begin.Started -> begun.transfer
             }
-            try {
+            val outcome = try {
                 bank.transfer(transfer.bankCode, transfer.accountNo, transfer.amount, transfer.memo, transfer.reference)
             } catch (e: CancellationException) {
                 // 은행에 갔는지 모른다: 아무것도 기록하지 않는다 → SENDING 으로 남아 정리 작업이 30초 뒤 UNKNOWN → 결과조회 (설계 §4). NotSent 로 다시 보내면 이중 지급
@@ -92,8 +95,9 @@ class SuspendingTransferRequestedListener(
                 // 블로킹 process() 와 같다: 포트가 분류하지 못한 예외 = 받았는지 모른다 → UNKNOWN
                 BankTransferOutcome.ResultUnknown
             }
+            transfer to outcome
         }
-        return withContext(db) { processor.finish(transferId, outcome) }
+        return withContext(db) { processor.finish(transfer, outcome) }
     }
 
     /** DLT: 블로킹 판과 같다 (로그 · 알림은 [TransferRequestedHandling.onDlt]). 항상 ack 한다. */

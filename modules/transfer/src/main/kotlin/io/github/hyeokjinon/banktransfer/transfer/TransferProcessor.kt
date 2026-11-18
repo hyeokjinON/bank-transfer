@@ -39,6 +39,8 @@ class TransferProcessor(
     private val store: TransferStore,
     private val bank: BankTransferPort,
     private val clock: Clock = Clock.systemUTC(),
+    /** P9a 지표 — 저장이 성공한 뒤에만 부른다 ([TransferObserver]). */
+    private val observer: TransferObserver = TransferObserver.NONE,
 ) {
 
     /** [begin] 의 결과 (P6-1). */
@@ -65,7 +67,7 @@ class TransferProcessor(
             // 포트가 결과를 분류하지 못하고 예외를 던졌다 = 은행이 받았는지 모른다 → 다시 보내지 않고 UNKNOWN (P3-3 결과조회로 확정)
             BankTransferOutcome.ResultUnknown
         }
-        return finish(transferId, outcome)
+        return finish(transfer, outcome)
     }
 
     /** 1단계: 조회 · RECEIVED → SENDING 조건부 전이 (P6-1 에서 [process] 에서 나눔). 은행은 부르지 않는다. */
@@ -75,12 +77,18 @@ class TransferProcessor(
         return Begin.Started(transfer)
     }
 
-    /** 3단계: 은행 결과를 기록하고 판정한다 (P6-1 에서 [process] 에서 나눔). [begin] 이 Started 를 돌려준 출금에만 부른다. 은행은 부르지 않는다. */
-    fun finish(transferId: UUID, outcome: BankTransferOutcome): ProcessResult = when (outcome) {
-        BankTransferOutcome.Completed -> record(transferId, COMPLETED, BANK_OK, ProcessResult.COMPLETED)
-        is BankTransferOutcome.Rejected -> record(transferId, FAILED, outcome.responseCode, ProcessResult.FAILED)
-        BankTransferOutcome.ResultUnknown -> record(transferId, UNKNOWN, null, ProcessResult.UNKNOWN)
-        BankTransferOutcome.NotSent -> record(transferId, RECEIVED, null, ProcessResult.RETRY_LATER)
+    /**
+     * 3단계: 은행 결과를 기록하고 판정한다 (P6-1 에서 [process] 에서 나눔). [begin] 이 Started 로 돌려준 [transfer] 에만 부른다. 은행은 부르지 않는다.
+     * P9a: 받는 것이 id 가 아니라 [Transfer] 다 — 접수 → 확정 시간에 createdAt 이 필요하다 (바꾸기 전에 읽은 값이어도 createdAt 은 같다).
+     */
+    fun finish(transfer: Transfer, outcome: BankTransferOutcome): ProcessResult {
+        observer.bankResult(outcome)
+        return when (outcome) {
+            BankTransferOutcome.Completed -> record(transfer, COMPLETED, BANK_OK, ProcessResult.COMPLETED)
+            is BankTransferOutcome.Rejected -> record(transfer, FAILED, outcome.responseCode, ProcessResult.FAILED)
+            BankTransferOutcome.ResultUnknown -> record(transfer, UNKNOWN, null, ProcessResult.UNKNOWN)
+            BankTransferOutcome.NotSent -> record(transfer, RECEIVED, null, ProcessResult.RETRY_LATER)
+        }
     }
 
     /**
@@ -90,14 +98,22 @@ class TransferProcessor(
      * 확정 결과를 UNKNOWN 에서도 옮기지 못했는데 현재 상태가 이미 다른 확정(완료 ↔ 거절)이면 [ProcessResult.CONFLICT] 다:
      * 결과조회 결과와 은행의 확정 결과가 엇갈린 것이라 조용히 넘기면 DB 와 은행이 어긋난 채 남는다.
      * 같은 확정 결과였거나 아직 확정 전이면 [ProcessResult.ALREADY_HANDLED] 다.
+     * 확정으로 옮겼을 때만 [TransferObserver.finalized] — 저장이 true 로 돌아온 뒤 (P9a).
      */
-    private fun record(id: UUID, to: TransferStatus, bankResponseCode: String?, result: ProcessResult): ProcessResult {
+    private fun record(transfer: Transfer, to: TransferStatus, bankResponseCode: String?, result: ProcessResult): ProcessResult {
+        val id = transfer.id
         val now = clock.instant()
-        if (move(id, SENDING, to, now, bankResponseCode)) return result
-        if ((to == COMPLETED || to == FAILED) && move(id, UNKNOWN, to, now, bankResponseCode)) return result
-        if (to == COMPLETED || to == FAILED) {
+        if (move(id, SENDING, to, now, bankResponseCode)) {
+            if (to.isFinal) observer.finalized(to, transfer.createdAt, now)
+            return result
+        }
+        if (to.isFinal && move(id, UNKNOWN, to, now, bankResponseCode)) {
+            observer.finalized(to, transfer.createdAt, now)
+            return result
+        }
+        if (to.isFinal) {
             val current = store.findById(id)?.status
-            if ((current == COMPLETED || current == FAILED) && current != to) return ProcessResult.CONFLICT
+            if (current?.isFinal == true && current != to) return ProcessResult.CONFLICT
         }
         return ProcessResult.ALREADY_HANDLED
     }

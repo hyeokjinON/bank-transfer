@@ -39,6 +39,8 @@ object TransferListenerSettings {
 internal class TransferRequestedHandling(
     private val alerts: AlertNotifier,
     private val log: Logger,
+    /** DLT 로 온 메시지 하나마다 (P9a 지표 transfer.dlt{kind}). 로그 · 알림보다 먼저 - 그쪽이 실패해도 센다. */
+    private val onDeadLetter: (DltKind) -> Unit = {},
 ) {
 
     fun transferIdOf(key: String?): UUID {
@@ -81,7 +83,9 @@ internal class TransferRequestedHandling(
     fun onDlt(record: ConsumerRecord<String, String>) {
         val causeFqcn = record.headerText(KafkaHeaders.EXCEPTION_CAUSE_FQCN) ?: record.headerText(KafkaHeaders.EXCEPTION_FQCN)
         val original = "${record.headerText(KafkaHeaders.ORIGINAL_TOPIC)}-${record.headerInt(KafkaHeaders.ORIGINAL_PARTITION)}@${record.headerLong(KafkaHeaders.ORIGINAL_OFFSET)}"
-        when (dltKind(causeFqcn)) {
+        val kind = dltKind(causeFqcn)
+        onDeadLetter(kind)
+        when (kind) {
             DltKind.BANK_NOT_CONNECTED -> log.warn(
                 "transfer {} moved to DLT: bank not connected. stays RECEIVED, reconcile will republish it. original={}",
                 record.key(), original,
@@ -121,8 +125,8 @@ private fun ConsumerRecord<*, *>.headerLong(name: String): Long? =
 private const val KEY_LOG_MAX = 64
 private const val MESSAGE_LOG_MAX = 200
 
-/** DLT 로 온 이유. 로그 수준 · 안내가 갈린다 (테스트에서 분기만 따로 확인할 수 있게 순수 함수로 뺐다). */
-internal enum class DltKind { BANK_NOT_CONNECTED, INVALID_KEY, OTHER }
+/** DLT 로 온 이유. 로그 수준 · 안내가 갈린다. P9a 지표 라벨(kind)이라 public (TransferMetrics 가 쓴다). */
+enum class DltKind { BANK_NOT_CONNECTED, INVALID_KEY, OTHER }
 
 internal fun dltKind(causeFqcn: String?): DltKind = when (causeFqcn) {
     RetryLaterException::class.java.name -> DltKind.BANK_NOT_CONNECTED

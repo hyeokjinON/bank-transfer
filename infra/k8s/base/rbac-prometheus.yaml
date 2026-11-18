@@ -1,0 +1,22 @@
+# P9a: Prometheus(monitoring namespace) 가 이 namespace 의 Pod 목록만 본다 — ClusterRole 이 아니다 (스펙 §6, 결정 D4)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: prometheus-pod-reader
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prometheus-pod-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: prometheus-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring   # 다른 namespace 의 SA — kustomize namespace 변환이 바꾸지 않는지 Step 5 에서 본다

@@ -3,3 +3,9 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: bank-transfer
+---
+# P9a 관측 (Prometheus · Alertmanager · alert-sink · Grafana). 앱 namespace 와 나눠 권한 · NetworkPolicy 를 따로 둔다
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring

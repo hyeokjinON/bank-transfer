@@ -21,6 +21,8 @@ dependencies {
     // 기본 HTTP 구현(vertx-5)은 Netty 를 하나 더 끌어와 빼고, Netty 없는 JDK HttpClient 구현을 쓴다
     implementation("io.fabric8:kubernetes-client:8.0.0") { exclude(group = "io.fabric8", module = "kubernetes-httpclient-vertx-5") }
     runtimeOnly("io.fabric8:kubernetes-httpclient-jdk:8.0.0")
+    // P9a 지표 노출 /actuator/prometheus (버전은 Boot BOM)
+    runtimeOnly("io.micrometer:micrometer-registry-prometheus")
 
     testImplementation(project(":apps:mock-bank"))
     testImplementation(testFixtures(project(":modules:bank-gateway-http")))   // TcpCutProxy

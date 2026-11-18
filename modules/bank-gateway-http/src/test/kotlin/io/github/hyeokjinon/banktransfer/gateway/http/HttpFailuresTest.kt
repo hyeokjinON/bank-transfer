@@ -3,6 +3,7 @@ package io.github.hyeokjinon.banktransfer.gateway.http
 import io.github.hyeokjinon.banktransfer.gateway.BankNotSentException
 import io.github.hyeokjinon.banktransfer.gateway.BankTimeoutException
 import io.github.hyeokjinon.banktransfer.gateway.BankUnavailableException
+import io.github.hyeokjinon.banktransfer.gateway.NotSentReason
 import java.io.IOException
 import java.net.ConnectException
 import java.net.UnknownHostException
@@ -24,7 +25,8 @@ class HttpFailuresTest {
 
     @Test
     fun `503 + BANK_NOT_SENT 만 안 보냄`() {
-        assertIs<BankNotSentException>(HttpFailures.fromStatus(503, err(GatewayErrorCodes.BANK_NOT_SENT)))
+        // 게이트웨이 안의 사유는 HTTP 로 넘어오지 않는다 — 게이트웨이의 gateway.not_sent{reason} 에서 본다
+        assertEquals(NotSentReason.OTHER, assertIs<BankNotSentException>(HttpFailures.fromStatus(503, err(GatewayErrorCodes.BANK_NOT_SENT))).reason)
     }
 
     @Test
@@ -59,6 +61,7 @@ class HttpFailuresTest {
         // Reactor Netty 1.3.7 의 실제 셰이드 예외 — 이름이 바뀌면(버전 올림) 여기서 깨진다
         assertIs<BankNotSentException>(HttpFailures.fromTransport(PoolAcquireTimeoutException(Duration.ofSeconds(1))))
         assertIs<BankNotSentException>(HttpFailures.fromTransport(PoolAcquirePendingLimitException(64)))
+        assertEquals(NotSentReason.GATEWAY_UNREACHABLE, (HttpFailures.fromTransport(ConnectException("refused")) as BankNotSentException).reason)
     }
 
     @Test

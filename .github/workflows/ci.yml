@@ -27,6 +27,12 @@ jobs:
           status=0; ./gradlew build --no-daemon || status=$?
           kill "$WATCH" 2>/dev/null || true
           exit "$status"
+      # P9a 알림 규칙 단위 테스트 · Alertmanager 설정 · 대시보드 검사 — promtool · amtool 컨테이너 (버전은 infra/k8s/versions.env). 30초 안팎
+      # Build and test 뒤에 always() — Docker Hub pull 이 실패해도 Gradle 결과가 가려지지 않고, Gradle 이 실패해도 이 검사는 돈다
+      - name: 알림 규칙 · 대시보드 검사
+        if: always()
+        timeout-minutes: 5
+        run: bash infra/k8s/monitoring/check.sh
       - name: Upload test reports
         if: failure() || cancelled()
         uses: actions/upload-artifact@v6
@@ -174,6 +180,8 @@ jobs:
           kubectl --context kind-bank-transfer -n envoy-gateway-system logs -l app.kubernetes.io/name=envoy --all-containers --tail=200 || true
           kubectl --context kind-bank-transfer get events -A --sort-by=.lastTimestamp | tail -50 || true
           kubectl --context kind-bank-transfer -n bank-transfer get gateways.gateway.networking.k8s.io,httproutes -o yaml || true
+          for a in prometheus alertmanager alert-sink grafana; do echo "=== monitoring/$a"; kubectl --context kind-bank-transfer -n monitoring logs deploy/$a --tail=200 || true; done
+          kubectl --context kind-bank-transfer -n monitoring get pods -o wide || true
       - name: Stop
         if: always()
         run: kind delete cluster --name bank-transfer || true

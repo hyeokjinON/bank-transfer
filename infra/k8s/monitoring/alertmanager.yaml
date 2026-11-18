@@ -1,0 +1,52 @@
+# P9a Alertmanager (스펙 §6) — 받는 곳 alert-sink 하나 · 묶기 · 억제 · 해제. 한 대라 클러스터(gossip)를 끈다
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  labels: {app: alertmanager}
+spec:
+  selector: {app: alertmanager}
+  ports:
+    - {name: http, port: 9093}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: alertmanager}
+  template:
+    metadata:
+      labels: {app: alertmanager}
+    spec:
+      automountServiceAccountToken: false   # 쿠버네티스 API 를 쓰지 않는다
+      nodeSelector: {bank-transfer/role: infra}
+      tolerations:
+        - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+      securityContext: {runAsUser: 65534, runAsGroup: 65534, runAsNonRoot: true, fsGroup: 65534}
+      containers:
+        - name: alertmanager
+          image: prom/alertmanager   # 태그 = versions.env ALERTMANAGER_VERSION (apply_overlay)
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+            - --cluster.listen-address=
+          ports:
+            - {name: http, containerPort: 9093}
+          readinessProbe:
+            httpGet: {path: /-/ready, port: http}
+            periodSeconds: 5
+          resources:
+            requests: {memory: 64Mi, cpu: 20m}
+            limits: {memory: 128Mi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/alertmanager}
+            - {name: data, mountPath: /alertmanager}
+      volumes:
+        - name: config
+          configMap: {name: alertmanager-config}
+        - name: data
+          emptyDir: {}

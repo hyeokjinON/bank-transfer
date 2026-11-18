@@ -6,6 +6,7 @@ import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -19,12 +20,16 @@ class TransferProcessorTest {
         /** 실제로 FAILED 로 바꾼 fail() 호출 (id, from, 은행 코드). 실제 저장소는 바로 이때 같은 트랜잭션에서 환불한다. */
         val failCalls = mutableListOf<Triple<UUID, TransferStatus, String>>()
 
+        /** 이 상태로 옮기려 하면 예외 — 저장 실패(롤백)를 흉내 낸다 (P9a: 이때는 세지 않는다). */
+        var throwOnMoveTo: TransferStatus? = null
+
         override fun saveWithEvent(transfer: Transfer, event: TransferEvent): Transfer = transfer.also { transfers[it.id] = it }
         override fun findById(id: UUID) = transfers[id]
         override fun findByIdempotencyKey(userId: String, key: String) =
             transfers.values.firstOrNull { it.userId == userId && it.idempotencyKey == key }
 
         override fun transition(id: UUID, from: TransferStatus, to: TransferStatus, at: Instant, bankResponseCode: String?, sentWithin: OpenEndRange<Instant>?): Boolean {
+            if (to == throwOnMoveTo) throw IllegalStateException("db down")
             require(to != TransferStatus.FAILED) { "FAILED 는 fail() 로만 간다 (환불을 빠뜨리지 않게)" }
             val current = transfers[id] ?: return false
             if (current.status != from) return false
@@ -38,6 +43,7 @@ class TransferProcessorTest {
         }
 
         override fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String, sentWithin: OpenEndRange<Instant>?): Boolean {
+            if (throwOnMoveTo == TransferStatus.FAILED) throw IllegalStateException("db down")
             val current = transfers[id] ?: return false
             if (current.status != from) return false
             transfers[id] = current.copy(status = TransferStatus.FAILED, updatedAt = at, bankResponseCode = bankResponseCode)
@@ -233,5 +239,67 @@ class TransferProcessorTest {
         assertEquals(TransferStatus.FAILED, store.transfers.getValue(t.id).status)
         // SENDING 에서 먼저 시도(0건) → UNKNOWN 에서 확정. 환불은 실제로 바뀐 한 번뿐이다
         assertEquals(listOf(Triple(t.id, TransferStatus.UNKNOWN, "1001")), store.failCalls)
+    }
+
+    // --- P9a 관찰자: 저장이 성공한 뒤에만 센다 ---
+
+    private val observer = RecordingObserver()
+    private fun observed(bank: BankTransferPort) = TransferProcessor(store, bank, Clock.fixed(now, ZoneOffset.UTC), observer)
+
+    private fun receivedAt(createdAt: Instant): Transfer {
+        val t = received().copy(createdAt = createdAt, updatedAt = createdAt)
+        store.transfers[t.id] = t
+        return t
+    }
+
+    @Test
+    fun `관찰자 - 완료는 은행 결과와 접수 → 확정 시간을 남긴다`() {
+        val t = receivedAt(now.minusSeconds(90))
+
+        observed { _, _, _, _, _ -> BankTransferOutcome.Completed }.process(t.id)
+
+        assertEquals(listOf("bank:Completed", "final:COMPLETED:90"), observer.events)
+    }
+
+    @Test
+    fun `관찰자 - 거절은 FAILED 로 확정, 미전송 · 모름은 확정이 아니다`() {
+        observed { _, _, _, _, _ -> BankTransferOutcome.Rejected("1001") }.process(received().id)
+        observed { _, _, _, _, _ -> BankTransferOutcome.NotSent }.process(received().id)
+        observed { _, _, _, _, _ -> BankTransferOutcome.ResultUnknown }.process(received().id)
+
+        assertEquals(listOf("bank:Rejected", "final:FAILED:0", "bank:NotSent", "bank:ResultUnknown"), observer.events)
+    }
+
+    @Test
+    fun `관찰자 - 저장이 예외면(롤백) 확정을 세지 않는다`() {
+        val t = received()
+        store.throwOnMoveTo = TransferStatus.COMPLETED
+
+        assertFailsWith<IllegalStateException> { observed { _, _, _, _, _ -> BankTransferOutcome.Completed }.process(t.id) }
+
+        assertEquals(listOf("bank:Completed"), observer.events)   // 은행 결과는 사실이라 남고, 확정은 없다
+    }
+
+    @Test
+    fun `관찰자 - 환불 경로(fail)가 예외여도 확정을 세지 않는다`() {
+        val t = received()
+        store.throwOnMoveTo = TransferStatus.FAILED
+
+        assertFailsWith<IllegalStateException> { observed { _, _, _, _, _ -> BankTransferOutcome.Rejected("1001") }.process(t.id) }
+
+        assertEquals(listOf("bank:Rejected"), observer.events)
+    }
+
+    @Test
+    fun `관찰자 - 다른 쪽이 먼저 확정했으면(0건) 세지 않는다`() {
+        val t = received()
+        val racing = BankTransferPort { _, _, _, _, _ ->
+            store.transition(t.id, TransferStatus.SENDING, TransferStatus.UNKNOWN, now)
+            store.transition(t.id, TransferStatus.UNKNOWN, TransferStatus.COMPLETED, now, "0000")   // 결과조회가 먼저 완료로 확정
+            BankTransferOutcome.Completed
+        }
+
+        assertEquals(ProcessResult.ALREADY_HANDLED, observed(racing).process(t.id))
+        assertEquals(listOf("bank:Completed"), observer.events)
     }
 }

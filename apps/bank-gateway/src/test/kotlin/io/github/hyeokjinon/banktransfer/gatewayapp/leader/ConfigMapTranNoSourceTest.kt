@@ -2,8 +2,11 @@ package io.github.hyeokjinon.banktransfer.gatewayapp.leader
 
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder
 import io.github.hyeokjinon.banktransfer.gateway.BankNotSentException
+import io.github.hyeokjinon.banktransfer.gateway.NotSentReason
 import io.github.hyeokjinon.banktransfer.gatewayapp.k8s.MockK8s
+import io.github.hyeokjinon.banktransfer.gatewayapp.metrics.GatewayMetrics
 import io.github.hyeokjinon.banktransfer.protocol.Header
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.awaitility.kotlin.await
 import org.awaitility.kotlin.untilAsserted
 import java.time.Clock
@@ -25,6 +28,7 @@ class ConfigMapTranNoSourceTest {
     private val name = "bank-gateway-tran-no"
     private val clock = MutableClock(Instant.parse("2026-11-16T01:00:00Z"))   // KST 2026-11-16 10:00
     private val sources = mutableListOf<ConfigMapTranNoSource>()
+    private val registry = SimpleMeterRegistry()
 
     @AfterTest
     fun tearDown() {
@@ -33,7 +37,7 @@ class ConfigMapTranNoSourceTest {
     }
 
     private fun source(blockSize: Long = 1000, prefetch: Long = 100, attempts: Int = 5) =
-        ConfigMapTranNoSource(k8s.client, ns, name, clock, blockSize, prefetch, attempts).also { sources += it }
+        ConfigMapTranNoSource(k8s.client, ns, name, clock, blockSize, prefetch, attempts, GatewayMetrics(registry)).also { sources += it }
 
     private fun data() = k8s.client.configMaps().inNamespace(ns).withName(name).get().data
 
@@ -96,7 +100,7 @@ class ConfigMapTranNoSourceTest {
         assertEquals(1, source.next())
 
         clock.now = Instant.parse("2026-11-16T15:00:00Z")   // KST 2026-11-17 00:00 (점검 시간 안 — 송신은 원래 막혀 있다)
-        assertFailsWith<BankNotSentException> { source.next() }
+        assertEquals(NotSentReason.NO_TRAN_NO, assertFailsWith<BankNotSentException> { source.next() }.reason)
 
         await.atMost(Duration.ofSeconds(5)) untilAsserted { assertEquals(1, runCatching { source.next() }.getOrNull()) }
         assertEquals(mapOf("date" to "20261117", "reservedTo" to "10"), data())
@@ -110,7 +114,7 @@ class ConfigMapTranNoSourceTest {
 
         assertEquals(1, source.next())
         assertEquals(2, source.next())
-        assertFailsWith<BankNotSentException> { source.next() }
+        assertEquals(NotSentReason.NO_TRAN_NO, assertFailsWith<BankNotSentException> { source.next() }.reason)
     }
 
     @Test
@@ -120,7 +124,7 @@ class ConfigMapTranNoSourceTest {
 
         source.prepare()
 
-        assertFailsWith<BankNotSentException> { source.next() }
+        assertEquals(NotSentReason.NO_TRAN_NO, assertFailsWith<BankNotSentException> { source.next() }.reason)
     }
 
     @Test
@@ -130,7 +134,7 @@ class ConfigMapTranNoSourceTest {
                 .addToData("date", "20261116").addToData("reservedTo", "${Header.MAX_TRAN_NO - 5}").build(),
         ).create()
 
-        assertFailsWith<BankNotSentException> { source(blockSize = 10).reserve("20261116") }
+        assertEquals(NotSentReason.TRAN_NO_STORE, assertFailsWith<BankNotSentException> { source(blockSize = 10).reserve("20261116") }.reason)
         assertTrue(data()["reservedTo"] == "${Header.MAX_TRAN_NO - 5}")
     }
 
@@ -145,19 +149,19 @@ class ConfigMapTranNoSourceTest {
     fun `저장된 날짜가 더 새로우면 예약하지 않고 기록도 그대로 둔다 - 시계가 늦은 예약자`() {
         store("20261117", "1000")
 
-        assertFailsWith<BankNotSentException> { source().reserve("20261116") }
+        assertEquals(NotSentReason.TRAN_NO_STORE, assertFailsWith<BankNotSentException> { source().reserve("20261116") }.reason)
         assertEquals(mapOf("date" to "20261117", "reservedTo" to "1000"), data())
     }
 
     @Test
     fun `깨진 기록은 덮지 않고 보내지 않는다`() {
         store("20261116", "abc")
-        assertFailsWith<BankNotSentException> { source().reserve("20261116") }
+        assertEquals(NotSentReason.TRAN_NO_STORE, assertFailsWith<BankNotSentException> { source().reserve("20261116") }.reason)
         assertEquals(mapOf("date" to "20261116", "reservedTo" to "abc"), data())
 
         k8s.client.configMaps().inNamespace(ns).withName(name).delete()
         store("20261116", null)
-        assertFailsWith<BankNotSentException> { source().reserve("20261116") }
+        assertEquals(NotSentReason.TRAN_NO_STORE, assertFailsWith<BankNotSentException> { source().reserve("20261116") }.reason)
         assertEquals(mapOf("date" to "20261116"), data())
     }
 
@@ -165,5 +169,28 @@ class ConfigMapTranNoSourceTest {
         override fun getZone(): ZoneId = ZoneId.of("UTC")
         override fun withZone(zone: ZoneId): Clock = this
         override fun instant(): Instant = now
+    }
+
+    private fun reserves(result: String) = registry.get(GatewayMetrics.TRAN_NO_RESERVE).tag("result", result).counter().count()
+
+    @Test
+    fun `예약 결과와 남은 번호 - 현재 구간 + 미리 예약 구간`() {
+        val source = source(blockSize = 10, prefetch = 0)
+        source.prepare()
+        assertEquals(1.0, reserves("ok"))
+        assertEquals(10, source.remaining())
+
+        source.next()
+        assertEquals(9, source.remaining())
+    }
+
+    @Test
+    fun `API 서버가 없으면 예약은 error 로 센다`() {
+        k8s.stopApiServer()
+        val source = source()
+        source.prepare()   // 던지지 않는다 — 실패를 센다
+
+        assertEquals(1.0, reserves("error"))
+        assertEquals(0, source.remaining())
     }
 }

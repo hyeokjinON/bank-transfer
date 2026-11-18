@@ -1,0 +1,11 @@
+# P9a 대시보드 공급자 — Git 의 JSON 2장(ConfigMap grafana-dashboards)을 읽기 전용으로 (UI 에서 고친 것은 저장되지 않는다)
+apiVersion: 1
+providers:
+  - name: bank-transfer
+    folder: bank-transfer
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards

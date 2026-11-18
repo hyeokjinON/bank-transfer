@@ -105,3 +105,40 @@ spec:
       ports:
         - {protocol: TCP, port: 9092}
         - {protocol: TCP, port: 9093}
+---
+# api ← Prometheus (monitoring) 만 — 지표 수집 (P9a). namespaceSelector · podSelector 는 한 from 항목 안 (둘 다 맞아야 한다)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: metrics-from-prometheus-api
+spec:
+  podSelector:
+    matchLabels: {app: api}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: monitoring}
+          podSelector:
+            matchLabels: {app: prometheus}
+      ports:
+        - {protocol: TCP, port: 8080}
+---
+# bank-gateway ← Prometheus 만 — 8082 는 송신 API 와 같은 포트라 Prometheus 도 송신 API 에 닿는다:
+# 받아들인 위험 (B5, ADR-0020) — Prometheus Pod 하나만 허용하고, 관리 포트 분리는 다음
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: metrics-from-prometheus-gateway
+spec:
+  podSelector:
+    matchLabels: {app: bank-gateway}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: monitoring}
+          podSelector:
+            matchLabels: {app: prometheus}
+      ports:
+        - {protocol: TCP, port: 8082}

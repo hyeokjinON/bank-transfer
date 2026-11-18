@@ -1,0 +1,10 @@
+$kind: http-request
+name: 8-4 입구로 /actuator/prometheus → 404 (지표는 입구로 안 나간다)
+method: GET
+url: 'http://127.0.0.1:8000/actuator/prometheus'
+order: 4000
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("404", () => pm.response.to.have.status(404));

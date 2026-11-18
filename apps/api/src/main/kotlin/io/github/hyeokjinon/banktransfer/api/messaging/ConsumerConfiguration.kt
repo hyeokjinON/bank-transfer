@@ -1,5 +1,6 @@
 package io.github.hyeokjinon.banktransfer.api.messaging
 
+import io.github.hyeokjinon.banktransfer.api.metrics.TransferMetrics
 import io.github.hyeokjinon.banktransfer.api.alert.AlertNotifier
 import io.github.hyeokjinon.banktransfer.api.config.SuspendBankTransferAdapter
 import io.github.hyeokjinon.banktransfer.gateway.BankGateway
@@ -56,7 +57,8 @@ class ConsumerConfiguration {
 
     @Bean
     @ConditionalOnProperty(prefix = "transfer.consumer", name = ["mode"], havingValue = TransferConsumerProperties.BLOCKING, matchIfMissing = true)
-    fun transferRequestedListener(processor: TransferProcessor, alerts: AlertNotifier) = TransferRequestedListener(alerts, processor::process)
+    fun transferRequestedListener(processor: TransferProcessor, alerts: AlertNotifier, metrics: TransferMetrics) =
+        TransferRequestedListener(alerts, onDeadLetter = metrics::deadLettered, process = processor::process)
 
     /** 어댑터 · 세마포어는 빈으로 올리지 않는다: 원래 토픽 · 재시도 토픽 컨테이너가 이 리스너 빈 하나 = 같은 상한을 쓴다. */
     @Bean
@@ -66,10 +68,12 @@ class ConsumerConfiguration {
         client: BankGateway,
         alerts: AlertNotifier,
         props: TransferConsumerProperties,
+        metrics: TransferMetrics,
     ) = SuspendingTransferRequestedListener(
         processor,
         SuspendBankTransferAdapter(client),
         Semaphore(props.coroutine.maxInFlightBankCalls),
         alerts = alerts,
+        onDeadLetter = metrics::deadLettered,
     )
 }

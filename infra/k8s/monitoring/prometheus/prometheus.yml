@@ -1,0 +1,48 @@
+# P9a Prometheus 설정 (스펙 §6, 결정 D4). 수집 · 평가 5초, bank-transfer namespace 의 어노테이션 붙은 Pod 만 (Role 권한 — base/rbac-prometheus.yaml).
+# 라벨: namespace · pod · node · app 을 relabel 로 붙인다 (앱은 application 공통 태그만 낸다 — Pod · 노드는 여기서).
+global:
+  scrape_interval: 5s
+  scrape_timeout: 4s           # 수집 간격보다 짧아야 한다
+  evaluation_interval: 5s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: [alertmanager.monitoring.svc.cluster.local:9093]
+
+scrape_configs:
+  - job_name: bank-transfer
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [bank-transfer]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        regex: "true"
+        action: keep
+      # 노드가 정해지지 않은(Pending) · 끝난 Pod 는 수집 대상이 아니다 (P8-3c 필수 분산의 Pending 게이트웨이 등)
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: Pending|Succeeded|Failed
+        action: drop
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        regex: '([^:]+)(?::\d+)?;(\d+)'
+        replacement: '$1:$2'
+        target_label: __address__
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        regex: (.+)
+        target_label: __metrics_path__
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - source_labels: [__meta_kubernetes_pod_node_name]
+        target_label: node
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        target_label: app
+  # 자기 자신 — 전체 시계열 수(prometheus_tsdb_head_series)를 M4 에서 잰다 (위험 B2). namespace 라벨이 없어 ScrapeTargetDown 대상이 아니다
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]

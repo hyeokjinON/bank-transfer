@@ -1,5 +1,8 @@
 server:
   shutdown: graceful           # P8-2: 내려갈 때 새 연결을 받지 않고 처리 중인 요청을 끝낸다. Boot 4 기본값이지만 명시 (GracefulShutdownConfigTest)
+  tomcat:
+    mbeanregistry:
+      enabled: true            # P9a: Tomcat 스레드 지표(tomcat_threads_busy_threads) — 꺼져 있으면 Micrometer 가 읽을 MBean 이 없다
 
 spring:
   application:
@@ -9,7 +12,7 @@ spring:
   task:
     scheduling:
       pool:
-        size: 4   # 발행기(0.5초) · 정리 작업(10초) · 일마감 대사(01 ~ 06시) · 보존 배치(06:30, 밀린 행이 많으면 길다)가 서로 막지 않게 (P5-2 에서 3 → 4)
+        size: 5   # 발행기(0.5초) · 정리 작업(10초) · 상태 지표 조회(10초, P9a) · 일마감 대사(01 ~ 06시) · 보존 배치(06:30, 밀린 행이 많으면 길다)가 서로 막지 않게 (P5-2 3 → 4, P9a 4 → 5)
   threads:
     virtual:
       enabled: false   # 가상 스레드 (P7): 켜면 Tomcat 요청 · 앱 실행기 · @Scheduled · Kafka 리스너가 가상 스레드. 기본은 끔 — 켤지는 ADR-0014, 측정은 VT=1 (OPERATION §13)
@@ -86,7 +89,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info   # prometheus 는 K8s 에서만 연다 (ConfigMap app-config) — Compose nginx 입구로 새지 않게, 결정 D2·D6
   endpoint:
     health:
       probes:
@@ -94,6 +97,16 @@ management:
   info:
     env:
       enabled: true   # info.* 설정을 /actuator/info 에 보인다 (P4-2: 차감 전략)
+  metrics:
+    tags:
+      application: ${spring.application.name}   # P9a 공통 태그. Pod · 노드는 Prometheus 가 붙인다 (relabel)
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true             # p95 를 Prometheus 가 계산하게 (histogram_quantile)
+      minimum-expected-value:
+        http.server.requests: 5ms              # 버킷 범위를 5ms ~ 10s 로 묶는다 — 시계열 수 (위험 B2)
+      maximum-expected-value:
+        http.server.requests: 10s
 
 transfer:
   retry:                       # 재시도 토픽 (P3-3b). 은행에 보내지도 못한 메시지만 온다
@@ -157,6 +170,11 @@ alert:
     bot-token: ${ALERT_TELEGRAM_BOT_TOKEN:}
     chat-id: ${ALERT_TELEGRAM_CHAT_ID:}
     base-url: https://api.telegram.org
+
+banktransfer:
+  metrics:                     # P9a 상태 Gauge (스펙 §4-2). 조회 주기 · 켜기만 둔다 (Prometheus 노출은 kind 매니페스트에서)
+    db-poll-enabled: true      # 테스트는 끈다 (ApiIntegrationTest — refresh() 를 직접 부른다)
+    db-poll-interval: 10s      # 조회 시간이 50ms 를 넘으면 V7 인덱스를 검토 (위험 B1, docs/perf/p9a-metrics.md)
 
 info:
   instance: ${INFO_INSTANCE:local}   # 어느 api 인가 (P8-2). Compose 가 api-1 · api-2 를 넣는다 — nginx 뒤 분배 확인 · ShedLock locked_by

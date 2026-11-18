@@ -52,9 +52,9 @@ class DataRetentionSchedulerTest {
     }
 
     @Test
-    fun `스케줄 풀은 4 - 밀린 행이 많은 첫 실행이 길어져도 발행기 · 정리 작업 · 대사를 굶기지 않는다`() {
+    fun `스케줄 풀은 5 - 밀린 행이 많은 첫 실행이 길어져도 발행기 · 정리 작업 · 상태 지표 조회 · 대사를 굶기지 않는다`() {
         val yml = Binder(ConfigurationPropertySources.from(YamlPropertySourceLoader().load("application", ClassPathResource("application.yml"))))
 
-        assertEquals(4, yml.bind("spring.task.scheduling.pool.size", Int::class.javaObjectType).get())
+        assertEquals(5, yml.bind("spring.task.scheduling.pool.size", Int::class.javaObjectType).get())
     }
 }

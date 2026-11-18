@@ -1,0 +1,67 @@
+# P9a Grafana (스펙 §5 · §6) — 데이터소스 · 대시보드는 ConfigMap 프로비저닝 (Git 이 원본, UI 에서 고친 것은 저장되지 않는다).
+# 익명 = Viewer. 관리자 비밀번호는 up.sh 가 임의로 만든 Secret grafana-admin (저장소에 없다). 밖으로 나가는 확인(업데이트 · 통계)은 끈다
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  labels: {app: grafana}
+spec:
+  selector: {app: grafana}
+  ports:
+    - {name: http, port: 3000}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: grafana}
+  template:
+    metadata:
+      labels: {app: grafana}
+    spec:
+      automountServiceAccountToken: false   # 쿠버네티스 API 를 쓰지 않는다
+      nodeSelector: {bank-transfer/role: infra}
+      tolerations:
+        - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+      securityContext: {runAsUser: 472, runAsGroup: 0, runAsNonRoot: true, fsGroup: 472}
+      containers:
+        - name: grafana
+          image: grafana/grafana   # 태그 = versions.env GRAFANA_VERSION (apply_overlay)
+          env:
+            - {name: GF_AUTH_ANONYMOUS_ENABLED, value: "true"}
+            - {name: GF_AUTH_ANONYMOUS_ORG_ROLE, value: Viewer}
+            - {name: GF_SECURITY_ADMIN_USER, value: admin}
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom: {secretKeyRef: {name: grafana-admin, key: password}}
+            - {name: GF_USERS_ALLOW_SIGN_UP, value: "false"}
+            - {name: GF_ANALYTICS_REPORTING_ENABLED, value: "false"}
+            - {name: GF_ANALYTICS_CHECK_FOR_UPDATES, value: "false"}
+            - {name: GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES, value: "false"}
+            - {name: GF_NEWS_NEWS_FEED_ENABLED, value: "false"}
+            - {name: GF_PLUGINS_PREINSTALL_DISABLED, value: "true"}   # 기본 플러그인 4개를 grafana.com 에서 버전 없이 받는다 — 끈다
+          ports:
+            - {name: http, containerPort: 3000}
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 5
+          resources:
+            requests: {memory: 128Mi, cpu: 50m}
+            limits: {memory: 256Mi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/grafana}
+            - {name: datasources, mountPath: /etc/grafana/provisioning/datasources}
+            - {name: dashboard-providers, mountPath: /etc/grafana/provisioning/dashboards}
+            - {name: dashboards, mountPath: /etc/grafana/dashboards}
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: datasources
+          configMap: {name: grafana-datasources}
+        - name: dashboard-providers
+          configMap: {name: grafana-dashboard-providers}
+        - name: dashboards
+          configMap: {name: grafana-dashboards}

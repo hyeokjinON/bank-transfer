@@ -24,6 +24,10 @@ spec:
   template:
     metadata:
       labels: {app: bank-gateway}
+      annotations:   # P9a: Prometheus 가 리더 · 대기 둘 다 직접 수집 (Service 는 리더만 고르지만 수집은 Pod 로 간다)
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8082"
+        prometheus.io/path: /actuator/prometheus
     spec:
       serviceAccountName: bank-gateway   # Lease · ConfigMap · 자기 Pod 라벨 (rbac-gateway.yaml)
       enableServiceLinks: false   # bank-gateway Service 가 BANK_GATEWAY_PORT=tcp://… 를 넣으면 bank.gateway.port 바인딩이 깨진다

@@ -130,6 +130,32 @@ flowchart LR
 - 리더 선출 (fabric8 `LeaderElector`, 로컬 워치독이 갱신 기한 + 0.25초 안에 자기 차단) → 리더 라벨 (접속 뒤 붙이고, 교대 때 끊은 뒤 뗀다) → 전문번호 구간 예약(선출과 독립 — 두 대가 겹쳐도 번호가 안 겹친다). 정상 교대: 새 요청 거절 → 처리 중 전문 비우기 → 연결 끊기 → 라벨 떼기 → Lease 반납 (SIGTERM 종료 훅). 선출은 K8s 에서만 켜진다 (기본 꺼짐).
 - 두 복제본이 한 노드에 있으면 이중화가 아니다 — P8-3c 부터 `DoNotSchedule` 분산으로 한 노드에 놓일 수 없다. 워커가 빠지면 대체 게이트웨이는 Pending, 돌아오면 그 워커에 뜬다 ([ADR-0019](docs/adr/0019-gateway-required-spread.md) · OPERATION §16-3).
 
+### 관측 (P9a, 제안)
+> [ADR-0020](docs/adr/0020-observability-metrics-alerts.md) (제안 — 머지 뒤 정리 PR 에서 "(제안)" 을 뗀다), [스펙](docs/superpowers/specs/2026-11-17-p9a-metrics-design.md), [측정 결과](docs/perf/p9a-metrics.md). kind 에만 있다. 운영은 [OPERATION §17](OPERATION.md#17-관측--지표--대시보드--알림-p9a).
+
+```mermaid
+flowchart LR
+    subgraph APP["워커 (role=app)"]
+        API["api ×2<br/>/actuator/prometheus"]
+        GW["bank-gateway ×2 (리더 · 대기)<br/>/actuator/prometheus"]
+    end
+    subgraph MON["제어 노드 — namespace monitoring"]
+        P["Prometheus<br/>수집 · 평가 5초 · 규칙 11"]
+        AM["Alertmanager<br/>묶기 10초 · 억제"]
+        SK["alert-sink<br/>busybox httpd CGI → 로그"]
+        GR["Grafana<br/>대시보드 2장"]
+    end
+    P -- "Pod 직접 5초<br/>(Role: Pod get · list · watch)" --> API & GW
+    P -- "규칙 → 알림" --> AM
+    AM -- "웹훅 /cgi-bin/sink" --> SK
+    GR -- "질의" --> P
+    DB[("MySQL")] -. "상태 Gauge 10초 조회" .-> API
+```
+- **세는 지점**: 게이트웨이는 `BankConnectionOwner.withClient` **한 점**에서 은행 호출 결과(`ok | rejected | not_sent | unknown`)와 안 보냄 사유(`NotSentReason`)를 센다 — 문자열 매칭 없이 던지는 곳마다 사유를 넣는다. api 는 도메인 **관찰 포트** `TransferObserver`(modules/transfer)를 저장 메서드가 성공을 돌려준 **뒤에만** 불러 사건 Counter · Timer 를 센다 (트랜잭션 안에서 세지 않아 롤백에도 두 번 세지 않는다). 상태(미완료 건 수 · 가장 오래된 나이 · 미발행 아웃박스)는 **상태 Gauge** 가 10초마다 DB 를 읽어 내고, 나이는 SQL `NOW(6)` 로 계산하며 조회가 실패하면 NaN 이다. 라벨에 사용자 · 계좌 · 금액은 없다.
+- **수집 경로**: Prometheus 는 Operator 없이 Deployment + 설정 파일이고 `kubernetes_sd`(pod, `bank-transfer` namespace)로 Service 를 거치지 않고 Pod 를 직접 읽는다 (어노테이션 `prometheus.io/*` 인 Pod 만). 권한은 Role + RoleBinding(`base/rbac-prometheus.yaml`), 네트워크는 NetworkPolicy `metrics-from-prometheus-*` 로 Prometheus 만 api:8080 · 게이트웨이:8082 에 닿는다. 입구 HTTPRoute 는 허용 목록(`/api/v1` · `/admin` · `/actuator/health` · `/actuator/info`)이라 `/actuator/prometheus` 는 입구로 404 다. 관측 4개는 제어 노드에 있어 워커를 죽여도 산다. 받아들인 위험: Prometheus 가 닿는 게이트웨이 8082 는 송신 API 와 같은 포트다 (관리 포트 분리는 다음 — ADR-0020 B5).
+- **알림 경로**: 규칙(`alerts.yml` 11개, 점검 시간은 `banktransfer_bank_maintenance` 로 제외) → Alertmanager(묶기 · 억제 · 해제 알림) → alert-sink(웹훅 수신기, 받은 알림 = 로그. 운영이면 Slack · 텔레그램 자리). 기존 P5 `AlertNotifier`(일마감 대사 결과)와 별개이고 Alertmanager 는 api 를 거치지 않는다 — 감시 대상이 죽어도 알림 경로가 산다 (ADR-0020 D9).
+- 카운터는 근사치(Pod 재시작 · Kafka 최소 한 번 전달)이고 돈의 정답은 DB 다. 성공 기준 · 숫자는 측정 결과 문서.
+
 ## 2. 모듈
 
 | 모듈 | 역할 | 의존 (Gradle) | 프레임워크 |
@@ -494,3 +520,4 @@ flowchart TB
 | [0017](docs/adr/0017-kubernetes-kind.md) | 같은 구성을 kind(Kubernetes)로 — Envoy Gateway 입구(재시도 없음), preStop 10s · 프로브 3종, 게이트웨이 readiness 에만 은행 연결, NetworkPolicy 기본 거부, 인프라 · 모의 은행은 제어 노드, 연결 주인 하나는 P8-3b |
 | [0018](docs/adr/0018-gateway-ha-leader-election.md) | 게이트웨이 2대 active-standby — K8s Lease 리더 선출, 리더 라벨 + 둘 다 Ready, 전문번호 ConfigMap 구간 예약, 정상 교대 순서(종료 훅), 규격 v0.4 `3001` |
 | [0019](docs/adr/0019-gateway-required-spread.md) | 게이트웨이 두 복제본 필수 분산 — `DoNotSchedule` + `matchLabelKeys`(롤링 교착 방지) + `nodeTaintsPolicy Ignore`(빠진 워커로 복귀) |
+| [0020](docs/adr/0020-observability-metrics-alerts.md) | (제안) 관측 — 사건 Counter · Timer + DB 를 읽는 상태 Gauge, Prometheus 는 Operator 없이 Pod 직접 수집, 알림 규칙 11개 → Alertmanager → alert-sink(대역), 입구 HTTPRoute 허용 목록, 점검 시간은 앱 설정 한 곳 |

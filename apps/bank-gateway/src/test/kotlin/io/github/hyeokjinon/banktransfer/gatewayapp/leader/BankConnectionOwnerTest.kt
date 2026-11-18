@@ -4,6 +4,7 @@ import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
 import io.github.hyeokjinon.banktransfer.gateway.BankNotSentException
 import io.github.hyeokjinon.banktransfer.gateway.InMemoryTranNoSource
+import io.github.hyeokjinon.banktransfer.gateway.NotSentReason
 import io.github.hyeokjinon.banktransfer.gateway.TranNoSource
 import io.github.hyeokjinon.banktransfer.gatewayapp.health.BankConnectionHealthIndicator
 import io.github.hyeokjinon.banktransfer.mockbank.MockBankServer
@@ -52,7 +53,7 @@ class BankConnectionOwnerTest {
     fun `리더가 아니면 연결 없음 - 요청은 BankNotSentException, 헬스는 UP(standby)`() {
         assertFalse(owner.isLeader)
         assertNull(owner.current())
-        assertIs<BankNotSentException>(failureOf { owner.inquireName("090", "1002123456789") })
+        assertEquals(NotSentReason.NOT_LEADER, assertIs<BankNotSentException>(failureOf { owner.inquireName("090", "1002123456789") }).reason)
 
         val health = BankConnectionHealthIndicator(owner).health()
         assertEquals(Status.UP, health.status)
@@ -94,6 +95,16 @@ class BankConnectionOwnerTest {
         assertTrue(owner.current() !== first)
         assertEquals(2, prepared.get())
         assertEquals(1, bank.peakSessions())   // 은행 쪽에서도 동시에 둘이 아니었다
+    }
+
+    @Test
+    fun `정상 교대에 들어가면 새 요청은 STEPPING_DOWN 사유로 안 보냄`() {
+        owner.startLeading()
+        await.atMost(Duration.ofSeconds(5)) untilAsserted { assertTrue(owner.current()!!.isConnected) }
+
+        owner.stepDown(Duration.ofSeconds(1))
+
+        assertEquals(NotSentReason.STEPPING_DOWN, assertIs<BankNotSentException>(failureOf { owner.inquire("T261117STEPDOWN0001") }).reason)
     }
 
     @Test

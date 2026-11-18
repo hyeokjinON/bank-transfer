@@ -38,6 +38,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
     runtimeOnly("com.mysql:mysql-connector-j")
+    // P9a 지표 노출 /actuator/prometheus (버전은 Boot BOM — Micrometer 1.17.x). 코드는 Micrometer API 만 쓴다
+    runtimeOnly("io.micrometer:micrometer-registry-prometheus")
 
     testImplementation(project(":apps:mock-bank"))
     testImplementation(testFixtures(project(":modules:bank-gateway-http")))   // TcpCutProxy · GatewayProcess (P8-1)

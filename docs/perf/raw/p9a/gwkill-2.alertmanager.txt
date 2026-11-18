@@ -1,0 +1,6 @@
+1794887353619 [{"annotations":{"summary":"k8s smoke test alert"},"endsAt":"2026-11-17T03:49:37.000Z","fingerprint":"db951e70cfea6029","receivers":[{"name":"alert-sink"}],"startsAt":"2026-11-17T03:49:37.000Z","status":{"inhibitedBy":[],"mutedBy":[],"silencedBy":[],"state":"active"},"updatedAt":"2026-11-17T03:48:37.486Z","labels":{"alertname":"SmokeTest1794887317","severity":"info"}}]
+1794887368920 [{"annotations":{"summary":"k8s smoke test alert"},"endsAt":"2026-11-17T03:49:37.000Z","fingerprint":"db951e70cfea6029","receivers":[{"name":"alert-sink"}],"startsAt":"2026-11-17T03:49:37.000Z","status":{"inhibitedBy":[],"mutedBy":[],"silencedBy":[],"state":"active"},"updatedAt":"2026-11-17T03:48:37.486Z","labels":{"alertname":"SmokeTest1794887317","severity":"info"}}]
+1794887384207 []
+1794887399488 []
+1794887414756 []
+1794887421609 []

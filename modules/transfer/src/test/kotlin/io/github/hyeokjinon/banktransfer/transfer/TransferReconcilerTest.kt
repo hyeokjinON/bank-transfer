@@ -103,10 +103,12 @@ class TransferReconcilerTest {
     private val gaveUp = mutableListOf<Transfer>()
     private val abandonedTransfers = mutableListOf<Transfer>()
     private val itemErrors = mutableListOf<Pair<Transfer, Exception>>()
+    private val observer = RecordingObserver()
     private fun reconciler(maxInquiries: Int = 10) = TransferReconciler(
         store, inquiry, Clock.fixed(now, ZoneOffset.UTC), Duration.ofSeconds(30), maxInquiries, 100,
         onGiveUp = { gaveUp += it }, onAbandon = { abandonedTransfers += it },
         onItemError = { t, e -> itemErrors += t to e },
+        observer = observer,
     )
 
     private var seq = 0
@@ -347,5 +349,56 @@ class TransferReconcilerTest {
 
         assertEquals(0, result.errors)
         assertTrue(itemErrors.isEmpty())
+    }
+
+    // --- P9a 관찰자 ---
+
+    @Test
+    fun `관찰자 - 결과조회 처리됨 · 처리 안 됨 · 모름을 센다, 확정은 접수 → 확정 시간과 함께`() {
+        val done = transfer(UNKNOWN)
+        val notDone = transfer(UNKNOWN)
+        val unknown = transfer(UNKNOWN)
+        inquiry.outcomes[done.reference] = { InquiryOutcome.Processed }
+        inquiry.outcomes[notDone.reference] = { InquiryOutcome.NotProcessed("2001") }
+        inquiry.outcomes[unknown.reference] = { InquiryOutcome.Unknown }
+
+        reconciler().reconcile()
+
+        assertEquals(
+            listOf("inquired:COMPLETED", "final:COMPLETED:0", "inquired:FAILED", "final:FAILED:0", "inquired:STILL_UNKNOWN"),
+            observer.events,
+        )
+    }
+
+    @Test
+    fun `관찰자 - 연결 없음(Unavailable)은 결과조회로 세지 않는다`() {
+        val t = transfer(UNKNOWN)
+        inquiry.outcomes[t.reference] = { InquiryOutcome.Unavailable }
+
+        reconciler().reconcile()
+
+        assertEquals(emptyList(), observer.events)
+    }
+
+    @Test
+    fun `관찰자 - 재발행과 포기(E001) - 포기는 FAILED 확정도 센다`() {
+        transfer(RECEIVED, sendingAt = now.minusSeconds(600), updatedAt = now.minusSeconds(400))
+        transfer(RECEIVED, sendingAt = now.minusSeconds(600), updatedAt = now.minusSeconds(400), republishCount = 3)
+
+        reconciler().reconcile()
+
+        assertEquals(listOf("republished", "abandoned", "final:FAILED:0"), observer.events)
+    }
+
+    @Test
+    fun `관찰자 - 확정 저장이 예외면 그 건은 세지 않는다 (건 격리와 같다)`() {
+        val broken = transfer(UNKNOWN)
+        store.failThrowsFor += broken.id
+        inquiry.outcomes[broken.reference] = { InquiryOutcome.NotProcessed("2001") }
+
+        reconciler().reconcile()
+
+        assertEquals(1, itemErrors.size)
+        assertEquals(emptyList(), observer.events)
     }
 }

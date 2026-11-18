@@ -1,6 +1,7 @@
 package io.github.hyeokjinon.banktransfer.gateway.http
 
 import io.github.hyeokjinon.banktransfer.gateway.BankNotSentException
+import io.github.hyeokjinon.banktransfer.gateway.NotSentReason
 import io.github.hyeokjinon.banktransfer.gateway.BankTimeoutException
 import io.github.hyeokjinon.banktransfer.gateway.BankUnavailableException
 import java.net.ConnectException
@@ -22,7 +23,7 @@ object HttpFailures {
 
     fun fromTransport(error: Throwable): RuntimeException =
         if (causes(error).any(::isBeforeRequest)) {
-            BankNotSentException("gateway not reached: ${rootMessage(error)}")
+            BankNotSentException("gateway not reached: ${rootMessage(error)}", reason = NotSentReason.GATEWAY_UNREACHABLE)
         } else {
             BankUnavailableException("gateway call failed, the request may have reached the bank: ${rootMessage(error)}", error)
         }
@@ -31,7 +32,7 @@ object HttpFailures {
         val error = GatewayJson.errorOrNull(body)
         return when {
             status == 503 && error?.code == GatewayErrorCodes.BANK_NOT_SENT ->
-                BankNotSentException("gateway: ${error.message}")
+                BankNotSentException("gateway: ${error.message}", reason = NotSentReason.OTHER)
             status == 504 && error?.code == GatewayErrorCodes.BANK_TIMEOUT ->
                 BankTimeoutException(error.tranNo ?: 0, Duration.ofMillis(error.timeoutMs ?: 0))
             else -> BankUnavailableException("gateway status=$status code=${error?.code}")

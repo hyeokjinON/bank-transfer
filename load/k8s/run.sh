@@ -9,12 +9,15 @@
 #   gwnode  리더 워커 노드 docker stop → NODE_DOWN_S 뒤 start (H4)   gwcut  리더의 API 서버 연결만 CUT_S 초 차단 — 자기 차단 (H5)
 #   drain 의 기본 대상 = 리더 워커 (H0 · H1)
 #   cleanup 측정 사용자 행 지우기 (끝나면 반드시)
+#   (P9a, PHASE=p9a 만 — 감시 원자료도 남긴다: load/k8s/p9a.sh)
+#   gwzero  게이트웨이 replicas 0 → GW_DOWN_S 뒤 원래 수 (M3)   maint  점검 창을 "지금" 으로 → 점검 중 · 뒤 MAINT_WATCH_S 초 알림 확인 (M5)
 # 확인 (P8-2 load/compose/run.sh 와 같은 기준): 접수된 키 = 출금 행, 전부 COMPLETED, 은행 거래 기록 = 출금 행(같은 거래번호 두 번 0), 잔고 = 원장 합.
 #   통과 못 하면 요약을 .json.invalid 로. 시간 지표는 timeline.sh(1 ~ 2초 간격) → timeline.awk.
 # 사용 (Git Bash · Linux): bash load/k8s/run.sh <동작> <회차>      먼저: bash infra/k8s/up.sh
-# 환경변수: RATE(20) DURATION(60s, rolling 은 150s) ACTION_AT(20) SETTLE(300) BANK_DOWN_S(60) NODE_DOWN_S(420) NODE(drain · node 대상) OVERLAY(tagtrap, local) PHASE(p8-3a | p8-3b | p8-3c, 기본 p8-3a) CUT_S(40, gwcut) NODE_KILL(0 | 1, node · gwnode — 1 이면 docker kill)
+# 환경변수: RATE(20) DURATION(60s, rolling 은 150s) ACTION_AT(20) SETTLE(300) BANK_DOWN_S(60) NODE_DOWN_S(420) NODE(drain · node 대상) OVERLAY(tagtrap, local) PHASE(p8-3a | p8-3b | p8-3c | p9a, 기본 p8-3a) CUT_S(40, gwcut) NODE_KILL(0 | 1, node · gwnode — 1 이면 docker kill) GW_DOWN_S(60, gwzero) MAINT_S(600) MAINT_PREP_S(480) MAINT_LEAD_S(60) MAINT_WATCH_S(1800) (maint)
 # 결과: docs/perf/raw/<PHASE>/<동작>-<회차>.json · .k6.json · .timeline.txt · .rebalance.txt, 작업 파일 build/load-<PHASE>/<동작>-<회차>/
 set -euo pipefail
+RESTORE=   # 셸 환경의 RESTORE 를 물려받지 않는다 (정상 종료에도 되돌리기가 돌지 않게). maint_prepare(M5)가 이 뒤에 maint 로 세운다
 . "$(dirname "$0")/../../infra/k8s/lib.sh"
 RUN=setup
 die() { echo "[$RUN] $*" >&2; exit 1; }
@@ -49,12 +52,14 @@ if [ "${1:-}" = cleanup ]; then
   exit 0
 fi
 
-ACTION=${1:?동작: steady | rolling | podkill | tagtrap | bank | drain | node | gwroll | gwkill | gwnode | gwcut | cleanup}
+ACTION=${1:?동작: steady | rolling | podkill | tagtrap | bank | drain | node | gwroll | gwkill | gwnode | gwcut | gwzero | maint | cleanup}
 ROUND=${2:?회차: 1, 2 …}
-case "$ACTION" in steady|rolling|podkill|tagtrap|bank|drain|node|gwroll|gwkill|gwnode|gwcut) ;; *) die "모르는 동작: $ACTION" ;; esac
+case "$ACTION" in steady|rolling|podkill|tagtrap|bank|drain|node|gwroll|gwkill|gwnode|gwcut|gwzero|maint) ;; *) die "모르는 동작: $ACTION" ;; esac
 [[ "$ROUND" =~ ^[0-9]{1,2}$ ]] || die "회차는 숫자 1 ~ 2자리: $ROUND"
-PHASE=${PHASE:-p8-3a}   # 결과 폴더 — P8-3b 실험은 PHASE=p8-3b, P8-3c(필수 분산)는 p8-3c
-[[ "$PHASE" =~ ^p8-3[abc]$ ]] || die "PHASE 는 p8-3a | p8-3b | p8-3c: $PHASE"
+PHASE=${PHASE:-p8-3a}   # 결과 폴더 — P8-3b 실험은 PHASE=p8-3b, P8-3c(필수 분산)는 p8-3c, P9a(관측)는 p9a
+[[ "$PHASE" =~ ^(p8-3[abc]|p9a)$ ]] || die "PHASE 는 p8-3a | p8-3b | p8-3c | p9a: $PHASE"
+case "$ACTION" in gwzero|maint) [ "$PHASE" = p9a ] || die "$ACTION 은 PHASE=p9a 전용" ;; esac
+if [ "$PHASE" = p9a ]; then . load/k8s/p9a.sh; fi
 RUN="$ACTION-$ROUND"
 OUT_DIR=docs/perf/raw/$PHASE; OUT="$OUT_DIR/$RUN.json"; WORK="build/load-$PHASE/$RUN"
 rm -rf "$WORK"; mkdir -p "$OUT_DIR" "$WORK"; rm -f "$OUT" "$OUT.invalid" "$OUT.tmp" "$OUT_DIR/$RUN.k6.json"
@@ -74,15 +79,18 @@ if [ "$ACTION" = tagtrap ]; then
   echo "[$RUN] 통과 — 같은 태그는 롤링을 일으키지 않는다"; cat "$OUT"; exit 0
 fi
 
+GW_DOWN_S=${GW_DOWN_S:-60}
+MAINT_S=${MAINT_S:-600}; MAINT_PREP_S=${MAINT_PREP_S:-480}; MAINT_LEAD_S=${MAINT_LEAD_S:-60}; MAINT_WATCH_S=${MAINT_WATCH_S:-1800}
 DEF_DURATION=60s; [ "$ACTION" = rolling ] && DEF_DURATION=150s
 [ "$ACTION" = gwroll ] && DEF_DURATION=150s; [ "$ACTION" = gwcut ] && DEF_DURATION=90s   # 롤링은 서로 이어진 두 번의 교체(새 Pod 준비 → 옛 Pod preStop · 종료)라 부하가 더 길어야 R1 비교가 의미 있다
+if [ "$ACTION" = maint ]; then DEF_DURATION="$(( MAINT_LEAD_S + MAINT_S + 120 ))s"; ACTION_AT=${ACTION_AT:-$MAINT_LEAD_S}; fi   # 점검 전 1분 · 점검 · 뒤 2분 동안 부하
 RATE=${RATE:-20}; DURATION=${DURATION:-$DEF_DURATION}; ACTION_AT=${ACTION_AT:-20}; SETTLE=${SETTLE:-300}
 BANK_DOWN_S=${BANK_DOWN_S:-60}; NODE_DOWN_S=${NODE_DOWN_S:-420}
 CUT_S=${CUT_S:-40}
 NODE_KILL=${NODE_KILL:-0}   # docker stop = SIGTERM → 노드 안 Pod 가 정상 종료(교대) / kill = SIGKILL, 갑작스런 노드 손실 (은행에 FIN 없음 · Lease 만료 · 모의 은행 유휴 정리)
 [[ "$NODE_KILL" =~ ^[01]$ ]] || die "NODE_KILL 은 0 | 1: $NODE_KILL"
 node_down() { if [ "$NODE_KILL" = 1 ]; then d kill "$NODE"; else d stop "$NODE"; fi; }
-for v in RATE ACTION_AT SETTLE BANK_DOWN_S NODE_DOWN_S CUT_S; do [[ "${!v}" =~ ^[1-9][0-9]*$ ]] || die "$v 는 양의 정수: ${!v}"; done
+for v in RATE ACTION_AT SETTLE BANK_DOWN_S NODE_DOWN_S CUT_S GW_DOWN_S MAINT_S MAINT_PREP_S MAINT_LEAD_S MAINT_WATCH_S; do [[ "${!v}" =~ ^[1-9][0-9]*$ ]] || die "$v 는 양의 정수: ${!v}"; done
 [[ "$DURATION" =~ ^([1-9][0-9]*)s$ ]] || die "DURATION 은 <숫자>s: $DURATION"
 DURATION_S=${BASH_REMATCH[1]}
 if [ "$ACTION" != steady ] && [ "$ACTION_AT" -ge "$DURATION_S" ]; then die "ACTION_AT($ACTION_AT) < DURATION(${DURATION_S}s) 이어야 한다"; fi
@@ -139,6 +147,8 @@ if [ "$ACTION" = gwroll ]; then   # 게이트웨이 같은 이미지 새 태그 
   kindc load docker-image "bank-transfer/bank-gateway:$NEW" --name "$CLUSTER_NAME" >/dev/null
 fi
 
+if [ "$ACTION" = maint ]; then maint_prepare; fi   # 점검 창을 "지금 + MAINT_PREP_S" 로 → api · 게이트웨이 재시작 (M5)
+
 # --- 2. 시드 ---
 sql < load/compose/cleanup.sql
 sql < load/compose/seed.sql
@@ -152,19 +162,24 @@ MSYS_NO_PATHCONV=1 kubectl --context "$CTX" -n "$NAMESPACE" logs -f -l app=api -
 FOLLOW=$!
 MSYS_NO_PATHCONV=1 kubectl --context "$CTX" -n "$NAMESPACE" logs -f -l app=bank-gateway --prefix --timestamps --tail=0 --max-log-requests=10 > "$WORK/gateway-follow.log" 2>&1 &
 GW_FOLLOW=$!
+AM_POLL=
+if [ "$PHASE" = p9a ]; then p9a_am_start; fi   # Alertmanager 표본 (억제 · 침묵 증거)
 K6_NAME="k6-$PHASE-$RUN"
-RESTORE=   # 동작이 시작돼 되돌려야 할 것 (drain | node | bank | gwcut) — 정상 흐름에서 되돌리면 비운다
+RESTORE=${RESTORE:-}   # (맨 위에서 비웠다 — maint 만 maint_prepare 가 세운 값이 남는다) 동작이 시작돼 되돌려야 할 것 (drain | node | bank | gwcut | gwzero | maint) — 정상 흐름에서 되돌리면 비운다. maint 는 maint_prepare 가 이미 정했다 — 지우지 않는다
 stop_bg() {
-  kill "$SAMPLER" "$FOLLOW" "$GW_FOLLOW" 2>/dev/null || true; d rm -f "$K6_NAME" >/dev/null 2>&1 || true
+  kill "$SAMPLER" "$FOLLOW" "$GW_FOLLOW" ${AM_POLL:+"$AM_POLL"} 2>/dev/null || true; [ -z "${AM_POLL:-}" ] || wait "$AM_POLL" 2>/dev/null || true; d rm -f "$K6_NAME" >/dev/null 2>&1 || true
   case "$RESTORE" in
     drain) ka uncordon "$NODE" >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — 노드 $NODE uncordon" >&2 ;;
     node)  d start "$NODE" >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — 노드 $NODE docker start (Ready 는 직접 확인)" >&2 ;;
     gwcut) k delete -f load/k8s/apicut-netpol.yaml --ignore-not-found >/dev/null 2>&1 || true
            [ -n "${VICTIM:-}" ] && k label pod "$VICTIM" bank-transfer/experiment- >/dev/null 2>&1 || true ;;
     bank)  k scale deploy/mock-bank --replicas=1 >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — mock-bank replicas 1 로 복구" >&2 ;;
+    gwzero) k scale deploy/bank-gateway --replicas="${GW_REPLICAS:-2}" >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — bank-gateway replicas ${GW_REPLICAS:-2} 로 복구" >&2 ;;
+    maint) restore_maint ;;
   esac
 }
 trap stop_bg EXIT
+trap 'exit 130' INT TERM   # 신호도 EXIT 트랩(stop_bg → 되돌리기)을 거치게
 # 다음 회차를 위해: api 두 대가 한 워커에 몰렸으면 다시 나눈다 (ScheduleAnyway · drain 뒤). 판정과 무관한 최선 노력
 spread_nodes() { live_pods api 2>/dev/null | awk 'NF {print $2}' | sort -u | grep -c . || true; }
 restore_spread() {
@@ -192,6 +207,7 @@ restore_spread() {
   fi
 }
 d rm -f "$K6_NAME" >/dev/null 2>&1 || true
+if [ "$ACTION" = maint ]; then maint_wait_start; fi   # 부하 시작 = 점검 시작 MAINT_LEAD_S 초 전 → 동작 시각 = 점검 시작
 echo "[$RUN] k6 ${RATE}건/s × $DURATION → $CLUSTER_NAME-control-plane:30080, 동작 $ACTION @ ${ACTION_AT}s (대상 $NODE)"
 d run --rm --name "$K6_NAME" --network kind \
   -v "$(host_path load):/scripts:ro" -v "$(host_path docs/perf/raw):/out" \
@@ -216,6 +232,10 @@ if [ "$ACTION" != steady ]; then
              VERIFY_DURING=${VERIFY_DURING:-000}   # 연결 실패면 curl 이 000 (문자열로 기록)
              rest=$(( BANK_DOWN_S - ($(date +%s%3N) - TA_MS) / 1000 )); [ "$rest" -gt 0 ] && sleep "$rest"
              k scale deploy/mock-bank --replicas=1 >/dev/null; RESTORE= ;;
+    gwzero)  RESTORE=gwzero; k scale deploy/bank-gateway --replicas=0 >/dev/null
+             rest=$(( GW_DOWN_S - ($(date +%s%3N) - TA_MS) / 1000 )); [ "$rest" -gt 0 ] && sleep "$rest"
+             k scale deploy/bank-gateway --replicas="$GW_REPLICAS" >/dev/null; RESTORE= ;;
+    maint)   sleep "$MAINT_S" ;;   # 점검 창은 시계가 연다 — 동작 시각 = 창 시작 (ACTION_AT = MAINT_LEAD_S)
     drain)   RESTORE=drain; ka drain "$NODE" --ignore-daemonsets --delete-emptydir-data --timeout=240s > "$WORK/drain.txt" 2>&1 \
                || echo "[$RUN] 주의: drain 이 240초 안에 안 끝났다 — $WORK/drain.txt" >&2 ;;
     node)    RESTORE=node; node_down >/dev/null ;;
@@ -246,7 +266,7 @@ case "$ACTION" in
 esac
 # P8-3c: 노드가 돌아온(uncordon) 뒤 Pending 이던 게이트웨이가 그 노드에 다시 뜨는 것까지 표본에 남긴다 (최대 300초, 최선 노력 — 판정 아님)
 case "$ACTION" in
-  drain|node|gwnode)
+  drain|node|gwnode|gwzero)
     for _ in $(seq 300); do
       r=$(k get deploy bank-gateway -o jsonpath='{.status.readyReplicas}' 2>/dev/null); w=$(k get deploy bank-gateway -o jsonpath='{.spec.replicas}' 2>/dev/null)
       [ -n "$w" ] && [ "${r:-0}" = "$w" ] && break
@@ -336,6 +356,10 @@ if [ ${#FAILS[@]} -gt 0 ]; then FINAL="$OUT.invalid"; else FINAL="$OUT"; fi
 mv -f "$OUT.tmp" "$FINAL"
 cp "$WORK/timeline.txt" "$OUT_DIR/$RUN.timeline.txt" || true
 cp "$WORK/rebalance.txt" "$OUT_DIR/$RUN.rebalance.txt" || true
+if [ "$PHASE" = p9a ]; then
+  p9a_capture || echo "[$RUN] 주의: P9a 원자료 일부를 못 남겼다 — $OUT_DIR/$RUN.p9a.json 확인" >&2
+  if [ "$ACTION" = maint ]; then restore_maint; RESTORE=; fi
+fi
 restore_spread || true
 if [ ${#FAILS[@]} -gt 0 ]; then
   die "정확성 확인 실패 — ${FAILS[*]} ($OUT.invalid, 작업 파일 $WORK)"
