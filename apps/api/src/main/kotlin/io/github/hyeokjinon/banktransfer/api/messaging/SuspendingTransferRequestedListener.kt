@@ -1,6 +1,7 @@
 package io.github.hyeokjinon.banktransfer.api.messaging
 
 import io.github.hyeokjinon.banktransfer.api.alert.AlertNotifier
+import io.github.hyeokjinon.banktransfer.api.tracing.TracingFailures
 import io.github.hyeokjinon.banktransfer.transfer.BankTransferOutcome
 import io.github.hyeokjinon.banktransfer.transfer.ProcessResult
 import io.github.hyeokjinon.banktransfer.transfer.SuspendBankTransferPort
@@ -23,6 +24,8 @@ import org.springframework.kafka.retrytopic.SameIntervalTopicReuseStrategy
 import org.springframework.kafka.retrytopic.TopicSuffixingStrategy
 import org.springframework.kafka.support.Acknowledgment
 import java.util.UUID
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 
 /**
  * transfer.requested 컨슈머 — 코루틴 판 (P6-1, ADR-0012). transfer.consumer.mode=coroutine 일 때만 빈이 된다 (기본은 블로킹 [TransferRequestedListener]).
@@ -77,7 +80,10 @@ class SuspendingTransferRequestedListener(
         val transferId = handling.transferIdOf(record.key())
         // P9b: 소비 구간(관측)을 코루틴 문맥에 실어, 어느 스레드에서 이어져도(db 스레드 · 이벤트 루프) 되살린다 (Micrometer 의 asContextElement).
         // 없으면 suspend 뒤에 여는 게이트웨이 HTTP 호출이 접수 trace 밖 새 root 가 된다. Spring 의 PropagationContextElement 는 Reactor 문맥을 우선해 쓸 수 없었다.
-        withContext(observations.asContextElement()) {
+        // E10: 요소를 못 만들면 빈 문맥으로 본문을 (추적 없이) 정확히 한 번 돈다
+        val traceContext: CoroutineContext = runCatching { observations.asContextElement() as CoroutineContext }
+            .onFailure { TracingFailures.report("listener.contextElement", it) }.getOrDefault(EmptyCoroutineContext)
+        withContext(traceContext) {
             val result = process(transferId)
             // RETRY_LATER 면 여기서 던진다 → 프레임워크가 재시도 토픽으로. CONFLICT 알림(텔레그램 HTTP)도 막는 호출이라 db 에서
             withContext(db) { handling.conclude(record, transferId, result) }

@@ -16,7 +16,8 @@ import io.micrometer.tracing.Tracer
 class ReconcileTracing(private val tracer: Tracer) : ReconcileItemScope {
 
     fun reconcile(run: () -> ReconcileResult): ReconcileResult {
-        val span = runCatching { tracer.spanBuilder().setNoParent().name(ROOT).start() }.getOrNull() ?: return run()
+        val span = runCatching { tracer.spanBuilder().setNoParent().name(ROOT).start() }
+            .onFailure { TracingFailures.report("reconcile.open", it) }.getOrNull() ?: return run()
         return tracer.inSpan(span) {
             val result = run()
             runCatching {
@@ -28,7 +29,7 @@ class ReconcileTracing(private val tracer: Tracer) : ReconcileItemScope {
                     .tag("reconcile.still_unknown", result.stillUnknown.toLong())
                     .tag("reconcile.gave_up", result.gaveUp.toLong())
                     .tag("reconcile.errors", result.errors.toLong())
-            }
+            }.onFailure { TracingFailures.report("reconcile.tag", it) }
             result
         }
     }
@@ -43,7 +44,7 @@ class ReconcileTracing(private val tracer: Tracer) : ReconcileItemScope {
                 .tag(TraceKeys.TRANSFER_ID, transfer.id.toString())
                 .tag(TraceKeys.TRANSFER_REFERENCE, transfer.reference)
                 .start()
-        }.getOrNull() ?: return block()
+        }.onFailure { TracingFailures.report("reconcile.item", it) }.getOrNull() ?: return block()
         return tracer.inSpan(span, block)
     }
 

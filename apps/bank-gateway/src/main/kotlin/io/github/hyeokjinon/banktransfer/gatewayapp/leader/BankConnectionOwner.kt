@@ -96,8 +96,9 @@ class BankConnectionOwner(
         val span = tracing.start(type, reference)
         val result = dispatch(call)
         result.whenComplete { value, error ->
-            metrics.recordBankCall(type, System.nanoTime() - startedAt, value, error)
-            tracing.end(span, value, error)
+            // 구간을 먼저 닫는다 — 지표가 던져도 구간이 열린 채 남지 않게 (E10). 지표 실패는 은행 호출 결과에 번지지 않는다
+            runCatching { tracing.end(span, value, error) }.onFailure { log.warn("bank.request 구간 닫기 실패 — {}", it.javaClass.name) }
+            runCatching { metrics.recordBankCall(type, System.nanoTime() - startedAt, value, error) }.onFailure { log.warn("은행 호출 지표 기록 실패 — {}", it.javaClass.name) }
         }
         return result
     }

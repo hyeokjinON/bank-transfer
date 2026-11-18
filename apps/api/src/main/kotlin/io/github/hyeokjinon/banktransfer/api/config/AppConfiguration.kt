@@ -14,6 +14,7 @@ import io.github.hyeokjinon.banktransfer.api.persistence.TransferJpaRepository
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletDebit
 import io.github.hyeokjinon.banktransfer.api.persistence.WalletLedger
 import io.github.hyeokjinon.banktransfer.api.tracing.OutboxTracing
+import io.github.hyeokjinon.banktransfer.api.tracing.TracingFailures
 import io.github.hyeokjinon.banktransfer.gateway.BankGateway
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayClient
 import io.github.hyeokjinon.banktransfer.gateway.BankGatewayConfig
@@ -151,7 +152,21 @@ private val CONTEXT_SNAPSHOTS: ContextSnapshotFactory = ContextSnapshotFactory.b
  * 지금 스레드의 ThreadLocal 문맥(관측 · 추적 — context-propagation 에 등록된 것 모두)을 [executor] 의 작업으로 옮긴다 (P9b).
  * 부르는 순간 잡는다 — 그래서 future 를 만드는 쪽(요청 스레드)에서 불러야 한다. 완료 콜백 스레드(Netty)에서 잡으면 빈 문맥이다.
  */
-internal fun carryContext(executor: Executor): Executor = CONTEXT_SNAPSHOTS.captureAll().wrapExecutor(executor)
+internal fun carryContext(executor: Executor): Executor {
+    // E10: 문맥을 잡지 못하면 실행기 그대로(추적 없이). 작업마다의 복원 · 되돌림이 던져도 작업은 추적 없이 정확히 한 번 돈다
+    val snapshot = runCatching { CONTEXT_SNAPSHOTS.captureAll() }
+        .onFailure { TracingFailures.report("carryContext.capture", it) }.getOrNull() ?: return executor
+    return Executor { task ->
+        executor.execute {
+            val scope = runCatching { snapshot.setThreadLocals() }.onFailure { TracingFailures.report("carryContext.restore", it) }.getOrNull()
+            try {
+                task.run()
+            } finally {
+                runCatching { scope?.close() }.onFailure { TracingFailures.report("carryContext.close", it) }
+            }
+        }
+    }
+}
 
 @Configuration(proxyBeanMethods = false)
 class AppConfiguration {

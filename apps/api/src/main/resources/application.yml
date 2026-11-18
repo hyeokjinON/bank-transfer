@@ -17,7 +17,7 @@ spring:
     virtual:
       enabled: false   # 가상 스레드 (P7): 켜면 Tomcat 요청 · 앱 실행기 · @Scheduled · Kafka 리스너가 가상 스레드. 기본은 끔 — 켤지는 ADR-0014, 측정은 VT=1 (OPERATION §13)
   reactor:
-    context-propagation: auto  # P9b: 코루틴 컨슈머(Spring 이 PropagationContextElement 를 자동으로 붙인다) · 리액터 연산자에서 추적 문맥을 잇는다 (기본 limited)
+    context-propagation: auto  # P9b: 리액터 연산자 · WebClient 신호 사이에서 ThreadLocal 문맥을 되살린다 (기본 limited). 코루틴 컨슈머는 이것으로 이어지지 않는다 — 리스너가 asContextElement 로 따로 싣는다 (스펙 §14-23)
   mvc:
     problemdetails:
       enabled: true   # ApiExceptionHandler 가 ResponseEntityExceptionHandler 를 상속하므로 표준 오류도 ProblemDetail + code 로 응답한다 (Boot 기본 핸들러는 물러난다. 설정은 명시용으로 유지)

@@ -19,7 +19,7 @@ class OutboxTracing(private val tracer: Tracer, private val propagator: Propagat
         val carrier = HashMap<String, String>()
         propagator.inject(context, carrier) { c, key, value -> c?.put(key, value) }
         carrier[TRACEPARENT]?.takeIf(::isValid)
-    }.getOrNull()
+    }.onFailure { TracingFailures.report("outbox.currentTraceParent", it) }.getOrNull()
 
     /** [traceParent] 를 부모로 `outbox.publish` 를 열고 그 범위 안에서 [send]. [send] 의 동기 예외는 구간에 남기고 그대로 던진다 (비동기 브로커 확인 실패는 Kafka producer 구간에 남는다). */
     fun <T> publishing(traceParent: String?, transferId: String, eventId: Long, send: () -> T): T {
@@ -29,7 +29,7 @@ class OutboxTracing(private val tracer: Tracer, private val propagator: Propagat
                 .tag(TraceKeys.TRANSFER_ID, transferId)
                 .tag(TraceKeys.OUTBOX_EVENT_ID, eventId.toString())
                 .start()
-        }.getOrNull() ?: return send()
+        }.onFailure { TracingFailures.report("outbox.open", it) }.getOrNull() ?: return send()
         return tracer.inSpan(span, send)
     }
 

@@ -120,6 +120,33 @@ class BankRequestTracingTest {
         }
     }
 
+    @Test
+    fun `E10 - 지표가 던져도 구간은 먼저 닫혀 있고 호출 결과는 그대로다 (end 가 recordBankCall 앞)`() {
+        val brokenRegistry = object : io.micrometer.core.instrument.simple.SimpleMeterRegistry() {
+            override fun newTimer(
+                id: io.micrometer.core.instrument.Meter.Id,
+                distributionStatisticConfig: io.micrometer.core.instrument.distribution.DistributionStatisticConfig,
+                pauseDetector: io.micrometer.core.instrument.distribution.pause.PauseDetector,
+            ): io.micrometer.core.instrument.Timer {
+                val real = super.newTimer(id, distributionStatisticConfig, pauseDetector)
+                return java.lang.reflect.Proxy.newProxyInstance(javaClass.classLoader, arrayOf(io.micrometer.core.instrument.Timer::class.java)) { _, m, args ->
+                    if (m.name == "record") error("지표 고장") else m.invoke(real, *(args ?: emptyArray()))
+                } as io.micrometer.core.instrument.Timer
+            }
+        }
+        val broken = BankConnectionOwner(tranNo, io.github.hyeokjinon.banktransfer.gatewayapp.metrics.GatewayMetrics(brokenRegistry), BankRequestTracing(tracer)) {
+            BankGatewayClient(BankGatewayConfig("127.0.0.1", bank.boundPort), tranNoSource = tranNo)
+        }
+        try {
+            // 대기자 — not_leader 로 바로 실패하는 future. 지표가 던져도 호출은 정확히 한 번 그 예외로 끝난다
+            val failure = runCatching { broken.transfer("090", "1002123456789", 1_000, "m", REF).get(3, TimeUnit.SECONDS) }.exceptionOrNull()
+            assertNotNull(failure)
+            assertEquals(BankRequestTracing.SPAN_NAME, ended().single().name)   // 구간이 닫혔다
+        } finally {
+            broken.close()
+        }
+    }
+
     private companion object {
         const val REF = "T261118TRACING00001"
         const val SILENT = "9990000000001"

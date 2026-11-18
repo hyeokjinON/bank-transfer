@@ -54,4 +54,50 @@ class BankGatewayAdapterTest {
             registry.removeThreadLocalAccessor("test.p9b.carry")
         }
     }
+
+    @Test
+    fun `carryContext - 문맥을 잡다가 던져도 실행기를 그대로 돌려주고 작업은 한 번 돈다 (E10)`() {
+        val registry = ContextRegistry.getInstance()
+        registry.registerThreadLocalAccessor(brokenAccessor("test.p9b.broken-capture", failOnGet = true, failOnSet = false))
+        val pool = Executors.newSingleThreadExecutor()
+        try {
+            val carried = carryContext(pool)
+            val runs = AtomicInteger()
+            CompletableFuture.supplyAsync({ runs.incrementAndGet() }, carried).get(5, TimeUnit.SECONDS)
+            assertEquals(1, runs.get())
+        } finally {
+            pool.shutdown()
+            registry.removeThreadLocalAccessor("test.p9b.broken-capture")
+        }
+    }
+
+    @Test
+    fun `carryContext - 작업 앞 복원이 던져도 작업은 추적 없이 정확히 한 번 돌고 결과는 그대로다 (E10)`() {
+        val registry = ContextRegistry.getInstance()
+        val local = ThreadLocal<String>()
+        registry.registerThreadLocalAccessor("test.p9b.ok", local)
+        registry.registerThreadLocalAccessor(brokenAccessor("test.p9b.broken-restore", failOnGet = false, failOnSet = true))
+        val pool = Executors.newSingleThreadExecutor()
+        try {
+            local.set("x")
+            val carried = carryContext(pool)
+            local.remove()
+            val runs = AtomicInteger()
+            val result = CompletableFuture.supplyAsync({ runs.incrementAndGet(); "ok" }, carried).get(5, TimeUnit.SECONDS)
+            assertEquals("ok", result)
+            assertEquals(1, runs.get())
+        } finally {
+            pool.shutdown()
+            registry.removeThreadLocalAccessor("test.p9b.broken-restore")
+            registry.removeThreadLocalAccessor("test.p9b.ok")
+        }
+    }
+
+    private fun brokenAccessor(key: String, failOnGet: Boolean, failOnSet: Boolean) = object : io.micrometer.context.ThreadLocalAccessor<String> {
+        override fun key(): Any = key
+        override fun getValue(): String? = if (failOnGet) error("capture boom") else "v"
+        override fun setValue(value: String) { if (failOnSet) error("restore boom") }
+        override fun setValue() {}
+        override fun reset() {}
+    }
 }
