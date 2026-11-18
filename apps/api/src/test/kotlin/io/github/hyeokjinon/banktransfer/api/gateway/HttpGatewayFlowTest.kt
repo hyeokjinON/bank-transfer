@@ -3,13 +3,20 @@ package io.github.hyeokjinon.banktransfer.api.gateway
 import io.github.hyeokjinon.banktransfer.api.config.BankInquiryAdapter
 import io.github.hyeokjinon.banktransfer.api.messaging.OutboxRelay
 import io.github.hyeokjinon.banktransfer.api.support.ApiIntegrationTest
+import io.github.hyeokjinon.banktransfer.api.support.OtlpReceiver
+import io.github.hyeokjinon.banktransfer.api.support.TestSpans
+import io.github.hyeokjinon.banktransfer.api.support.attr
+import io.github.hyeokjinon.banktransfer.api.tracing.OutboxTracing
+import io.github.hyeokjinon.banktransfer.api.tracing.TraceKeys
 import io.github.hyeokjinon.banktransfer.api.web.USER_ID_HEADER
+import io.github.hyeokjinon.banktransfer.gateway.http.GatewayPaths
 import io.github.hyeokjinon.banktransfer.gateway.http.HttpBankGateway
 import io.github.hyeokjinon.banktransfer.gateway.http.fixture.GatewayProcess
 import io.github.hyeokjinon.banktransfer.gateway.http.fixture.TcpCutProxy
 import io.github.hyeokjinon.banktransfer.transfer.TransferReconciler
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus
 import io.github.hyeokjinon.banktransfer.transfer.TransferStore
+import io.opentelemetry.api.trace.SpanKind
 import org.awaitility.kotlin.await
 import org.awaitility.kotlin.untilAsserted
 import org.junit.jupiter.api.AfterAll
@@ -28,6 +35,8 @@ import kotlin.random.Random
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 /**
  * mode=http (P8-1, 스펙 §7): api → (끊는 프록시) → 게이트웨이 앱(별도 JVM) → 모의 은행.
@@ -38,8 +47,17 @@ import kotlin.test.assertNotEquals
 class HttpGatewayFlowTest : ApiIntegrationTest() {
 
     companion object {
+        /** P9b: 게이트웨이 JVM 의 구간을 받는다 (0.1초마다 묶어 보낸다 — 운영 5초). */
+        val otlp = OtlpReceiver()
+
         // Lazy 를 따로 쥔다: 정리에서 "띄운 것만" 닫고, 정리하려고 게이트웨이를 새로 띄우지 않는다
-        private val gatewayHolder = lazy { GatewayProcess.start(bank.boundPort, "--bank.gateway.response-timeout=500ms") }
+        private val gatewayHolder = lazy {
+            GatewayProcess.start(
+                bank.boundPort, "--bank.gateway.response-timeout=500ms",
+                "--management.opentelemetry.tracing.export.otlp.endpoint=${otlp.endpoint}",
+                "--management.opentelemetry.tracing.export.schedule-delay=100ms",
+            )
+        }
         private val gatewayApp: GatewayProcess get() = gatewayHolder.value
         private val proxyHolder = lazy { TcpCutProxy(gatewayApp.port).start() }
         val proxy: TcpCutProxy get() = proxyHolder.value
@@ -59,12 +77,14 @@ class HttpGatewayFlowTest : ApiIntegrationTest() {
                 if (proxyHolder.isInitialized()) proxyHolder.value.close()
             } finally {
                 if (gatewayHolder.isInitialized()) gatewayHolder.value.close()   // 프록시 정리가 던져도 게이트웨이 JVM 은 반드시 닫는다
+                otlp.close()
             }
         }
     }
 
     @Autowired private lateinit var relay: OutboxRelay
     @Autowired private lateinit var store: TransferStore
+    @Autowired private lateinit var spans: TestSpans
 
     override fun bankConnected(): Boolean = gatewayApp.bankConnected()
 
@@ -151,5 +171,55 @@ class HttpGatewayFlowTest : ApiIntegrationTest() {
         val after = store.findById(id)!!
         assertEquals(TransferStatus.COMPLETED, after.status)
         assertEquals(1, bank.depositsOf(account).count { it.reference == after.reference })
+    }
+
+    @Test
+    fun `출금 한 건이 api 와 게이트웨이 두 프로세스에 걸쳐 trace 하나 - 접수 → 발행 → 소비 → HTTP → 게이트웨이 서버 → bank request`() {
+        spans.clear()
+        val account = verifiedBy(user, "1002123456789")
+        val id = request(account, memo())
+        await.atMost(Duration.ofSeconds(20)) untilAsserted {
+            relay.publishPending()
+            assertEquals(TransferStatus.COMPLETED, store.findById(id)!!.status)
+        }
+        val reference = store.findById(id)!!.reference
+
+        await.atMost(Duration.ofSeconds(10)) untilAsserted {
+            val server = assertNotNull(spans.all().singleOrNull { it.kind == SpanKind.SERVER && it.attr(TraceKeys.TRANSFER_ID) == id.toString() })
+            val api = spans.ofTrace(server.traceId)
+            val process = assertNotNull(api.singleOrNull { it.kind == SpanKind.CONSUMER })
+            val clientSpan = assertNotNull(api.singleOrNull { it.kind == SpanKind.CLIENT && it.attr("uri") == GatewayPaths.TRANSFERS })
+            assertTrue(api.any { it.name == OutboxTracing.SPAN_NAME })
+            assertEquals(process.spanId, clientSpan.parentSpanId)   // 컨슈머 스레드에서 연 HTTP 호출
+
+            val gw = otlp.spans().filter { it.traceId == server.traceId }
+            val gwServer = assertNotNull(gw.singleOrNull { it.name == "http post ${GatewayPaths.TRANSFERS}" })
+            val bankRequest = assertNotNull(gw.singleOrNull { it.name == "bank.request" })
+            assertEquals("bank-gateway", gwServer.service)
+            assertEquals(clientSpan.spanId, gwServer.parentSpanId)   // 프로세스 경계 = traceparent 헤더
+            assertEquals(gwServer.spanId, bankRequest.parentSpanId)
+            assertEquals("ok", bankRequest.attributes["bank.outcome"])
+            assertEquals(reference, bankRequest.attributes["transfer.reference"])
+        }
+    }
+
+    @Test
+    fun `1원인증 - 성명조회 · 1원 이체 HTTP 호출이 요청 trace 하나에 (실행기로 넘어가도)`() {
+        spans.clear()
+        val userId = newUserId()
+        val created = client.post().uri("/api/v1/account-verifications")
+            .contentType(MediaType.APPLICATION_JSON).header(USER_ID_HEADER, userId)
+            .body(mapOf("bankCode" to "090", "accountNo" to "1002123456789", "holderName" to "홍길동"))
+            .retrieve().body(mapType)!!
+        val vid = created["id"] as String
+
+        await.atMost(Duration.ofSeconds(10)) untilAsserted {
+            val server = assertNotNull(spans.all().singleOrNull { it.kind == SpanKind.SERVER && it.attr(TraceKeys.VERIFICATION_ID) == vid })
+            val clients = spans.ofTrace(server.traceId).filter { it.kind == SpanKind.CLIENT }.mapNotNull { it.attr("uri") }.toSet()
+            assertEquals(setOf(GatewayPaths.NAME_INQUIRIES, GatewayPaths.TRANSFERS), clients)
+            val bankTypes = otlp.spans().filter { it.traceId == server.traceId && it.name == "bank.request" }
+                .mapNotNull { it.attributes["bank.request.type"] }.toSet()
+            assertEquals(setOf("name", "transfer"), bankTypes)
+        }
     }
 }

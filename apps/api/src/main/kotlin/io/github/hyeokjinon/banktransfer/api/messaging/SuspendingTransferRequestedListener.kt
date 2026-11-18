@@ -8,9 +8,12 @@ import io.github.hyeokjinon.banktransfer.transfer.TransferProcessor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ThreadContextElement
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import io.micrometer.context.ContextSnapshot
+import io.micrometer.context.ContextSnapshotFactory
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.slf4j.LoggerFactory
 import org.springframework.kafka.annotation.BackOff
@@ -21,6 +24,8 @@ import org.springframework.kafka.retrytopic.SameIntervalTopicReuseStrategy
 import org.springframework.kafka.retrytopic.TopicSuffixingStrategy
 import org.springframework.kafka.support.Acknowledgment
 import java.util.UUID
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 
 /**
  * transfer.requested 컨슈머 — 코루틴 판 (P6-1, ADR-0012). transfer.consumer.mode=coroutine 일 때만 빈이 된다 (기본은 블로킹 [TransferRequestedListener]).
@@ -71,9 +76,13 @@ class SuspendingTransferRequestedListener(
     @KafkaListener(topics = [TransferTopics.REQUESTED], groupId = TransferListenerSettings.GROUP_ID)
     suspend fun on(record: ConsumerRecord<String, String>) {
         val transferId = handling.transferIdOf(record.key())
-        val result = process(transferId)
-        // RETRY_LATER 면 여기서 던진다 → 프레임워크가 재시도 토픽으로. CONFLICT 알림(텔레그램 HTTP)도 막는 호출이라 db 에서
-        withContext(db) { handling.conclude(record, transferId, result) }
+        // P9b: 소비 구간이 열린 지금 스레드의 추적 문맥을 잡아, 코루틴이 어느 스레드에서 이어져도(db 스레드 · 이벤트 루프) 되살린다.
+        // 없으면 suspend 뒤에 여는 게이트웨이 HTTP 호출이 접수 trace 밖 새 root 가 된다.
+        withContext(TraceContextElement()) {
+            val result = process(transferId)
+            // RETRY_LATER 면 여기서 던진다 → 프레임워크가 재시도 토픽으로. CONFLICT 알림(텔레그램 HTTP)도 막는 호출이라 db 에서
+            withContext(db) { handling.conclude(record, transferId, result) }
+        }
     }
 
     private suspend fun process(transferId: UUID): ProcessResult {
@@ -107,5 +116,22 @@ class SuspendingTransferRequestedListener(
     fun onDlt(record: ConsumerRecord<String, String>, ack: Acknowledgment) {
         handling.onDlt(record)
         ack.acknowledge()
+    }
+}
+
+/**
+ * 만든 순간 스레드의 ThreadLocal 문맥(관측 · 추적)을 잡아 두고, 코루틴이 이어지는 스레드마다 되살린다 (P9b).
+ * Spring 의 `PropagationContextElement` 를 쓰지 않는 이유: 그 요소는 코루틴 문맥에 Reactor 문맥이 있으면 그것을 우선하는데,
+ * Spring 이 suspend 리스너를 Mono 로 감싸 부를 때의 Reactor 문맥에는 소비 구간이 없다 → 되살려도 빈 문맥이다 (HttpGatewayCoroutineFlowTest 로 확인).
+ */
+private class TraceContextElement(
+    private val snapshot: ContextSnapshot = SNAPSHOTS.captureAll(),
+) : AbstractCoroutineContextElement(Key), ThreadContextElement<ContextSnapshot.Scope> {
+    override fun updateThreadContext(context: CoroutineContext): ContextSnapshot.Scope = snapshot.setThreadLocals()
+
+    override fun restoreThreadContext(context: CoroutineContext, oldState: ContextSnapshot.Scope) = oldState.close()
+
+    companion object Key : CoroutineContext.Key<TraceContextElement> {
+        private val SNAPSHOTS: ContextSnapshotFactory = ContextSnapshotFactory.builder().build()
     }
 }
