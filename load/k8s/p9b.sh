@@ -15,27 +15,39 @@ p9b_tag() {
 }
 
 # 샘플링을 저장소 값(overlays/local 의 1.0)으로 되돌린다 — env 는 Pod 시작 때 읽으므로 다시 시작한다 (여러 번 불려도 된다)
+# 태그는 지금 떠 있는 것(deployed_tag)으로 — 중간에 바뀌었어도 맞춘다. RESTORE 슬롯과 따로 TRACING_DIRTY 깃발로 돈다
 restore_tracing() {
-  apply_overlay local "$P9B_TAG" >/dev/null 2>&1 || true
+  local tag; tag=$(deployed_tag 2>/dev/null || true); tag=${tag:-$P9B_TAG}
+  apply_overlay local "$tag" >/dev/null 2>&1 || true
   k rollout restart deploy/api deploy/bank-gateway >/dev/null 2>&1 || true
   k rollout status deploy/bank-gateway --timeout=300s >/dev/null 2>&1 || true
   k rollout status deploy/api --timeout=420s >/dev/null 2>&1 || true
   echo "[$RUN] 샘플링을 overlays/local 값으로 되돌렸다 — 재시작 중 (kubectl -n bank-transfer rollout status deploy/api)" >&2
 }
 
+# 대상 선택(run.sh 사전 확인) 전에 부른다 — 재시작이 Pod 를 바꾸기 때문
 p9b_prepare() {
   p9b_tag
+  local cur
+  cur=$(k get configmap app-config -o jsonpath='{.data.MANAGEMENT_TRACING_SAMPLING_PROBABILITY}' 2>/dev/null || true)
   if [ "$TRACING" = off ]; then
-    RESTORE=tracing
+    TRACING_DIRTY=1
     trap restore_tracing EXIT   # stop_bg 트랩이 들어서기 전에 죽어도 되돌린다
     trap 'exit 130' INT TERM
     k patch configmap app-config --type merge -p '{"data":{"MANAGEMENT_TRACING_SAMPLING_PROBABILITY":"0.0"}}' >/dev/null
+  elif [ "$cur" != "1.0" ]; then
+    echo "[$RUN] 주의: 샘플링이 '$cur' 였다 (이전 실험이 못 되돌렸나) — 1.0 으로 맞춘다" >&2
+    k patch configmap app-config --type merge -p '{"data":{"MANAGEMENT_TRACING_SAMPLING_PROBABILITY":"1.0"}}' >/dev/null
   fi
   echo "[$RUN] 추적 $TRACING — api · 게이트웨이 재시작 (회차마다 같은 조건)"
   k rollout restart deploy/bank-gateway deploy/api >/dev/null
   k rollout status deploy/bank-gateway --timeout=300s >/dev/null || die "게이트웨이 재시작이 300초 안에 끝나지 않았다"
   k rollout status deploy/api --timeout=420s >/dev/null || die "api 재시작이 420초 안에 끝나지 않았다"
   wait_no_terminating || die "종료 중인 Pod 가 남아 있다"
+  # 리더 라벨이 붙을 때까지 (제한 120초) — 대상 선택이 새 Pod 를 보게
+  local i
+  for (( i = 0; i < 60; i++ )); do [ -n "$(gw_leader)" ] && break; sleep 2; done
+  [ -n "$(gw_leader)" ] || echo "[$RUN] 주의: 게이트웨이 리더 라벨이 120초 안에 안 붙었다 (선출을 끈 구성이면 정상)" >&2
 }
 
 P9B_SEARCH_TRIES=${P9B_SEARCH_TRIES:-4}; P9B_SEARCH_WAIT_S=${P9B_SEARCH_WAIT_S:-5}
@@ -63,7 +75,7 @@ run_py() {
   for py in python3 python; do
     if [ "$("$py" -c 'print(1)' 2>/dev/null | tr -d '\r')" = 1 ]; then "$py" "$@"; return; fi
   done
-  echo '{}'
+  echo null
 }
 
 p9b_capture() {
@@ -78,7 +90,7 @@ p9b_capture() {
   export_err=$(cat "$WORK/api.log" "$WORK/gateway.log" 2>/dev/null | { grep -ac 'Failed to export' || true; })
 
   # T2 모양 — Tempo 를 내린 회차(tempozero)는 그 동안의 trace 를 잃었으므로 건너뛴다
-  local shape='{}' tid t doc
+  local shape=null tid t doc
   : > "$OUT_DIR/$RUN.traces.txt"
   if [ "$TRACING" = on ] && [ "$ACTION" != tempozero ]; then
     sql <<<"SELECT id FROM transfer WHERE $USERS ORDER BY RAND() LIMIT $TRACE_SAMPLE" | tr -d '\r' > "$WORK/trace-sample.txt"
@@ -92,7 +104,7 @@ p9b_capture() {
       fi
       printf '%s\t%s\n' "$tid" "$doc" >> "$OUT_DIR/$RUN.traces.txt"
     done < "$WORK/trace-sample.txt"
-    shape=$(run_py load/k8s/traceshape.py "$OUT_DIR/$RUN.traces.txt")
+    shape=$(run_py load/k8s/traceshape.py "$OUT_DIR/$RUN.traces.txt" || true); [ -n "$shape" ] || shape=null
   fi
 
   # T3 재시도 체인 · 재발행
@@ -103,8 +115,10 @@ p9b_capture() {
     retry_rooted=$({ grep -o '"rootTraceName":"[^"]*"' "$OUT_DIR/$RUN.tempo-search-retry.json" || true; } | { grep -c '"rootTraceName":"http post /api/v1/transfers"' || true; })
     sql <<<"SELECT id FROM transfer WHERE $USERS AND republish_count > 0" | tr -d '\r' > "$WORK/republished.txt"
     repub=$(count_lines < "$WORK/republished.txt"); repub_found=0; repub_recon=0
+    local cap_end=$(( $(date +%s) + 300 ))   # 재발행 검색 전체 상한 5분
     while read -r tid; do
       [ -n "$tid" ] || continue
+      if [ "$(date +%s)" -ge "$cap_end" ]; then echo "[$RUN] 주의: 재발행 trace 검색이 5분 상한에 걸려 멈췄다" >&2; break; fi
       s=$(tempo_search_retry "{ span.transfer.id = \"$tid\" }" 20 2)
       if [ "$(trace_ids <<<"$s" | count_lines)" -ge 2 ]; then repub_found=$(( repub_found + 1 )); fi
       if [ "$(grep -c '"rootTraceName":"transfer.reconcile"' <<<"$s" || true)" -ge 1 ]; then repub_recon=$(( repub_recon + 1 )); fi

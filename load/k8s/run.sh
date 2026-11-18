@@ -65,6 +65,25 @@ if [ "$PHASE" = p9a ]; then . load/k8s/p9a.sh; fi
 if [ "$PHASE" = p9b ]; then . load/k8s/p9b.sh; fi
 RUN="$ACTION-$ROUND"
 OUT_DIR=docs/perf/raw/$PHASE; OUT="$OUT_DIR/$RUN.json"; WORK="build/load-$PHASE/$RUN"
+GW_DOWN_S=${GW_DOWN_S:-60}
+TEMPO_DOWN_S=${TEMPO_DOWN_S:-60}; TRACE_SAMPLE=${TRACE_SAMPLE:-20}; TRACING=${TRACING:-on}   # P9b
+[[ "$TRACING" =~ ^(on|off)$ ]] || die "TRACING 은 on | off: $TRACING"
+if [ "$TRACING" = off ] && [ "$PHASE" != p9b ]; then die "TRACING=off 는 PHASE=p9b 전용"; fi
+if [ "$TRACING" = off ] && [ "$ACTION" != steady ]; then die "TRACING=off 는 steady 동작에서만 (T1 비용 비교) — $ACTION 은 TRACING=on"; fi
+MAINT_S=${MAINT_S:-600}; MAINT_PREP_S=${MAINT_PREP_S:-480}; MAINT_LEAD_S=${MAINT_LEAD_S:-60}; MAINT_WATCH_S=${MAINT_WATCH_S:-1800}
+DEF_DURATION=60s; [ "$ACTION" = rolling ] && DEF_DURATION=150s
+[ "$ACTION" = gwroll ] && DEF_DURATION=150s; [ "$ACTION" = gwcut ] && DEF_DURATION=90s   # 롤링은 서로 이어진 두 번의 교체(새 Pod 준비 → 옛 Pod preStop · 종료)라 부하가 더 길어야 R1 비교가 의미 있다
+if [ "$ACTION" = maint ]; then DEF_DURATION="$(( MAINT_LEAD_S + MAINT_S + 120 ))s"; ACTION_AT=${ACTION_AT:-$MAINT_LEAD_S}; fi   # 점검 전 1분 · 점검 · 뒤 2분 동안 부하
+RATE=${RATE:-20}; DURATION=${DURATION:-$DEF_DURATION}; ACTION_AT=${ACTION_AT:-20}; SETTLE=${SETTLE:-300}
+BANK_DOWN_S=${BANK_DOWN_S:-60}; NODE_DOWN_S=${NODE_DOWN_S:-420}
+CUT_S=${CUT_S:-40}
+NODE_KILL=${NODE_KILL:-0}   # docker stop = SIGTERM → 노드 안 Pod 가 정상 종료(교대) / kill = SIGKILL, 갑작스런 노드 손실 (은행에 FIN 없음 · Lease 만료 · 모의 은행 유휴 정리)
+[[ "$NODE_KILL" =~ ^[01]$ ]] || die "NODE_KILL 은 0 | 1: $NODE_KILL"
+node_down() { if [ "$NODE_KILL" = 1 ]; then d kill "$NODE"; else d stop "$NODE"; fi; }
+for v in RATE ACTION_AT SETTLE BANK_DOWN_S NODE_DOWN_S CUT_S GW_DOWN_S MAINT_S MAINT_PREP_S MAINT_LEAD_S MAINT_WATCH_S TEMPO_DOWN_S TRACE_SAMPLE; do [[ "${!v}" =~ ^[1-9][0-9]*$ ]] || die "$v 는 양의 정수: ${!v}"; done
+[[ "$DURATION" =~ ^([1-9][0-9]*)s$ ]] || die "DURATION 은 <숫자>s: $DURATION"
+DURATION_S=${BASH_REMATCH[1]}
+if [ "$ACTION" != steady ] && [ "$ACTION_AT" -ge "$DURATION_S" ]; then die "ACTION_AT($ACTION_AT) < DURATION(${DURATION_S}s) 이어야 한다"; fi
 rm -rf "$WORK"; mkdir -p "$OUT_DIR" "$WORK"; rm -f "$OUT" "$OUT.invalid" "$OUT.tmp" "$OUT_DIR/$RUN.k6.json"
 
 # --- R3: 같은 태그로 다시 apply (부하 없음) ---
@@ -82,24 +101,7 @@ if [ "$ACTION" = tagtrap ]; then
   echo "[$RUN] 통과 — 같은 태그는 롤링을 일으키지 않는다"; cat "$OUT"; exit 0
 fi
 
-GW_DOWN_S=${GW_DOWN_S:-60}
-TEMPO_DOWN_S=${TEMPO_DOWN_S:-60}; TRACE_SAMPLE=${TRACE_SAMPLE:-20}; TRACING=${TRACING:-on}   # P9b
-[[ "$TRACING" =~ ^(on|off)$ ]] || die "TRACING 은 on | off: $TRACING"
-if [ "$TRACING" = off ] && [ "$PHASE" != p9b ]; then die "TRACING=off 는 PHASE=p9b 전용"; fi
-MAINT_S=${MAINT_S:-600}; MAINT_PREP_S=${MAINT_PREP_S:-480}; MAINT_LEAD_S=${MAINT_LEAD_S:-60}; MAINT_WATCH_S=${MAINT_WATCH_S:-1800}
-DEF_DURATION=60s; [ "$ACTION" = rolling ] && DEF_DURATION=150s
-[ "$ACTION" = gwroll ] && DEF_DURATION=150s; [ "$ACTION" = gwcut ] && DEF_DURATION=90s   # 롤링은 서로 이어진 두 번의 교체(새 Pod 준비 → 옛 Pod preStop · 종료)라 부하가 더 길어야 R1 비교가 의미 있다
-if [ "$ACTION" = maint ]; then DEF_DURATION="$(( MAINT_LEAD_S + MAINT_S + 120 ))s"; ACTION_AT=${ACTION_AT:-$MAINT_LEAD_S}; fi   # 점검 전 1분 · 점검 · 뒤 2분 동안 부하
-RATE=${RATE:-20}; DURATION=${DURATION:-$DEF_DURATION}; ACTION_AT=${ACTION_AT:-20}; SETTLE=${SETTLE:-300}
-BANK_DOWN_S=${BANK_DOWN_S:-60}; NODE_DOWN_S=${NODE_DOWN_S:-420}
-CUT_S=${CUT_S:-40}
-NODE_KILL=${NODE_KILL:-0}   # docker stop = SIGTERM → 노드 안 Pod 가 정상 종료(교대) / kill = SIGKILL, 갑작스런 노드 손실 (은행에 FIN 없음 · Lease 만료 · 모의 은행 유휴 정리)
-[[ "$NODE_KILL" =~ ^[01]$ ]] || die "NODE_KILL 은 0 | 1: $NODE_KILL"
-node_down() { if [ "$NODE_KILL" = 1 ]; then d kill "$NODE"; else d stop "$NODE"; fi; }
-for v in RATE ACTION_AT SETTLE BANK_DOWN_S NODE_DOWN_S CUT_S GW_DOWN_S MAINT_S MAINT_PREP_S MAINT_LEAD_S MAINT_WATCH_S TEMPO_DOWN_S TRACE_SAMPLE; do [[ "${!v}" =~ ^[1-9][0-9]*$ ]] || die "$v 는 양의 정수: ${!v}"; done
-[[ "$DURATION" =~ ^([1-9][0-9]*)s$ ]] || die "DURATION 은 <숫자>s: $DURATION"
-DURATION_S=${BASH_REMATCH[1]}
-if [ "$ACTION" != steady ] && [ "$ACTION_AT" -ge "$DURATION_S" ]; then die "ACTION_AT($ACTION_AT) < DURATION(${DURATION_S}s) 이어야 한다"; fi
+if [ "$PHASE" = p9b ]; then p9b_prepare; fi   # 추적 켬/끔 → api · 게이트웨이 재시작 (T1 — 대상 선택 전에: 재시작이 Pod 를 바꾼다 — 회차마다 같은 조건)
 
 # --- 1. 사전 확인 · 대상 ---
 for dpl in mock-bank bank-gateway api; do
@@ -154,7 +156,6 @@ if [ "$ACTION" = gwroll ]; then   # 게이트웨이 같은 이미지 새 태그 
 fi
 
 if [ "$ACTION" = maint ]; then maint_prepare; fi   # 점검 창을 "지금 + MAINT_PREP_S" 로 → api · 게이트웨이 재시작 (M5)
-if [ "$PHASE" = p9b ]; then p9b_prepare; fi   # 추적 켬/끔 → api · 게이트웨이 재시작 (T1 — 회차마다 같은 조건)
 
 # --- 2. 시드 ---
 sql < load/compose/cleanup.sql
@@ -175,6 +176,7 @@ K6_NAME="k6-$PHASE-$RUN"
 RESTORE=${RESTORE:-}   # (맨 위에서 비웠다 — maint 만 maint_prepare 가 세운 값이 남는다) 동작이 시작돼 되돌려야 할 것 (drain | node | bank | gwcut | gwzero | maint) — 정상 흐름에서 되돌리면 비운다. maint 는 maint_prepare 가 이미 정했다 — 지우지 않는다
 stop_bg() {
   kill "$SAMPLER" "$FOLLOW" "$GW_FOLLOW" ${AM_POLL:+"$AM_POLL"} 2>/dev/null || true; [ -z "${AM_POLL:-}" ] || wait "$AM_POLL" 2>/dev/null || true; d rm -f "$K6_NAME" >/dev/null 2>&1 || true
+  if [ "${TRACING_DIRTY:-0}" = 1 ]; then restore_tracing; TRACING_DIRTY=0; fi   # RESTORE 슬롯과 따로 — 어느 경로로 끝나도
   case "$RESTORE" in
     drain) ka uncordon "$NODE" >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — 노드 $NODE uncordon" >&2 ;;
     node)  d start "$NODE" >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — 노드 $NODE docker start (Ready 는 직접 확인)" >&2 ;;
@@ -183,7 +185,6 @@ stop_bg() {
     bank)  k scale deploy/mock-bank --replicas=1 >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — mock-bank replicas 1 로 복구" >&2 ;;
     gwzero) k scale deploy/bank-gateway --replicas="${GW_REPLICAS:-2}" >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — bank-gateway replicas ${GW_REPLICAS:-2} 로 복구" >&2 ;;
     maint) restore_maint ;;
-    tracing) restore_tracing ;;
     tempozero) km scale deploy/tempo --replicas=1 >/dev/null 2>&1 || true; echo "[$RUN] 비정상 종료 — tempo replicas 1 로 복구" >&2 ;;
   esac
 }
@@ -374,7 +375,7 @@ if [ "$PHASE" = p9a ]; then
 fi
 if [ "$PHASE" = p9b ]; then
   p9b_capture || echo "[$RUN] 주의: P9b 원자료 일부를 못 남겼다 — $OUT_DIR/$RUN.p9b.json 확인" >&2
-  if [ "$TRACING" = off ]; then restore_tracing; RESTORE=; fi
+  if [ "${TRACING_DIRTY:-0}" = 1 ]; then restore_tracing; TRACING_DIRTY=0; fi
 fi
 restore_spread || true
 if [ ${#FAILS[@]} -gt 0 ]; then
