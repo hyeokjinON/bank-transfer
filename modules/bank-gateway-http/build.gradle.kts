@@ -8,6 +8,7 @@ plugins {
 dependencies {
     api(project(":modules:bank-gateway"))   // BankGateway · 예외 3종 · 전문 타입
     implementation("org.springframework:spring-webflux")
+    api("io.micrometer:micrometer-observation")   // P9b: 게이트웨이 호출 관측 · traceparent 자리 (create 의 공개 인자라 api). 추적 라이브러리에는 의존하지 않는다
     implementation("org.springframework:spring-context")   // ReactorClientHttpConnector 의 상위 타입(SmartLifecycle) — spring-webflux 가 끌어오지 않는다
     implementation("io.projectreactor.netty:reactor-netty-http")
     implementation("tools.jackson.core:jackson-databind")

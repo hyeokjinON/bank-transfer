@@ -3,6 +3,7 @@ package io.github.hyeokjinon.banktransfer.api.web
 import io.github.hyeokjinon.banktransfer.account.AccountVerification
 import io.github.hyeokjinon.banktransfer.account.AccountVerificationService
 import io.github.hyeokjinon.banktransfer.account.VerificationStatus
+import io.github.hyeokjinon.banktransfer.api.tracing.TraceTags
 import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceGuard
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
@@ -45,12 +46,13 @@ data class VerificationResponse(
 /** 1원인증 확인 (P1 · P4-1 · P5-1). 요청(POST)은 판(account.verification.web-mode)에 따라 [AsyncVerificationRequestController] 또는 [BlockingVerificationRequestController] 가 받는다 (P6-2). */
 @RestController
 @RequestMapping("/api/v1/account-verifications")
-class AccountVerificationController(private val service: AccountVerificationService, private val maintenance: BankMaintenanceGuard) {
+class AccountVerificationController(private val service: AccountVerificationService, private val maintenance: BankMaintenanceGuard, private val traceTags: TraceTags) {
 
     /** 남의 인증 건이면 404 VERIFICATION_NOT_FOUND (실패 횟수도 늘지 않는다, P4-1). 점검 중이면 503 (P5-1 — 스펙 §4: 요청 · 확인 모두). */
     @PostMapping("/{id}/confirm")
     fun confirm(user: RequestUser, @PathVariable id: UUID, @Valid @RequestBody body: ConfirmRequest): VerificationResponse {
         maintenance.ensureOpen()
+        traceTags.verificationId(id)   // P9b: 확인 server 구간에 인증 건 id
         return VerificationResponse.from(service.confirm(user.id, id, body.code))
     }
 }

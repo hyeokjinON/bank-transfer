@@ -2,6 +2,7 @@ package io.github.hyeokjinon.banktransfer.gateway.http
 
 import com.sun.net.httpserver.HttpServer
 import io.github.hyeokjinon.banktransfer.gateway.BankNotSentException
+import io.micrometer.observation.ObservationRegistry
 import java.net.InetSocketAddress
 import java.time.Duration
 import java.time.LocalDateTime
@@ -15,7 +16,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class WebClientBankGatewayTest : HttpBankGatewayClientContract() {
-    override fun newGateway(settings: HttpGatewaySettings): HttpBankGateway = WebClientBankGateway(settings)
+    override fun newGateway(settings: HttpGatewaySettings, observations: ObservationRegistry): HttpBankGateway = WebClientBankGateway(settings, observations)
 
     /**
      * WebClient 판에만 있는 실패 — 연결 풀 대기열 상한(Reactor Netty 기본 maxConnections × 2).

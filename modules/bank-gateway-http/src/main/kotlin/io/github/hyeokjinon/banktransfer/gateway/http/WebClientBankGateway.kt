@@ -3,6 +3,7 @@ package io.github.hyeokjinon.banktransfer.gateway.http
 import io.github.hyeokjinon.banktransfer.protocol.InquiryResponse
 import io.github.hyeokjinon.banktransfer.protocol.NameInquiryResponse
 import io.github.hyeokjinon.banktransfer.protocol.TransferResponse
+import io.micrometer.observation.ObservationRegistry
 import io.netty.channel.ChannelOption
 import org.springframework.http.MediaType
 import org.springframework.http.client.reactive.ReactorClientHttpConnector
@@ -19,8 +20,12 @@ import java.util.concurrent.CompletableFuture
  *
  * 자동 재시도는 끈다(disableRetry): Reactor Netty 는 재사용하던 연결이 요청 중 끊기면 한 번 다시 보낼 수 있는데,
  * 요청이 정말 안 갔는지 우리가 판단할 수 없다 — 이체가 두 번 갈 여지를 없앤다. 재시도는 Kafka 재시도 토픽 · 정리 작업만 한다.
+ * P9b: [observations] 를 WebClient 에 준다 — Spring 의 클라이언트 관측이 구간을 열고 추적 처리기가 traceparent 헤더를 넣는다 (Boot 의 자동 구성 Builder 를 쓰지 않으므로 직접). 부모는 부르는 스레드의 현재 구간.
  */
-class WebClientBankGateway(private val settings: HttpGatewaySettings) : HttpBankGateway {
+class WebClientBankGateway(
+    private val settings: HttpGatewaySettings,
+    observations: ObservationRegistry = ObservationRegistry.NOOP,
+) : HttpBankGateway {
 
     private val provider: ConnectionProvider = ConnectionProvider.builder("bank-gateway")
         .maxConnections(settings.maxConnections)
@@ -40,6 +45,7 @@ class WebClientBankGateway(private val settings: HttpGatewaySettings) : HttpBank
                     .disableRetry(true),
             ),
         )
+        .observationRegistry(observations)
         .build()
 
     override fun inquireName(bankCode: String, accountNo: String): CompletableFuture<NameInquiryResponse> =

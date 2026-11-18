@@ -3,6 +3,7 @@ package io.github.hyeokjinon.banktransfer.api.web
 import io.github.hyeokjinon.banktransfer.account.AccountVerificationService
 import io.github.hyeokjinon.banktransfer.account.RequestVerification
 import io.github.hyeokjinon.banktransfer.api.config.VerificationProperties
+import io.github.hyeokjinon.banktransfer.api.tracing.TraceTags
 import io.github.hyeokjinon.banktransfer.gateway.BankMaintenanceGuard
 import jakarta.validation.Valid
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
@@ -21,13 +22,14 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/api/v1/account-verifications")
 @ConditionalOnProperty(prefix = "account.verification", name = ["web-mode"], havingValue = VerificationProperties.BLOCKING)
-class BlockingVerificationRequestController(private val service: AccountVerificationService, private val maintenance: BankMaintenanceGuard) {
+class BlockingVerificationRequestController(private val service: AccountVerificationService, private val maintenance: BankMaintenanceGuard, private val traceTags: TraceTags) {
 
     /** join 이 던지는 CompletionException 은 ApiExceptionHandler 가 벗긴다 — 오류 응답은 비동기 판과 같다. */
     @PostMapping
     fun request(user: RequestUser, @Valid @RequestBody body: VerificationRequest): ResponseEntity<VerificationResponse> {
         maintenance.ensureOpen()
         val verification = service.request(RequestVerification(user.id, body.bankCode, body.accountNo, body.holderName)).join()
+        traceTags.verificationId(verification.id)   // P9b
         return ResponseEntity.status(HttpStatus.CREATED).body(VerificationResponse.from(verification))
     }
 }
