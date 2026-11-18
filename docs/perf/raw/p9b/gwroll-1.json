@@ -1,0 +1,13 @@
+{"run":"gwroll-1","action":"gwroll","rate":20,"duration":"150s","action_at_s":20,"t0":"2026-11-18T06:41:53Z","t_action":"2026-11-18T06:42:13.741Z","t_action_end":"2026-11-18T06:42:26.435Z",
+ "prestop_s":10,"gateway_liveness_bank":null,"api_unreachable_toleration_s":300,"node":null,"node_kill":0,"gw_nodes_before":"bank-transfer-worker bank-transfer-worker2","victim":null,"new_tag":"dev-f16cb94-r1794984094",
+ "verify_during_outage":null,"action_within_load":true,"settle_s":1,
+ "first_202":3000,"first_5xx":0,"first_502":0,"first_neterr":0,
+ "retried_requests":0,"accepted_keys":3000,"gave_up_keys":0,"p95_ms":22.410010549999985,
+ "transfers":3000,"not_completed":0,"refunds":0,
+ "negative_balance":0,"balance_ne_ledger":0,
+ "transfer_ne_withdraw":0,"unpublished_outbox":0,
+ "journal_missing":0,"journal_dup":0,"rebalance_lines":0,
+ "api_ready_min":2,"api_recovered_s":0.0,"gw_not_ready_s":0.0,"gw_restarts":0,
+ "node_notready_s":null,"pod_notready_s":null,"replacement_ready_s":null,
+ "gw_leader_before":"bank-gateway-6bbbb96744-hjvjf","bank_sessions_max":1,"bank_sessions_rejected":0,"bank_sessions_evicted":0,"bank_dup_tran_no":0,"unknown_results":0,"gw_lost_s":null,"gw_acquired_s":14.4,"gw_leaderless_s":1.6,"leader_changes":1,
+ "gw_pending_s":0.0,"gw_colocated_s":0.0,"gw_nodes_end":2}

@@ -1,0 +1,5 @@
+{"run":"steady-1","tracing":"on","rate":20,"duration_s":60,"settle_s":1,"transfers":1201,
+ "completed_per_s":19.69,"accept_p95_ms":24.883588,"complete_p95_s":0.4595606449563491,"api_cpu_avg":0.047028460653854215,"gw_cpu_avg":0.008524719098878282,"export_errors":0,
+ "trace_shape":{"traces": 20, "complete": 20, "spans_min": 7, "spans_max": 7, "accept_to_publish_ms_p50": 125.7, "accept_to_publish_ms_p95": 288.3, "consumer_to_bank_ms_p50": 16.5, "consumer_to_bank_ms_p95": 22.1, "bank_ms_p50": 1.6, "bank_ms_p95": 2.8, "e2e_ms_p50": 228.8, "e2e_ms_p95": 350.1},
+ "retry_traces":null,"retry_traces_rooted":null,"republished":null,"republished_found":null,"republished_reconcile_root":null,
+ "not_sent_traces":null,"not_sent_reasons":"","exemplars":36,"exemplar_trace_found":true}

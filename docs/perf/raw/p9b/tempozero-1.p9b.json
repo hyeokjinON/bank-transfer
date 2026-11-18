@@ -1,0 +1,5 @@
+{"run":"tempozero-1","tracing":"on","rate":20,"duration_s":60,"settle_s":1,"transfers":1201,
+ "completed_per_s":19.69,"accept_p95_ms":24.587738,"complete_p95_s":0.487177748447652,"api_cpu_avg":0.04698523051292779,"gw_cpu_avg":0.00891056041914818,"export_errors":12,
+ "trace_shape":null,
+ "retry_traces":null,"retry_traces_rooted":null,"republished":null,"republished_found":null,"republished_reconcile_root":null,
+ "not_sent_traces":null,"not_sent_reasons":"","exemplars":38,"exemplar_trace_found":false}
