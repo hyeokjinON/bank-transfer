@@ -37,6 +37,7 @@ spec:
             - {name: GF_SECURITY_ADMIN_USER, value: admin}
             - name: GF_SECURITY_ADMIN_PASSWORD
               valueFrom: {secretKeyRef: {name: grafana-admin, key: password}}
+            - {name: GF_USERS_VIEWERS_CAN_EDIT, value: "true"}   # 익명 보기 사용자도 Explore(Tempo trace 검색)를 쓰게 한다 — 저장은 못 함. kind 전용, port-forward 로만 접근
             - {name: GF_USERS_ALLOW_SIGN_UP, value: "false"}
             - {name: GF_ANALYTICS_REPORTING_ENABLED, value: "false"}
             - {name: GF_ANALYTICS_CHECK_FOR_UPDATES, value: "false"}
