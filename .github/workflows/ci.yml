@@ -180,7 +180,7 @@ jobs:
           kubectl --context kind-bank-transfer -n envoy-gateway-system logs -l app.kubernetes.io/name=envoy --all-containers --tail=200 || true
           kubectl --context kind-bank-transfer get events -A --sort-by=.lastTimestamp | tail -50 || true
           kubectl --context kind-bank-transfer -n bank-transfer get gateways.gateway.networking.k8s.io,httproutes -o yaml || true
-          for a in prometheus alertmanager alert-sink grafana; do echo "=== monitoring/$a"; kubectl --context kind-bank-transfer -n monitoring logs deploy/$a --tail=200 || true; done
+          for a in prometheus alertmanager alert-sink grafana tempo; do echo "=== monitoring/$a"; kubectl --context kind-bank-transfer -n monitoring logs deploy/$a --tail=200 || true; done
           kubectl --context kind-bank-transfer -n monitoring get pods -o wide || true
       - name: Stop
         if: always()
