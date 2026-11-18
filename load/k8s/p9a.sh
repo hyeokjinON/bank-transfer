@@ -1,7 +1,7 @@
 # P9a 실험 원자료 (스펙 §8) — load/k8s/run.sh 가 PHASE=p9a 일 때 source 한다 (run.sh 의 변수 · 함수를 그대로 쓴다).
 # 남기는 것: docs/perf/raw/p9a/<동작>-<회차>.prom-*.json (Prometheus 질의 결과) · .alert-sink.txt · .alertmanager.txt · .mock-bank-sessions.txt, 숫자 요약 .p9a.json
 # (.log 는 .gitignore 가 무시해 .txt). 숫자: 지표로 본 은행 재연결 vs 모의 은행 로그 재연결 (M1 ≤ 5초), 리더 0 구간, 알림 도착 · 해제 (M2 · M3),
-# 상태 조회 시간 (M4 > 50ms 면 V7), 전체 시계열 수 (B2), 카운터 vs DB (B3), 죽은 Pod 시계열이 끊긴 시각 (B4), 점검 중 · 뒤 알림 (M5),
+# 상태 조회 시간 (M4 > 50ms 면 다음 마이그레이션 인덱스), 전체 시계열 수 (B2), 카운터 vs DB (B3), 죽은 Pod 시계열이 끊긴 시각 (B4), 점검 중 · 뒤 알림 (M5),
 # 억제 증거 (M3 — Alertmanager 가 BankDisconnected 를 suppressed 로 본 표본 수), ScrapeTargetDown Pod 별 첫 firing (M1 노드 kill).
 
 # --- M5: 점검 창을 "지금" 으로 ---

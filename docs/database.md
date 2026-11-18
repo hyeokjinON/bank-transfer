@@ -74,6 +74,7 @@ erDiagram
         VARCHAR event_type
         JSON payload
         DATETIME published_at "NULL = 미발행"
+        VARCHAR55 trace_parent "NULL = 추적 문맥 없음 (P9b)"
     }
     wallet {
         VARCHAR36 user_id PK
@@ -183,6 +184,7 @@ erDiagram
 | `payload` | `JSON` | N | `{"transferId", "occurredAt"}`. eventId 는 이 행의 `id` 라 발행할 때 `JSON_SET(payload, '$.eventId', id)` 로 메시지에 붙인다 |
 | `created_at` | `DATETIME(6)` | N | 이벤트 기록 시각 (이체 저장과 같은 트랜잭션) |
 | `published_at` | `DATETIME(6)` | Y | Kafka 발행 완료 시각. `NULL` = 미발행. 브로커가 받았다고 확인한 뒤 `NOW(6)`로 기록한다. `NOW(6)` 은 세션 시간대를 따르고, 세션 시간대는 JDBC `forceConnectionTimeZoneToSession=true` + `connectionTimeZone=Asia/Seoul` 이 KST 로 맞춘다 (서버 시간대만의 결과가 아니다, §2) |
+| `trace_parent` | `VARCHAR(55)` | Y | 이 행을 쓴 구간(접수 HTTP · 정리 작업 재발행)의 W3C traceparent (P9b, V7). 발행기가 부모로 되살린다. NULL = 구간 없음 → 새 trace |
 
 인덱스: `idx_outbox_unpublished (published_at, id)` — `WHERE published_at IS NULL ORDER BY id LIMIT 100` 를 인덱스만으로 처리.
 발행 뒤 7일이 지난 행은 보존 배치가 지운다 (§4-9). 범위 삭제가 이 인덱스를 탄다 (대표 데이터 1만 행 `EXPLAIN` 에서 `range`, §9). 미발행은 NULL 이라 비교에 걸리지 않는다.
@@ -350,7 +352,7 @@ append-only — 사람이 `resolved_at` · `resolution_note` 만 채운다. DB �
 - 개인정보 원문(인증코드)은 저장하지 않는다. 계좌번호 마스킹: `Transfer.toString()` 은 뒤 4자리만 남겨 로그에 원문이 찍히지 않는다. API 응답 마스킹은 인증 도입 때 적용한다.
 
 ## 8. 마이그레이션 규칙 (Flyway)
-- 파일명: `V<번호>__<설명>.sql` (예 `V1__init.sql`, `V2__transfer_republish.sql`, `V3__wallet.sql`, `V4__daily_reconciliation.sql`, `V5__data_retention.sql`, `V6__shedlock.sql`).
+- 파일명: `V<번호>__<설명>.sql` (예 `V1__init.sql`, `V2__transfer_republish.sql`, `V3__wallet.sql`, `V4__daily_reconciliation.sql`, `V5__data_retention.sql`, `V6__shedlock.sql`, `V7__outbox_trace_parent.sql`).
 - **이미 적용된 파일은 고치지 않는다.** 바꿀 게 있으면 새 버전을 추가한다 (체크섬 불일치로 기동 실패).
 - 앱 기동 시 자동 적용. 테스트(Testcontainers)도 같은 파일로 스키마를 만든다.
 - 큰 테이블 변경(인덱스 추가 등)은 운영 반영 방법(온라인 DDL)을 PR 에 적는다.
@@ -500,3 +502,4 @@ SELECT name, locked_by, locked_at, lock_until, lock_until > UTC_TIMESTAMP(3) AS 
 | 2026-10-29 | V4: Spring Batch 6 메타 표 · bank_statement_line · recon_issue, E002, 대사 동시성 · 운영 쿼리 | P5-1 (ADR-0010) |
 | 2026-11-02 | V5: idx_verification_purge, 보존 정책표(§4-9), 보존 배치 동시성 · 운영 쿼리 | P5-2 (ADR-0011) |
 | 2026-11-11 | V6: shedlock (하루 배치 락, DATETIME(3) · 값은 UTC — KST 정책의 예외) | P8-2 (ADR-0016) |
+| 2026-11-18 | V7: outbox_event.trace_parent (분산 추적 문맥) | P9b (ADR-0021) |

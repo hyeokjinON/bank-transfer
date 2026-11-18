@@ -145,7 +145,7 @@ OpenTelemetry Collector · 꼬리 샘플링, JDBC · SQL 구간, Redis 구간, �
 7. **내보내기 앞 지우개 + 공용 모듈 `modules/tracing`** (새로, E9) — 예외를 구간에 남기면 메시지 · 스택 · 상태 설명이 같이 간다 (예: 잔고 부족 메시지의 사용자 id · 금액, 검증 메시지의 거절된 계좌번호). 보내기 전에 `exception.type` 만 남긴다. 두 앱이 같이 쓴다.
 8. **아웃박스 복원 = 행마다 `outbox.publish` 구간** (§4-1 · §5 표) — 저장한 traceparent 를 부모로 짧은 구간을 열고 그 안에서 send. Kafka 자동 producer 구간은 사용자 속성을 받지 못해 `transfer.id` · `outbox.event_id` 를 이 구간에 둔다. 구간 표에 한 줄 는다.
 9. **WebClient** (§4-4) — 게이트웨이 클라이언트는 `modules/bank-gateway-http` 에서 `WebClient.builder()` 로 직접 만든다 (Boot Builder 아님) → `HttpBankGateway.create(kind, settings, observations)` 로 관측 레지스트리를 넘긴다. JDK 판은 보내는 쪽 관측(`banktransfer.gateway.http.client`)을 손으로 — 모듈은 micrometer-observation 에만 의존.
-10. **코루틴** (§4-4 "정확한 API") — Spring 7.0.9 가 suspend 리스너를 부를 때 자동 문맥 전파가 켜져 있으면 `PropagationContextElement` 를 붙인다 → `spring.reactor.context-propagation=auto` 한 줄 (코드 없음). 비동기 실패 경로의 재시도 발행은 소비 구간 밖이라 새 trace 일 수 있다 (시험 범위 밖).
+10. **코루틴** (§4-4 "정확한 API") — Spring 7.0.9 가 suspend 리스너를 부를 때 자동 문맥 전파가 켜져 있으면 `PropagationContextElement` 를 붙인다 → `spring.reactor.context-propagation=auto` 한 줄 (코드 없음). 비동기 실패 경로의 재시도 발행은 소비 구간 밖이라 새 trace 일 수 있다 (시험 범위 밖). **→ 설정 한 줄로는 부족했다, 23.**
 11. **1원인증 실행기 넘김** (새로) — 성명조회 응답 뒤 1원 이체가 앱 실행기 스레드에서 불려 trace 가 끊긴다 → 요청 스레드에서 ContextSnapshot 을 잡아 실행기를 감싼다.
 12. **`bank.request` 는 Observation 이 아니라 Tracer** (§4-3 "구간(Observation)") — Observation 이면 P9a Timer 와 같은 이름의 지표가 다른 태그로 생긴다. 속성에 `error.type`(클래스 이름) 추가.
 13. **정리 작업 건별 구간 = 도메인 포트 `ReconcileItemScope`** (§4-2) — 결과조회 · 재발행 한 건에 transfer.id 를 붙일 자리. 기본 no-op, apps/api 가 구현.
@@ -158,3 +158,11 @@ OpenTelemetry Collector · 꼬리 샘플링, JDBC · SQL 구간, Redis 구간, �
 20. **로그 줄 모양** (위험 C8) — 실험 도구 · 스모크는 kubectl 시각 열과 부분 문자열만 읽는다 (점검함). Boot 기본 상관 패턴은 통합 테스트로 확인, 비어 있으면 `logging.pattern.correlation` 명시.
 21. **`reconcile.*` 건수는 숫자(long) 속성** (§5 표) — "우리가 붙이는 속성 값은 문자열" 규칙의 의도된 예외. TraceQL 이 `span.reconcile.republished > 0` 처럼 비교하게 하려는 것이다.
 22. **스펙 §8 통합 6(추적 끔에서 기존 흐름 그대로)은 대표 흐름 — 출금 · 1원인증 — 으로 갈음 (전체 스위트를 샘플링 0 으로 다시 돌리지 않음: 전파 코드는 샘플링과 무관하게 같은 길).**
+23. **코루틴 컨슈머는 설정 한 줄로 부족했다 (10 을 고침)** — `spring.reactor.context-propagation=auto` 만으로는 trace 가 이어지지 않았다. Spring 7.0.9 의 `PropagationContextElement` 는 Reactor 문맥을 먼저 쓰는데 거기에 소비 구간이 없고, `bank.transfer` 는 `withContext(db)` 밖에서 돈다. 리스너 `on` 본문 전체를 Micrometer `ObservationRegistry.asContextElement()` 로 감싸 해결했다 (Task 7).
+24. **JDK HttpClient 판은 CLIENT 구간이어야 한다** — 계획의 코드는 INTERNAL 구간을 냈다. 추가한 `JdkClientPropagationTest` 가 잡았고 `RequestReplySenderContext(setter, Kind.CLIENT)` 로 고쳤다.
+25. **E10 을 글자 그대로 지킨다** — 돈 흐름 위의 모든 추적 호출(`Tracer.inSpan` · JDK 관측 · `bank.request` · `TraceTags` · 아웃박스 구간 열기)을 `runCatching` 으로 감싼다 (첫 실패만 WARN, 이후 DEBUG). 업무 블록은 정확히 한 번만 실행된다.
+26. **traceparent 끝 플래그는 비교하지 않는다** — OpenTelemetry 1.62 는 W3C 2단계의 "random trace id" 비트를 켜서 `-03` (샘플링 0 이면 `-02`) 이다. `-01` 문자열 비교 코드는 깨진다.
+27. **Grafana 익명 보기 사용자가 Explore 를 못 열었다** — `GF_USERS_VIEWERS_CAN_EDIT=true` (kind 만, 저장은 여전히 못 한다).
+28. **스모크 [11] 의 검색 · 로그 확인** — Tempo 검색은 시작 · 끝 시각이 필요하고 요청 뒤 약 8초 지나야 보인다(제한된 재시도). `kubectl logs | grep -q` 는 pipefail 아래 SIGPIPE 로 거짓 실패하므로 `grep -c`.
+29. **실험 도구 안전장치** — `run.sh` 는 인자를 검사한 **뒤에** 이전 출력을 지운다 (잘못된 인자가 추적되는 원자료를 지웠었다). `TRACING=off` 는 steady 에만. T1d (Tempo 0대) 는 Tempo 의 emptyDir 을 비운다.
+30. **실제 422 · 400 요청은 구간에 예외를 싣지 않는다** — `ApiExceptionHandler` 가 처리한다. 지우개는 프로브 구간 테스트(지우개를 빼면 실패함)로 증명한다.
