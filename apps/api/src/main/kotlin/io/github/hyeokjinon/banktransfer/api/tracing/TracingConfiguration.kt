@@ -17,7 +17,7 @@ import org.springframework.context.annotation.Configuration
  * - spanExporters: Boot 의 같은 이름 빈(@ConditionalOnMissingBean)을 대신해 모든 내보내기를 지우개로 감싼다 (E9). 감싸는 본문은 modules/tracing 의 [ScrubbingSpanExporter.wrapAll] 하나 (게이트웨이와 공유).
  *   OTLP 내보내기는 management.opentelemetry.tracing.export.otlp.endpoint 가 있을 때만 생긴다 — kind 의 app-config 만 준다 (E3).
  * - actuatorSpans: 헬스 프로브 · Prometheus 수집 요청 구간은 내보내지 않는다 (지표는 그대로).
- * - emptyReconcileSpans: 건수가 모두 0 인 정리 작업 root 는 내보내지 않는다.
+ * - emptyReconcileSpans: 건수 · 건별 구간 수(reconcile.items)가 모두 0 인 정리 작업 root 는 내보내지 않는다.
  */
 @Configuration(proxyBeanMethods = false)
 class TracingConfiguration {
@@ -29,7 +29,7 @@ class TracingConfiguration {
     @Bean
     fun actuatorSpans(): SpanExportingPredicate = ActuatorSpans()
 
-    /** 할 일 없던 정리 작업 root(10초마다 Pod 당 하나)는 내보내지 않는다 — 건이 있는 실행만 trace 로 남는다. */
+    /** 할 일 없던 정리 작업 root(10초마다 Pod 당 하나)는 내보내지 않는다 — 건별 구간을 하나라도 연 실행(은행 끊김 결과조회 포함)은 남는다. */
     @Bean
     fun emptyReconcileSpans(): SpanExportingPredicate = EmptyReconcileSpans()
 

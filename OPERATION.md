@@ -986,7 +986,7 @@ kubectl --context kind-bank-transfer -n monitoring port-forward svc/tempo 3200:3
 | 1원인증 | `{ span.verification.id = "<id>" }` |
 | 느린 은행 호출 | `{ name = "bank.request" && duration > 1s }` |
 
-정리 작업 1회의 건수(`reconcile.republished` · `reconcile.completed` …)는 숫자 속성이라 `{ name = "transfer.reconcile" && span.reconcile.republished > 0 }` 처럼 비교한다.
+정리 작업 1회의 건수(`reconcile.republished` · `reconcile.completed` …)와 연 건별 구간 수(`reconcile.items`)는 숫자 속성이라 `{ name = "transfer.reconcile" && span.reconcile.republished > 0 }` 처럼 비교한다. 건수 · `reconcile.items` 가 모두 0 인 실행(할 일이 없던 10초 주기)은 Tempo 로 보내지 않는다 — 은행이 끊겨 결과조회만 하고 아무것도 못 바꾼 실행은 `items` 가 0 이 아니라 남는다.
 
 ### 18-3. trace 읽는 법
 위에서 아래로, 아래로 갈수록 자식 구간이다.

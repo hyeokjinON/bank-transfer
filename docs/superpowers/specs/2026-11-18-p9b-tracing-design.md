@@ -166,3 +166,4 @@ OpenTelemetry Collector · 꼬리 샘플링, JDBC · SQL 구간, Redis 구간, �
 28. **스모크 [11] 의 검색 · 로그 확인** — Tempo 검색은 시작 · 끝 시각이 필요하고 요청 뒤 약 8초 지나야 보인다(제한된 재시도). `kubectl logs | grep -q` 는 pipefail 아래 SIGPIPE 로 거짓 실패하므로 `grep -c`.
 29. **실험 도구 안전장치** — `run.sh` 는 인자를 검사한 **뒤에** 이전 출력을 지운다 (잘못된 인자가 추적되는 원자료를 지웠었다). `TRACING=off` 는 steady 에만. T1d (Tempo 0대) 는 Tempo 의 emptyDir 을 비운다.
 30. **실제 422 · 400 요청은 구간에 예외를 싣지 않는다** — `ApiExceptionHandler` 가 처리한다. 지우개는 프로브 구간 테스트(지우개를 빼면 실패함)로 증명한다.
+31. **빈 정리 작업 root 판정 (PR 전 점검에서 고침)** — 처음 판정은 parentId 가 빈 값일 때만 root 로 봤는데 OTel 브리지는 `0000000000000000` 을 줘서 아무것도 거르지 않았다. 또 건수가 모두 0 이어도 자식이 있을 수 있다 (은행 끊김 → 결과조회 Unavailable, 다른 Pod 에 전이를 뺏김). → root 에 `reconcile.items`(연 건별 구간 수)를 달고, parentId 가 비었거나 모두 0 이면서 건수 · items 가 모두 0 일 때만 지운다. 실제 브리지가 만든 구간으로 테스트.

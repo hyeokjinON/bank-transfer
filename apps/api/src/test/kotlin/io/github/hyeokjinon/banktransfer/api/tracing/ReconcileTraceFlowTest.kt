@@ -11,6 +11,7 @@ import io.github.hyeokjinon.banktransfer.api.web.USER_ID_HEADER
 import io.github.hyeokjinon.banktransfer.transfer.TransferReconciler
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus
 import io.github.hyeokjinon.banktransfer.transfer.TransferStore
+import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.SpanKind
 import org.awaitility.kotlin.await
 import org.awaitility.kotlin.untilAsserted
@@ -112,6 +113,10 @@ class ReconcileTraceFlowTest : ApiIntegrationTest() {
             val root = spans.ofTrace(inquiry.traceId).singleOrNull { it.name == ReconcileTracing.ROOT }
             assertNotNull(root)
             assertEquals(root.spanId, inquiry.parentSpanId)
+            // 건별 구간 수 — 빈 실행 거르기가 자식 있는 root 를 지우지 않게 하는 값 (m4). 공유 DB 라 다른 건이 같이 잡힐 수 있어 하한만 본다
+            val items = root.attributes.get(AttributeKey.longKey("reconcile.items"))
+            assertNotNull(items)
+            assertTrue(items >= 1, "reconcile.items=$items")
         }
     }
 }

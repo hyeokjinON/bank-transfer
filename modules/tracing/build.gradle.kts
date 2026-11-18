@@ -9,4 +9,5 @@ dependencies {
 
     testImplementation("io.opentelemetry:opentelemetry-sdk-testing")
     testImplementation("io.micrometer:micrometer-tracing-test")
+    testImplementation("io.micrometer:micrometer-tracing-bridge-otel")   // 실제 브리지가 만든 FinishedSpan 으로 root 판정 확인 (m4)
 }

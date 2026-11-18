@@ -99,7 +99,7 @@ Grafana → Explore → Tempo 에서 출금 하나(`gwroll-1` 표본)의 trace �
 
 ## 한계
 - kind 한 호스트 — 비용은 상대 비교, 망 지연 없음. 40건/s 비교는 한 쌍뿐.
-- bank 회차 표본은 재발행 출금에서 검색이 정리 작업(`transfer.reconcile` root) trace 를 먼저 집었다 — 그래서 여러 출금이 든 trace · 큰 구간 수(최대 701)가 보이고, 그 표본의 e2e · bank_ms 는 다른 출금 구간에서 계산됐다. 이 수정(`p9b.sh` 가 root 가 `http post /api/v1/transfers` 인 trace 를 고른다) 전에 받은 bank 회차가 그렇다. 또 빈 정리 작업 root 는 이제 내보내지 않는다 (`EmptyReconcileSpans`).
+- bank 회차 표본은 재발행 출금에서 검색이 정리 작업(`transfer.reconcile` root) trace 를 먼저 집었다 — 그래서 여러 출금이 든 trace · 큰 구간 수(최대 701)가 보이고, 그 표본의 e2e · bank_ms 는 다른 출금 구간에서 계산됐다. 이 수정(`p9b.sh` 가 root 가 `http post /api/v1/transfers` 인 trace 를 고른다) 전에 받은 bank 회차가 그렇다. 또 빈 정리 작업 root 는 이제 내보내지 않는다 (`EmptyReconcileSpans` — 건수와 건별 구간 수 `reconcile.items` 가 모두 0 인 root 만. 처음 판정은 OTel 의 root parentId `0000000000000000` 을 root 로 못 봐 아무것도 거르지 않았다 — PR 전 마지막 점검에서 고침, 실제 브리지 구간으로 테스트).
 - 모의 은행은 계측하지 않는다 — trace 는 게이트웨이의 `bank.request` 에서 끝난다 (은행 안 시간은 모름).
 - 재발행 검색은 5분 상한의 표본 (286 · 304건). 재시도 검색은 Tempo 검색 한도 1000 에서 잘렸다 (재시도 trace 가 1000 보다 많을 수 있음).
 - Tempo emptyDir · 보관 2일 · 샘플링 1.0 — 운영이면 비율 · 꼬리 샘플링과 영구 저장.
