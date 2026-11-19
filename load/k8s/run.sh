@@ -273,7 +273,8 @@ if [ "$ACTION" != steady ]; then
              km rollout status ds/alloy --timeout=180s > "$WORK/rollout.txt" 2>&1 || echo "[$RUN] 주의: Alloy 가 180초 안에 3/3 이 아니다" >&2 ;;
     errfault) RESTORE=errfault; p9c_fault_on
              p9c_verify_probes "$FAULT_S"
-             p9c_fault_off; RESTORE= ;;
+             p9c_fault_off || die "1원인증 저장 실패 트리거가 남아 있다 — 위 경고의 직접 지우기 명령을 실행 (RESTORE 를 유지해 종료 때 한 번 더 시도한다)"
+             RESTORE= ;;
     maint)   sleep "$MAINT_S" ;;   # 점검 창은 시계가 연다 — 동작 시각 = 창 시작 (ACTION_AT = MAINT_LEAD_S)
     drain)   RESTORE=drain; ka drain "$NODE" --ignore-daemonsets --delete-emptydir-data --timeout=240s > "$WORK/drain.txt" 2>&1 \
                || echo "[$RUN] 주의: drain 이 240초 안에 안 끝났다 — $WORK/drain.txt" >&2 ;;
@@ -405,7 +406,7 @@ if [ "$PHASE" = p9b ]; then
 fi
 if [ "$PHASE" = p9c ]; then
   p9c_capture || echo "[$RUN] 주의: P9c 원자료 일부를 못 남겼다 — $OUT_DIR/$RUN.p9c.json 확인" >&2
-  if [ "${JSONLOG_DIRTY:-0}" = 1 ]; then restore_jsonlog; JSONLOG_DIRTY=0; fi
+  if [ "${JSONLOG_DIRTY:-0}" = 1 ]; then restore_jsonlog || P9C_BAD=1; JSONLOG_DIRTY=0; fi
 fi
 restore_spread || true
 if [ ${#FAILS[@]} -gt 0 ]; then
@@ -414,3 +415,4 @@ fi
 # 5xx · 재시작은 판정이 아니라 결과다 (문서에 원인과 함께 적는다)
 echo "[$RUN] 통과 — $OUT"
 cat "$OUT"
+[ -z "${P9C_BAD:-}" ] || { echo "[$RUN] 경고: 구조화 로그를 ecs 로 못 되돌렸다 — 위 경고 확인" >&2; exit 1; }

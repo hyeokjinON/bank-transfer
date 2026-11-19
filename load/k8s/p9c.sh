@@ -29,7 +29,13 @@ restore_jsonlog() {
   k rollout restart deploy/api deploy/bank-gateway >/dev/null 2>&1 || true
   k rollout status deploy/bank-gateway --timeout=300s >/dev/null 2>&1 || true
   k rollout status deploy/api --timeout=420s >/dev/null 2>&1 || true
-  echo "[$RUN] 구조화 로그를 overlays/local 값(ecs)으로 되돌렸다 — 재시작 중 (kubectl -n bank-transfer rollout status deploy/api)" >&2
+  local now; now=$(k get configmap app-config -o jsonpath='{.data.LOGGING_STRUCTURED_FORMAT_CONSOLE}' 2>/dev/null | tr -d '\r' || true)
+  if [ "$now" = ecs ]; then
+    echo "[$RUN] 구조화 로그를 overlays/local 값(ecs)으로 되돌렸다 — 확인함 (api · 게이트웨이 재시작 뒤 준비 확인: kubectl -n bank-transfer rollout status deploy/api)" >&2
+  else
+    echo "[$RUN] !!! 경고: 구조화 로그를 못 되돌렸다 (app-config 값 '${now:-없음}') — 직접: bash -c '. infra/k8s/lib.sh; apply_overlay local $tag' 후 kubectl -n bank-transfer rollout restart deploy/api deploy/bank-gateway" >&2
+    return 1
+  fi
 }
 
 # 대상 선택(run.sh 사전 확인) 전에 부른다 — 재시작이 Pod 를 바꾸고, 새 Pod 라야 로그 파일이 0.log 하나다 (L3 · L5)
@@ -128,7 +134,19 @@ CREATE TRIGGER p9c_fault_verification BEFORE INSERT ON account_verification FOR 
   SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'p9c fault injection (L6)';
 SQL
 }
-p9c_fault_off() { sql_root <<<"DROP TRIGGER IF EXISTS p9c_fault_verification;" >/dev/null 2>&1 || true; }
+# 지운 뒤 SHOW TRIGGERS 로 정말 없는지 확인 (최대 5번). 못 지우면 크게 경고하고 실패(1) — 남은 트리거는 1원인증을 막는다
+p9c_fault_off() {
+  local i left=x
+  for (( i = 0; i < 5; i++ )); do
+    if sql_root <<<"DROP TRIGGER IF EXISTS p9c_fault_verification;" >/dev/null 2>&1 \
+       && left=$(sql_root <<<"SHOW TRIGGERS WHERE \`Trigger\`='p9c_fault_verification';" 2>/dev/null | tr -d '\r') && [ -z "$left" ]; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "[${RUN:-p9c}] !!! 경고: 1원인증 저장 실패 트리거(p9c_fault_verification)를 못 지웠다 — 1원인증이 계속 실패한다. 직접: kubectl -n bank-transfer exec -i mysql-0 -- sh -c 'MYSQL_PWD=\"\$MYSQL_ROOT_PASSWORD\" mysql -uroot \"\$MYSQL_DATABASE\" -e \"DROP TRIGGER IF EXISTS p9c_fault_verification\"'" >&2
+  return 1
+}
 # $1 초 동안 VERIFY_EVERY_S 마다 1원인증 요청 (모의 은행 예금주 홍길동 — 성명조회 · 1원은 통과하고 저장에서 500 이 기대값). "epoch_ms 코드" 줄
 p9c_verify_probes() {
   local until=$(( $(date +%s) + $1 )) code
@@ -142,7 +160,7 @@ p9c_verify_probes() {
 }
 
 # --- L6 ③ 억제 ---
-# BankDisconnected 가 울리면 시험 ErrorLogSurge(60초 뒤 저절로 끝남 — 은행 복구 전)를 Alertmanager 에 넣고, 15초 뒤 그 알림 상태를 남긴다
+# BankDisconnected 가 울리면 시험 ErrorLogSurge(25초 뒤 저절로 끝남 — 상태 확인 15초보다 길고, 은행 복구 · BankDisconnected 해소 전에 끝난다)를 Alertmanager 에 넣고, 15초 뒤 그 알림 상태를 남긴다
 p9c_inhibit_probe() {
   local i fired= ends
   for (( i = 0; i < 60; i++ )); do
@@ -150,7 +168,7 @@ p9c_inhibit_probe() {
     sleep 2
   done
   [ -n "$fired" ] || { echo "no_bank_disconnected" > "$WORK/inhibit.txt"; return 0; }
-  ends=$(date -u -d '+60 seconds' +%Y-%m-%dT%H:%M:%SZ)
+  ends=$(date -u -d '+25 seconds' +%Y-%m-%dT%H:%M:%SZ)
   km exec deploy/alertmanager -- wget -qO- --header='Content-Type: application/json' \
     --post-data="[{\"labels\":{\"alertname\":\"ErrorLogSurge\",\"app\":\"api\",\"severity\":\"warning\",\"source\":\"logs\",\"p9c_probe\":\"$RUN\"},\"annotations\":{\"summary\":\"p9c L6 inhibition probe\"},\"endsAt\":\"$ends\"}]" \
     http://127.0.0.1:9093/api/v2/alerts >/dev/null 2>&1 || { echo "post_failed" > "$WORK/inhibit.txt"; return 0; }
@@ -169,7 +187,7 @@ p9c_start_bg() {
     podkill)   # 희생 Pod 를 미리 정하고 (run.sh 가 같은 Pod 를 지운다) 노드의 로그 파일을 끝까지 떠 둔다 — 지워져도 열린 fd 는 남는다
       P9C_VICTIM=$(k get pods -l app=api -o jsonpath='{.items[0].metadata.name}')
       uid=$(k get pod "$P9C_VICTIM" -o jsonpath='{.metadata.uid}'); node=$(k get pod "$P9C_VICTIM" -o jsonpath='{.spec.nodeName}')
-      d exec "$node" timeout "$(( DURATION_S + 30 ))" tail -n +1 -f "/var/log/pods/${NAMESPACE}_${P9C_VICTIM}_${uid}/api/0.log" > "$WORK/l3-victim-cri.txt" 2>/dev/null &
+      d exec "$node" timeout "$(( DURATION_S + 30 ))" tail -n +1 -f "/var/log/pods/${NAMESPACE}_${P9C_VICTIM}_${uid}/api/0.log" > "$WORK/l3-victim-cri.txt" 2> "$WORK/l3-victim-cri.err" &
       P9C_TAIL=$! ;;
     alloykill)
       P9C_LOSS_POD=$(k get pods -l app=api -o jsonpath='{.items[0].metadata.name}')
@@ -203,6 +221,8 @@ p9c_loss_live() {
 p9c_err5m_max() {
   local q="sum by (app) (count_over_time($1 [5m]))"
   { loki_get "/loki/api/v1/query_range?query=$(urlenc "$q")&start=$(date -u -d "$T0" +%s)&end=$(date +%s)&step=30" 2>/dev/null || true; } | tr -d '\r' > "$OUT_DIR/$RUN.loki-$2.json"
+  # 질의가 실패했으면(성공 응답이 아님) null — 0 으로 바꾸지 않는다. 성공했는데 계열이 없으면 ERROR 가 없었다는 뜻이라 0
+  if ! grep -q '"status":"success"' "$OUT_DIR/$RUN.loki-$2.json" 2>/dev/null; then echo null; return 0; fi
   { grep -o '\[[0-9.]*,"[0-9.]*"\]' "$OUT_DIR/$RUN.loki-$2.json" || true; } | tr -d '[]"' | awk -F, '{ if ($2 + 0 > m) m = $2 + 0 } END { printf "%d", m + 0 }'
 }
 # 동작 뒤 5분 ERROR 수(규칙 식)가 처음 N 을 넘은 시각 (동작 시각 기준 초, 5초 간격) 또는 null
@@ -215,7 +235,7 @@ p9c_cross_s() {
 # alert-sink 원자료에서 알림 $1 의 상태 $2(firing|resolved) 첫 도착 epoch_ms (동작 뒤) — 웹훅 본문 첫 "status" = 묶음 상태
 p9c_sink_first() {
   local ts body
-  { grep -a "\"alertname\":\"$1\"" "$OUT_DIR/$RUN.alert-sink.txt" || true; } | while read -r ts body; do
+  { grep -a "\"alertname\":\"$1\"" "$OUT_DIR/$RUN.alert-sink.txt" | { grep -av 'p9c_probe' || true; } || true; } | while read -r ts body; do
     [ "$(grep -o '"status":"[a-z]*"' <<<"$body" | head -1 | cut -d'"' -f4)" = "$2" ] || continue
     date -d "$ts" +%s%3N 2>/dev/null
   done | awk -v t="$TA_MS" '$1 >= t' | sort -n | head -1
@@ -271,6 +291,13 @@ p9c_capture() {
       loss_pod=$P9C_LOSS_POD
       read -r file_n loki_n < <(p9c_loss_live "$P9C_LOSS_POD") ;;
   esac
+  # 기준(파일 · kubectl logs 줄 수)이 0 이거나 숫자가 아니면 수집 실패 — 가짜 0 · 가짜 중복을 남기지 않고 null
+  case "$ACTION" in podkill|lokizero|alloykill)
+    if ! [[ "${file_n:-}" =~ ^[0-9]+$ ]] || [ "${file_n:-0}" -le 0 ]; then
+      echo "[$RUN] 주의: 기준 줄 수가 ${file_n:-없음} — 로그 수집 실패로 보고 file_lines · lost_lines · dup_lines 를 null 로 남긴다 ($WORK/l3-victim-cri.err 등 확인)" >&2
+      file_n=; lost=; dup=; loki_n=
+    fi ;;
+  esac
   if [[ "${file_n:-}" =~ ^[0-9]+$ ]] && [[ "${loki_n:-}" =~ ^[0-9]+$ ]]; then
     lost=$(( file_n > loki_n ? file_n - loki_n : 0 )); dup=$(( loki_n > file_n ? loki_n - file_n : 0 ))
   fi
@@ -281,7 +308,7 @@ p9c_capture() {
   err_max_all=$(p9c_err5m_max "$P9C_ERR_ALL" err-all)
   km logs deploy/alert-sink --timestamps --since-time="$T0" > "$OUT_DIR/$RUN.alert-sink.txt" 2>&1 || true
   surge_fired=$(since_ta "$(p9c_sink_first ErrorLogSurge firing)")
-  surge_sink=$({ grep -a '"alertname":"ErrorLogSurge"' "$OUT_DIR/$RUN.alert-sink.txt" || true; } | { grep -c '"status":"firing"' || true; })
+  surge_sink=$({ grep -a '"alertname":"ErrorLogSurge"' "$OUT_DIR/$RUN.alert-sink.txt" || true; } | { grep -av 'p9c_probe' || true; } | { grep -c '"status":"firing"' || true; })
   if [ "$ACTION" = errfault ]; then
     cross=$(p9c_cross_s)
     if [ "$cross" != null ]; then   # 계산값 = 넘은 시각 + for 2m + 묶기 10초, 늦게는 + ruler 평가 간격 1m + 수집 지연 여유 10초
