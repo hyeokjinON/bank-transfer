@@ -72,22 +72,25 @@ if [ -f infra/k8s/monitoring/alloy/check.alloy ]; then
   ENTRIES=build/k8s/alloy-entries.txt
   { grep -a 'msg="received log entry"' "$OUTF" || true; } > "$ENTRIES"
   n=$(grep -c . "$ENTRIES" || true)
-  [ "$n" = 6 ] || { tail -30 "$OUTF" >&2; echo "표본 6줄 중 ${n}줄만 나왔다 (잘린 줄 P + F 는 한 줄)" >&2; exit 1; }
+  [ "$n" = 8 ] || { tail -30 "$OUTF" >&2; echo "표본 8줄 중 ${n}줄만 나왔다 (잘린 줄 P + F 는 한 줄)" >&2; exit 1; }
   n=$(grep -cF 'labels="{app=\"api\", container=\"api\", namespace=\"bank-transfer\"}"' "$ENTRIES" || true)
-  [ "$n" = 6 ] || { echo "라벨이 app · container · namespace 셋이 아닌 줄이 있다 (${n}/6 — stage.label_keep)" >&2; exit 1; }
+  [ "$n" = 8 ] || { echo "라벨이 app · container · namespace 셋이 아닌 줄이 있다 (${n}/8 — stage.label_keep)" >&2; exit 1; }
   sed -n 's/.* entry="\(.*\)" entry_timestamp=.*/\1/p' "$ENTRIES" > build/k8s/alloy-lines.txt
-  if grep -aE '(^|[^0-9A-Za-z])[0-9]{10,14}([^0-9A-Za-z]|$)|BT[0-9]{4}|[0-9]원' build/k8s/alloy-lines.txt >&2; then
+  # 금지 패턴 = 이름 · 질의 표의 LogQL 과 같은 식. JSON 이스케이프(\n \t … \uXXXX) 뒤도 경계다 (ECS 의 예외 메시지 · stack_trace — 스펙 §14-10)
+  if grep -aE '(^|\\[nrtbf]|\\u[0-9A-Fa-f]{4}|[^0-9A-Za-z])[0-9]{10,14}([^0-9A-Za-z]|$)|BT[0-9]{4}|[0-9]원' build/k8s/alloy-lines.txt >&2; then
     echo "가리지 않은 줄이 있다 (위)" >&2; exit 1
   fi
-  for want in '*********6789' '*********6780,******3333' 'BT****' '***원' '거래번호=T2611190123456789AB' '1234567890123abcdef0123456789abc'; do
+  for want in '*********6789' '*********6780,******3333' 'BT****' '***원' '거래번호=T2611190123456789AB' '1234567890123abcdef0123456789abc' \
+    'n*********6789' 'n*********6780' 't*********6789' 'u0020*********6780' 'reference=T2611190987654321CD'; do
     grep -aqF -- "$want" build/k8s/alloy-lines.txt || { echo "가린 결과에 '$want' 가 없다 (과하게 · 덜 가렸다)" >&2; exit 1; }
   done
-  for tid in 1234567890123abcdef0123456789abc 4bf92f3577b34da6a3ce929d0e0e4736 7ec3e15e708ee2d039aa42ee04193141 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; do
+  for tid in 1234567890123abcdef0123456789abc 4bf92f3577b34da6a3ce929d0e0e4736 7ec3e15e708ee2d039aa42ee04193141 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+    bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb cccccccccccccccccccccccccccccccc; do
     grep -aq "structured_metadata=.*$tid" "$ENTRIES" || { echo "trace_id $tid 를 메타데이터로 꺼내지 못했다 (가리기 전에 꺼내야 한다)" >&2; exit 1; }
   done
   n=$({ grep -ao 'structured_metadata="[^ ]*level' "$ENTRIES" || true; } | wc -l | tr -d ' ')
-  [ "$n" = 6 ] || { echo "level 메타데이터가 6줄이 아니다: $n" >&2; exit 1; }
-  echo "  Alloy 설정 3개 문법 · 표본 6줄 — 라벨 3개, 금지 패턴 0, 거래번호 · traceId 그대로, trace_id 4 · level 6"
+  [ "$n" = 8 ] || { echo "level 메타데이터가 8줄이 아니다: $n" >&2; exit 1; }
+  echo "  Alloy 설정 3개 문법 · 표본 8줄 — 라벨 3개, 금지 패턴 0 (JSON 이스케이프 경계 포함), 거래번호 · traceId 그대로, trace_id 6 · level 8"
 else
   echo "  (Alloy 없음 — Task 5 에서 생긴다)"
 fi
