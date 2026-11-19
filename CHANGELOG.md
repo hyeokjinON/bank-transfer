@@ -33,7 +33,7 @@
 ### CI · 사람 확인
 - CI (#39): 첫 실행 `9adea98` — `build` 10m27s · `infra-smoke` 48s · `app-smoke` 3m57s · `k8s-smoke` 11m26s **실패** (제어 노드 Alloy 가 `inotify: too many open files` 로 CrashLoopBackOff — GitHub 러너의 `max_user_instances=128` 을 kind 노드 3개가 같이 씀 → Alloy `import.file` 감시를 폴링으로 + CI 에 inotify 한도 올리는 단계, `c57b0b1`). `c57b0b1` — `k8s-smoke` 7m51s **실패** (CI `mysql:8.4` 의 소켓이 `/var/lib/mysql/mysql.sock` 이라 스모크 [12] 의 `sql()` 이 못 붙음 → kind 의 `sql()` · `sql_root()` 를 TCP `127.0.0.1` 로, `18b133c`). 머지 직전 `18b133c` — `build` 10m29s · `infra-smoke` 51s · `app-smoke` 3m51s · **`k8s-smoke` 5m32s** (20분 제한, 성공 기준 7 통과).
 - Postman 직접 확인 (2026-11-20): 새 폴더 `10. 로그 (P9c, kind)` Run folder 10-1 ~ 10-6 **16/16** 통과 — 출금 202 → 출금 id 로 api 줄 · trace_id → 같은 trace_id 로 api · 게이트웨이 줄 (`bank call … outcome=ok`) → 거래번호로 모의 은행 줄 가려짐 → 금지 패턴 0 → `ErrorLogSurge` 규칙. Grafana Explore 로그 → Tempo → "Logs for this span". (10-3 만 따로 보내면 앞 Run 의 trace_id 가 15분 밖이라 빈 결과 — 폴더를 처음부터.)
-- 정리 PR #40: ADR-0022 채택, README P9c · P9 `[x]`, ARCHITECTURE 기준 줄 · "(제안)" 떼기, 측정 결과에 CI 시간 · Postman 확인 · 알림 로그 사본의 10자리 이상 금액 한계, OPERATION §19-4 inotify · §19-6 그 한계, HANDOVER P9 완료. 구성도 두 장은 #39 에서 이미 갱신.
+- 정리 PR #40: ADR-0022 채택, README P9c · P9 `[x]` (하위 단계가 모두 끝났는데 비어 있던 P8 상위 칸도 `[x]`), ARCHITECTURE 기준 줄 · "(제안)" 떼기, 측정 결과에 CI 시간 · Postman 확인 · 알림 로그 사본의 10자리 이상 금액 한계, OPERATION §19-4 inotify · §19-6 그 한계, HANDOVER P9 완료. 구성도 두 장은 #39 에서 이미 갱신.
 
 ## [P9b] 분산 추적 — Micrometer Tracing · OpenTelemetry · Tempo — 2026-11-18 ([#37](https://github.com/hyeokjinON/bank-transfer/pull/37), 머지 후 정리 PR #38)
 ### Added
