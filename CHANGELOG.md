@@ -9,7 +9,7 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
-## [P9b] 분산 추적 — Micrometer Tracing · OpenTelemetry · Tempo — 2026-11-18 (PR 번호는 PR 을 만든 뒤 채운다)
+## [P9b] 분산 추적 — Micrometer Tracing · OpenTelemetry · Tempo — 2026-11-18 ([#37](https://github.com/hyeokjinON/bank-transfer/pull/37), 머지 후 정리 PR #38)
 ### Added
 - 추적 스타터(`spring-boot-starter-opentelemetry`) · 공용 모듈 `modules/tracing`(내보내기 앞 지우개 `ScrubbingSpanExporter` — 예외 메시지 · 스택 · 상태 설명 제거, `/actuator` 구간 거름). 보내기는 주소가 있을 때만 (kind 의 app-config).
 - V7 `outbox_event.trace_parent`(`VARCHAR(55)`) · 발행기 행마다 `outbox.publish` 구간 (저장한 traceparent 를 부모로, 틀린 값은 새 trace) · 정리 작업 1회 = 새 trace `transfer.reconcile` (건별 `transfer.inquiry` · `transfer.republish`, 도메인 포트 `ReconcileItemScope`) · 게이트웨이 `bank.request` 구간 (Tracer, `bank.outcome` · `bank.not_sent.reason` · `bank.tran_no` …).
@@ -17,7 +17,7 @@
 - kind: Tempo 2.10.10 (`monitoring/tempo.yaml` · `tempo/tempo.yml`, 제어 노드 · emptyDir · 보관 2일) · Grafana Tempo 데이터 소스 · `versions.env` `TEMPO_VERSION` · 스모크 [11] (Tempo 검색으로 api · 게이트웨이 구간 확인).
 - 실험 도구 `PHASE=p9b` (`load/k8s/p9b.sh` · `traceshape.py`, `tempozero` 동작, `TRACING=on|off`) · [측정 결과](docs/perf/p9b-tracing.md) · 원자료 `docs/perf/raw/p9b/`.
 - (덤) Prometheus exemplar → Grafana "접수 → 확정 시간" 패널 점에서 Tempo 로.
-- [ADR-0021](docs/adr/0021-distributed-tracing.md) (제안 — 정리 PR 에서 채택), OPERATION §18, ARCHITECTURE 추적 절, 구성도 두 장 갱신 (`runtime-k8s.svg` 에 Tempo · 보내기 선, `app-architecture.svg` 에 ● T), `docs/database.md` V7.
+- [ADR-0021](docs/adr/0021-distributed-tracing.md) (정리 PR 에서 채택), OPERATION §18, ARCHITECTURE 추적 절, 구성도 두 장 갱신 (`runtime-k8s.svg` 에 Tempo · 보내기 선, `app-architecture.svg` 에 ● T), `docs/database.md` V7.
 ### Changed
 - Kafka 관측(template · listener) 켬 · 샘플링 1.0 · `spring.reactor.context-propagation=auto` · `@Scheduled` 관측 끔 · OTLP 지표 끔 · Grafana 익명 보기 사용자도 Explore (`GF_USERS_VIEWERS_CAN_EDIT=true`, kind 만).
 - `HttpBankGateway.create(kind, settings, observations)` (관측 레지스트리 인자) · `BankConnectionOwner` 인자 · `TransferReconciler` 건별 범위.
@@ -30,7 +30,10 @@
 - 리더 교대 (T4): 안 보냄 사유는 모두 `stepping_down`. exemplar (T5): 회차마다 26 ~ 119개, Tempo 에서 trace 확인.
 - 발견: 코루틴은 설정 한 줄로 부족(→ `asContextElement()`), JDK 판 INTERNAL → CLIENT, traceparent 플래그 `-03`, 스모크 `grep -q` SIGPIPE 거짓 실패(→ `grep -c`), 실험 도구가 잘못된 인자로 원자료를 지우던 것(인자 검사를 삭제 앞으로).
 ### CI · 사람 확인
-- CI `k8s-smoke` 시간 · Postman 직접 확인: PR CI 에서 기록.
+- CI (#37): 첫 실행 `48b130f` — `build` 9m56s · `infra-smoke` 48s · `app-smoke` 3m50s · `k8s-smoke` 6m37s **실패** (스모크 [10] 출금 카운터 `increase()` 0 — 새 Pod 의 첫 수집이 스모크 출금보다 늦으면 첫 증가를 못 셈 → 원래 합계로 한 번 더 보게 고침 `b1247a5`). `b1247a5` — `k8s-smoke` 4m13s 통과, `build` 는 가상 스레드 실험 테스트의 pinning 2ms(Kafka 컨슈머 내부 잠금)로 실패. 머지 직전 `3a9ed42` — `infra-smoke` 55s · `app-smoke` 2m09s · **`k8s-smoke` 4m49s** 통과, `build` 는 게이트웨이 리더 반납 테스트가 CI 의 API 서버에서 2초를 넘겨 실패 → 실패 잡만 다시 돌려 9m53s 통과. `build` 두 실패는 P9b 코드와 무관한 시간 흔들림 (로컬 5/5 · 3/3 통과) — 기준을 느슨하게 하지 않았다.
+- PR 직전 수정 (최종 리뷰 m4): 빈 정리 작업 root 거르기가 OTel 의 root parentId `0000000000000000` 을 root 로 못 봐 아무것도 거르지 않았다 → 모두 0 도 root 로 보고, 건별 구간 수 `reconcile.items` 를 함께 봐서 은행 끊김 때 root 를 지워 자식이 고아가 되는 것을 막음 (`553a2d7`). 실제 브리지 구간 테스트 · kind `dev-553a2d7` 새 Pod 의 빈 실행 Tempo 0건.
+- Postman 직접 확인 (2026-11-19): 새 폴더 `9. 추적 (P9b, kind)` 9-1 ~ 9-4 통과 — 출금 202 → Tempo 검색 trace 1개 → 구간 7개 이름 · 두 서비스 · 계좌번호 없음, Grafana Explore 로 같은 trace, api 로그 줄의 traceId 로 같은 출금 찾음, 은행 끊기 중 재시도 구간이 처음 trace 에 붙음, `{ name = "transfer.reconcile" && span.reconcile.items = 0 }` 결과 없음. (Tempo 수집이 8 ~ 20초 늦어 9-2 는 5초 간격 6번까지 다시 묻는다.)
+- 정리 PR #38: ADR-0021 채택, README P9b `[x]`, ARCHITECTURE 기준 줄 · "(제안)" 떼기, 측정 결과에 CI 시간 · Postman 확인, HANDOVER 다음 = P9c. 구성도 두 장은 #37 에서 이미 갱신.
 
 ## [P9a] 관측성 — 지표 · 대시보드 · 알림 — 2026-11-17 ([#35](https://github.com/hyeokjinON/bank-transfer/pull/35), 머지 후 정리 PR #36)
 ### Added

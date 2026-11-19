@@ -226,7 +226,7 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
   - [x] P8-3c 게이트웨이 필수 분산 (`DoNotSchedule` — 두 대는 반드시 다른 워커) — [#33](https://github.com/hyeokjinON/bank-transfer/pull/33) · [ADR-0019](docs/adr/0019-gateway-required-spread.md) · [실험 결과](docs/perf/p8-3c-gateway-spread.md)
 - [ ] **P9** 관측성: Micrometer, Prometheus, Grafana
   - [x] P9a 지표 · 대시보드 · 알림 (Micrometer · Prometheus · Alertmanager · Grafana, kind) → [ADR-0020](docs/adr/0020-observability-metrics-alerts.md) · [실험 결과](docs/perf/p9a-metrics.md)
-  - [ ] P9b 분산 추적 (Micrometer Tracing · OpenTelemetry · Tempo, kind) → [ADR-0021](docs/adr/0021-distributed-tracing.md) · [실험 결과](docs/perf/p9b-tracing.md)
+  - [x] P9b 분산 추적 (Micrometer Tracing · OpenTelemetry · Tempo, kind) — [#37](https://github.com/hyeokjinON/bank-transfer/pull/37) · [ADR-0021](docs/adr/0021-distributed-tracing.md) · [실험 결과](docs/perf/p9b-tracing.md)
   - [ ] P9c 로그 모으기
 
 ## 기술 스택
