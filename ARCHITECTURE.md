@@ -170,13 +170,13 @@ flowchart LR
 > [ADR-0022](docs/adr/0022-log-collection.md), [스펙](docs/superpowers/specs/2026-11-19-p9c-logs-design.md) (§14 계획 · 실험 단계에서 고친 점), [측정 결과](docs/perf/p9c-logs.md), 사용법 [OPERATION §19](OPERATION.md#19-로그-모으기--loki--alloy-p9c). kind 에만 있다 (구성도의 ● L, `runtime-k8s.svg` 의 갈색 점선).
 
 앱은 **표준 출력에만** 쓴다 (수집이 실패해도 앱은 그대로 — F10). 흐름: 표준 출력 → 노드의 `/var/log/pods` 파일 → **Alloy**(노드마다 1개 DaemonSet, 읽기 전용) → **Loki**(제어 노드, emptyDir, 보관 2일) → Grafana(Explore · 대시보드 ① 4행).
-- **처리 순서** (`pipeline.alloy` 하나를 수집 설정과 CI 표본 검사가 같이 import): ① 꺼내기 — `level` · `trace_id`(ECS JSON 의 `log.level` · `traceId`, 텍스트면 `[traceId-spanId]` 정규식) → 구조화 메타데이터 ② 가리기 — 계좌(10 ~ 14자리, 앞부분 `*`) · 1원인증 코드 `BT****` · 금액 `***원`, 같은 규칙을 두 번 ③ 라벨은 `namespace` · `app` · `container` 만 남김. 메타데이터는 `pod` · `node` · `level` · `trace_id` 넷.
-- **이중 방어**: 앱이 먼저 남기지 않는다(지갑 로그 · `Transfer.toString` · 예외 메시지에서 사용자 id · 멱등키 · 금액 제거) → Alloy 가 보내기 직전 가린다 → 금지 패턴 0건을 Loki 질의로 스모크 · 실험이 증명한다. 모의 은행 콘솔은 원본, Loki 사본만 가린다.
+- **처리 순서** (`pipeline.alloy` 하나를 수집 설정과 CI 표본 검사가 같이 import): ① 꺼내기 — `level` · `trace_id`(ECS JSON 의 `log.level` · `traceId`, 텍스트면 `[traceId-spanId]` 정규식) ② 구조화 메타데이터(`pod` · `node` · `level` · `trace_id` 넷) · 라벨은 `namespace` · `app` · `container` 만 남김(`label_keep`) ③ 가리기 — 계좌(10 ~ 16자리, 앞부분 `*`) · 1원인증 코드 `BT****` · 금액 `***원`, 같은 규칙을 두 번.
+- **이중 방어**: 앱이 먼저 남기지 않는다(지갑 로그 · `Transfer.toString` · 예외 메시지에서 사용자 id · 멱등키 · 금액 제거, 앱 알림의 로그 사본도 금액 · 잔고를 가린다 — 텔레그램 본문은 그대로) → Alloy 가 보내기 직전 가린다 → 금지 패턴 0건을 Loki 질의로 스모크 · 실험이 증명한다. 모의 은행 콘솔은 원본, Loki 사본만 가린다.
 - **형식**: kind 의 api · 게이트웨이만 ECS JSON (`app-config` 한 곳). Compose · IntelliJ 는 텍스트 그대로.
 - **잇기 셋**: 로그 → trace (Loki 파생 필드 `trace_id` → Tempo), trace → 로그 (Tempo `tracesToLogsV2`, 앞뒤 1분), 지표 → trace (P9b exemplar). 경로 traceId → 게이트웨이 `bank call` 줄의 `reference=` → 모의 은행 통장 줄.
 - **게이트웨이 은행 호출 한 줄**: `withClient` 완료 때 `bank call type= outcome= reason= tranNo= reference= ms=` INFO 를 `bank.request` 문맥에서 남긴다 (정상 출금에서 게이트웨이가 trace 안에서 쓰는 유일한 줄 — 없으면 "traceId 로 게이트웨이 로그" 가 안 된다).
 - **로그 알림 `ErrorLogSurge` 하나**: Loki ruler → 기존 Alertmanager (`source=logs`), 5분 ERROR > 10 · `for: 2m`, **Spring Kafka DLT 발행 줄은 식에서 뺀다** (DLT 는 지표 알림 `TransferDeadLettered` 가 맡고, 은행 끊김의 DLT ERROR 가 복구 뒤에도 5분 창에 남아 억제 밖에서 울리기 때문). `BankDisconnected` · `GatewayNoLeader` 동안 억제.
-- 받아들인 한계: Loki emptyDir (Pod 가 바뀌면 이전 로그 사라짐 — 꺼진 동안 줄은 복구 뒤 늦게 도착), 과한 가리기 (10 ~ 14자리 숫자 전부), 로그 알림은 넘은 뒤 약 3 ~ 4.5분.
+- 받아들인 한계: Loki emptyDir (Pod 가 바뀌면 이전 로그 사라짐 — 꺼진 동안 줄은 복구 뒤 늦게 도착), 과한 가리기 (10 ~ 16자리 숫자 전부), 로그 알림은 넘은 뒤 약 3 ~ 4.5분.
 
 ## 2. 모듈
 
