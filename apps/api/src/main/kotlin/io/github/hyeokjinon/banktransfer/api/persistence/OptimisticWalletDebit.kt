@@ -44,8 +44,8 @@ class OptimisticWalletDebit(
             } catch (e: VersionConflict) {
                 if (attempt >= maxAttempts) {
                     // 핫스팟에서는 흔한 결과라 INFO (부하 측정은 WARN 으로 돌린다 — 요청마다 로그를 쓰면 측정이 흐려진다)
-                    log.info("wallet of {} kept changing for {} attempts, answering CONCURRENT_UPDATE", userId, maxAttempts)
-                    throw StoreConflict.ConcurrentUpdate(userId)
+                    log.info("wallet kept changing for {} attempts, answering CONCURRENT_UPDATE", maxAttempts)
+                    throw StoreConflict.ConcurrentUpdate()
                 }
                 sleeper(nextBackoff())
                 attempt++
@@ -75,7 +75,7 @@ class OptimisticWalletDebit(
                 .addValue("version", version)
                 .addValue("at", Timestamp.from(at.toDbPrecision())),
         )
-        if (updated == 0) throw VersionConflict(userId)
+        if (updated == 0) throw VersionConflict()
         ledger.recordWithdraw(userId, transferId, amount, newBalance, at)
         return true
     }
@@ -85,7 +85,7 @@ class OptimisticWalletDebit(
 
     /**
      * 읽은 뒤 다른 트랜잭션이 version 을 올렸다. 트랜잭션 전체를 롤백시키고 [around] 가 처음부터 다시 한다. 이 클래스 밖으로 나가지 않는다.
-     * 스택 트레이스를 만들지 않는다 — 핫스팟에서는 요청마다 여러 번 생기는 흐름 제어용 예외다.
+     * 스택 트레이스를 만들지 않는다 — 핫스팟에서는 요청마다 여러 번 생기는 흐름 제어용 예외다. 메시지에 사용자 id 를 싣지 않는다 (P9c).
      */
-    internal class VersionConflict(userId: String) : RuntimeException("wallet version of '$userId' changed", null, false, false)
+    internal class VersionConflict : RuntimeException("wallet version changed", null, false, false)
 }

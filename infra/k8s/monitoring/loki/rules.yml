@@ -1,0 +1,17 @@
+# P9c 로그 알림 (스펙 §6, 결정 F9) — 하나뿐. 업무 신호는 지표(prometheus/alerts.yml), 여기는 지표로 못 잡는 예상 밖 오류만.
+# Spring Kafka 의 DLT 발행 줄(DeadLetterPublishingRecovererFactory)은 뺀다 — DLT 는 지표 알림 TransferDeadLettered 가 맡고,
+# 은행 끊김의 DLT ERROR 는 재접속 뒤에도 5분 창에 남아 억제(BankDisconnected) 밖에서 울린다 (P9b 원자료 bank-2 — 계획에서 정한 것 7).
+# N = 10: kind 정상 상태 ERROR 는 일마감 대사 파일 없음(Spring Batch AbstractStep) 대사 회차마다 1줄뿐 — L6 ① 로 확정 (load/k8s/p9c.sh P9C_N 과 같은 값)
+groups:
+  - name: bank-transfer-logs
+    interval: 1m
+    rules:
+      - alert: ErrorLogSurge
+        expr: sum by (app) (count_over_time({namespace="bank-transfer", app=~"api|bank-gateway"} | level="ERROR" != "DeadLetterPublishingRecovererFactory" [5m])) > 10
+        for: 2m
+        labels:
+          severity: warning
+          source: logs
+        annotations:
+          summary: "{{ $labels.app }} 의 ERROR 로그가 5분에 10줄을 넘었다 (지표에 없는 오류)"
+          runbook: OPERATION.md §19-5 ErrorLogSurge

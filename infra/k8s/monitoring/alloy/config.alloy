@@ -1,0 +1,93 @@
+// P9c Alloy 수집 (스펙 §4, 결정 F1 · F2) — DaemonSet: 노드마다 1개가 자기 노드의 bank-transfer Pod 로그 파일만 읽는다.
+// 처리(꺼내기 · 가리기)는 pipeline.alloy 한 곳 — CI 표본 검사(check.alloy)도 같은 파일을 쓴다. 위치 기록은 --storage.path (hostPath — 재시작해도 이어 읽는다)
+// 모듈 파일 변경 감시는 폴링으로 — 기본(fsnotify)은 inotify 인스턴스가 필요한데, kind 노드는 호스트 커널을 같이 써서
+// 제어 노드에서 한도(fs.inotify.max_user_instances, GitHub 러너 128)에 걸려 "too many open files" 로 죽었다 (PR #39 CI). 설정은 ConfigMap 이라 바뀌면 Pod 가 다시 뜬다.
+import.file "p9c" {
+	filename       = "/etc/alloy/pipeline.alloy"
+	detector       = "poll"
+	poll_frequency = "1m"
+}
+
+discovery.kubernetes "pods" {
+	role = "pod"
+
+	namespaces {
+		names = ["bank-transfer"]
+	}
+
+	selectors {
+		role  = "pod"
+		field = "spec.nodeName=" + sys.env("NODE_NAME")
+	}
+}
+
+discovery.relabel "pods" {
+	targets = discovery.kubernetes.pods.targets
+
+	rule {
+		source_labels = ["__meta_kubernetes_namespace"]
+		target_label  = "namespace"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_label_app"]
+		target_label  = "app"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_container_name"]
+		target_label  = "container"
+	}
+
+	// 스모크 np_probe 의 임시 Pod(np-probe-<난수>)는 컨테이너 이름 = Pod 이름이라 실행마다 라벨 값이 늘어난다 → 하나로 모은다
+	rule {
+		source_labels = ["container"]
+		regex         = "np-probe-[0-9]+"
+		target_label  = "container"
+		replacement   = "np-probe"
+	}
+
+	rule {
+		source_labels = ["container"]
+		regex         = "np-probe"
+		target_label  = "app"
+		replacement   = "np-probe"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_name"]
+		target_label  = "pod"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_node_name"]
+		target_label  = "node"
+	}
+
+	// /var/log/pods/<ns>_<pod>_<uid>/<container>/0.log (kind 노드에서 확인)
+	rule {
+		source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+		separator     = "/"
+		target_label  = "__path__"
+		replacement   = "/var/log/pods/*$1/*.log"
+	}
+}
+
+local.file_match "pods" {
+	path_targets = discovery.relabel.pods.output
+}
+
+p9c.bank_transfer "main" {
+	forward_to = [loki.write.default.receiver]
+}
+
+loki.source.file "pods" {
+	targets    = local.file_match.pods.targets
+	forward_to = [p9c.bank_transfer.main.receiver]
+}
+
+loki.write "default" {
+	endpoint {
+		url = "http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+	}
+}

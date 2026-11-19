@@ -1,0 +1,23 @@
+# P9c: Alloy(monitoring namespace) 가 이 namespace 의 Pod 목록만 본다 — ClusterRole 이 아니다 (Prometheus 와 같은 모양, 계획에서 정한 것 14).
+# 노드 정보는 쓰지 않는다 (노드 이름은 Pod 의 spec.nodeName). 다른 namespace 의 로그 파일은 발견 단계에서 버려진다 (위험 R1)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: alloy-pod-reader
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: alloy-pod-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: alloy-pod-reader
+subjects:
+  - kind: ServiceAccount
+    name: alloy
+    namespace: monitoring

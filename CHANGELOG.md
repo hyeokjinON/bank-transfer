@@ -9,6 +9,30 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
+## [P9c] 로그 모으기 — Grafana Alloy · Loki — 2026-11-19 (PR 번호는 PR 을 만든 뒤 채운다)
+### Added
+- kind: Loki 3.7.9 (`monitoring/loki.yaml` · `loki/loki.yml` · `loki/rules.yml`, 제어 노드 · emptyDir · 보관 2일, 라벨 `namespace` · `app` · `container` 셋 · 구조화 메타데이터 `pod` · `node` · `level` · `trace_id`) · Grafana Alloy v1.21.3 DaemonSet 3개 (`monitoring/alloy.yaml` · `alloy/{config,pipeline,check}.alloy` · `base/rbac-alloy.yaml` — `bank-transfer` namespace Pod 읽기 Role) · `versions.env` `LOKI_VERSION` · `ALLOY_VERSION`.
+- 처리 모듈 `pipeline.alloy` (꺼내기 level · trace_id → 가리기): 수집 설정과 CI 표본 설정이 같이 import. 가리기 = 계좌(10 ~ 16자리) · 1원인증 코드 `BT****` · 금액 `***원`, 같은 규칙 두 번 · 영숫자 경계 · JSON 이스케이프 경계. 금지 패턴(가리지 않은 모양) 0건을 Loki 질의로 증명.
+- 로그 알림 `ErrorLogSurge` 하나 (Loki ruler → Alertmanager, `source=logs`, 5분 ERROR > 10 · `for: 2m`, Spring Kafka DLT 발행 줄 제외) · Alertmanager 억제 (`BankDisconnected` · `GatewayNoLeader` 동안).
+- Grafana: Loki 데이터 소스 (`trace_id` 파생 필드 → Tempo) · Tempo → 로그(`tracesToLogsV2`) · 대시보드 ① 4행 "로그" (서비스 · 레벨별 양, api · 게이트웨이 ERROR · WARN).
+- 게이트웨이 은행 호출 한 줄 `bank call type= outcome= reason= tranNo= reference= ms=` (`bank.request` 문맥의 traceId) · kind 구조화 로그(ECS JSON) 계약 테스트 (별도 JVM).
+- 검사 · 스모크: `check.sh` [5/6] Loki 설정 · LogQL · [6/6] Alloy 가리기 표본 실제 실행, 스모크 [12] 로그 (traceId 로 api · 게이트웨이 줄, 모의 은행 줄 가림, 금지 패턴 0, ErrorLogSurge 규칙 · Grafana Loki).
+- 실험 도구 `PHASE=p9c` (`load/k8s/p9c.sh` — 수집 지연 표지 · `JSONLOG=on|off` · `podkill` · `lokizero` · `alloykill` · `errfault`(1원인증 저장 실패 트리거) · 억제 시험 · 가리기 확인) · [측정 결과](docs/perf/p9c-logs.md) · 원자료 `docs/perf/raw/p9c/`. Postman `10. 로그 (P9c, kind)` 폴더 (10-1 ~ 10-6).
+- [ADR-0022](docs/adr/0022-log-collection.md) (제안 — 머지 뒤 정리 PR 에서 채택), OPERATION §19, ARCHITECTURE 로그 절, 구성도 두 장 갱신 (`runtime-k8s.svg` 에 Loki · Alloy · 갈색 점선, `app-architecture.svg` 에 ● L), `infra/k8s/README.md`.
+### Changed
+- kind 의 api · 게이트웨이 로그를 ECS JSON 으로 (`app-config` `LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs`, 게이트웨이 env 는 optional). Compose · IntelliJ 는 텍스트 그대로.
+- 로그에서 사용자 id · 멱등키 · 금액 빼기: 지갑 로그 · `Transfer.toString` · `StoreConflict` · 지갑 낙관적 차감 충돌 예외 메시지, 앱 알림의 로그 사본(`ALERT` 로거)도 금액 · 잔고를 가린다 (`AlertLogMask` — 텔레그램 본문은 그대로), Redisson 시간 초과 예외는 클래스 이름만, Hibernate 제약 위반 로그(`org.hibernate.orm.jdbc.error`)는 ERROR 로 (api `application.yml`, 모든 환경).
+- `check-dashboards` 를 Python 으로 나눠 PromQL 은 promtool, LogQL 은 `check.sh` [5/6] 의 Loki 가 검사.
+### 측정 요약 (이 PC · kind 3노드 기준 — 운영 수치가 아니다, 돈은 9회 전부 통과)
+- 수집 지연 (L1): 표지 줄이 Loki 에서 보이기까지 p50 1.0 ~ 2.3초, p95 **2.4 ~ 2.6초**, 빠진 표본 0 (해상도 약 1초).
+- JSON 비용 (L2): 접수 p95 켬 평균 27.19ms / 끔 26.86ms → **+1.2%** (기준 ≤ +10%), 완료 /s 19.68 / 19.69 → **−0.05%** (기준 ≥ −5%). 바이트는 약 두 배 (api 11.1 대 5.7 KB/s, 게이트웨이 9.6 대 5.1 KB/s). Loki CPU 0.015 ~ 0.027 코어 · RSS 192 ~ 242MB, Alloy CPU 0.026 ~ 0.066 코어 · RSS 231 ~ 239MB.
+- 잃는 줄 (L3 · L5): api Pod 강제 종료 **940/940**, Alloy 재시작 **506/506**, 중복 0. Loki 0대 60초 (L4): 회차 중 기록은 813줄 중 270줄 도착(543 미도착)이었지만 약 19분 뒤 재계수 **830 ≥ 813** — 최종 잃음 0, 도착 지연만 (Alloy 가 나중에 다시 넣음 — 지수 백오프 재시도인지는 추정, 코드로 확인하지 않음. `loki.write` 가 막히면 읽기가 멈추는 역압일 수도 있다. 도구의 기다림이 더 짧았음 — 543 은 도구 한계). 꺼지기 전 데이터는 emptyDir 이라 사라짐.
+- ErrorLogSurge (L6): 정상 상태 5분 ERROR 최대 0 → N = 10 그대로. 1원인증 저장 실패 주입 → 500 응답 58건 = api ERROR 58줄, `ApiHigh5xx` 안 울림. **도착은 계산 구간 [186, 256]초보다 18초 늦은 273.9초 — 성공 기준 6 은 "부분"** (원인 후보: 묶음 `group_interval` 대기 · ruler 의 다음 평가, 둘 다 추정). 은행 2분 끊김: 억제 확인 (`inhibit_ok` true), 새 ErrorLogSurge 0, DLT 를 포함하면 5분 ERROR 가 773줄 — 식에서 뺀 결정이 실측으로 맞음.
+- 가리기 (L7): 모든 회차 금지 패턴 **0**, 가린 줄은 실제로 있음 (계좌 703 ~ 11468줄, 1원인증 코드 58줄 = 주입 58건).
+- 발견: 측정 도구의 L4 기다림이 Alloy 가 다시 넣기까지보다 짧아 유실처럼 보인 것(→ 재계수), 로그 알림은 넘은 뒤 약 3 ~ 4.5분(지표 알림 50초보다 느림), Loki 3.7 자동 라벨 · `detected_level` 끄기, 계좌 가리기 경계에 JSON 이스케이프 추가.
+### CI · 사람 확인
+- CI `k8s-smoke` 20분 제한 (성공 기준 7) — PR CI 에서 기록한다. Grafana 화면 클릭 이동 · 캡처 · Postman `10. 로그 (P9c, kind)` 는 Postman 직접 확인으로 남김.
+
 ## [P9b] 분산 추적 — Micrometer Tracing · OpenTelemetry · Tempo — 2026-11-18 ([#37](https://github.com/hyeokjinON/bank-transfer/pull/37), 머지 후 정리 PR #38)
 ### Added
 - 추적 스타터(`spring-boot-starter-opentelemetry`) · 공용 모듈 `modules/tracing`(내보내기 앞 지우개 `ScrubbingSpanExporter` — 예외 메시지 · 스택 · 상태 설명 제거, `/actuator` 구간 거름). 보내기는 주소가 있을 때만 (kind 의 app-config).

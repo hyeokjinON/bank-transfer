@@ -1,0 +1,47 @@
+# P9c Loki 단일 바이너리 설정 (스펙 §4, 결정 F3 · F5 · F9). 받기 · 조회 = HTTP 3100 (Alloy · Grafana · 스모크 · 실험), 로컬 디스크(emptyDir) · 보관 2일.
+# 로그 알림 규칙은 ConfigMap loki-rules → /etc/loki/rules/fake (auth 를 껐을 때 테넌트 이름이 fake). 객체 저장소 · 읽기/쓰기 분리는 범위 밖 (스펙 §11)
+auth_enabled: false
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9095
+  log_level: info
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /var/loki
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+  storage:
+    filesystem:
+      chunks_directory: /var/loki/chunks
+      rules_directory: /var/loki/rules
+schema_config:
+  configs:
+    - from: "2026-01-01"
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+limits_config:
+  retention_period: 48h            # 보관 2일 (Prometheus · Tempo 와 같다) — compactor 가 지운다
+  allow_structured_metadata: true  # pod · node · level · trace_id (결정 F5)
+  discover_service_name: []        # 3.x 기본은 app 등에서 service_name 라벨을 스스로 만든다 — 라벨은 셋뿐 (F5)
+  discover_log_levels: false       # detected_level 메타데이터도 만들지 않는다 (level 은 Alloy 가 꺼낸다)
+compactor:
+  working_directory: /var/loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem # 보관 기간을 켜면 필요하다
+ruler:
+  storage:
+    type: local
+    local:
+      directory: /etc/loki/rules
+  rule_path: /var/loki/ruler-scratch
+  alertmanager_url: http://alertmanager.monitoring.svc.cluster.local:9093
+  enable_api: true                 # /prometheus/api/v1/rules · alerts (스모크 · check.sh)
+  evaluation_interval: 1m
+analytics:
+  reporting_enabled: false         # 밖으로 나가는 사용 통계를 끈다 (Grafana · Tempo 와 같은 원칙)

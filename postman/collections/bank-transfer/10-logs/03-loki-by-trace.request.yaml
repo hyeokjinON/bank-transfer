@@ -1,0 +1,28 @@
+$kind: http-request
+name: 10-3 trace_id 로 api · 게이트웨이 줄 → 거래번호 저장
+method: GET
+url: 'http://127.0.0.1:3100/loki/api/v1/query_range?query={namespace="bank-transfer", app=~"api|bank-gateway"} | trace_id="{{p9cTraceId}}"&since=15m&limit=50'
+order: 3000
+queryParams:
+  - key: query
+    value: '{namespace="bank-transfer", app=~"api|bank-gateway"} | trace_id="{{p9cTraceId}}"'
+  - key: since
+    value: 15m
+  - key: limit
+    value: '50'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      const result = (pm.response.json().data || {}).result || [];
+      const apps = [...new Set(result.map(r => r.stream.app))].sort();
+      pm.test("api · bank-gateway 둘 다 (traceId 하나로 두 서비스 로그 — 성공 기준 2)", () => pm.expect(apps).to.eql(["api", "bank-gateway"]));
+      const lines = result.flatMap(r => r.values.map(v => v[1]));
+      const gw = lines.find(l => l.includes("bank call type=transfer"));
+      pm.test("게이트웨이 은행 호출 줄 (outcome=ok)", () => pm.expect(gw || "").to.include("outcome=ok"));
+      pm.test("계좌번호 전체가 없다", () => pm.expect(pm.response.text()).to.not.include(pm.collectionVariables.get("accountNo")));
+      const m = /reference=(T[0-9A-Z]{19})/.exec(gw || "");
+      if (m) {
+        pm.collectionVariables.set("p9cReference", m[1]);
+        console.log("거래번호 = " + m[1] + " — 10-4");
+      }

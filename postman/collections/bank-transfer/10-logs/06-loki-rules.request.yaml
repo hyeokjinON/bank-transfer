@@ -1,0 +1,15 @@
+$kind: http-request
+name: 10-6 로그 알림 규칙 → ErrorLogSurge 적재 · 오류 없음
+method: GET
+url: 'http://127.0.0.1:3100/prometheus/api/v1/rules'
+order: 6000
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      const groups = (pm.response.json().data || {}).groups || [];
+      const rules = groups.flatMap(g => g.rules);
+      const surge = rules.find(r => r.name === "ErrorLogSurge");
+      pm.test("ErrorLogSurge 하나 (결정 F9)", () => { pm.expect(rules.length).to.eql(1); pm.expect(surge).to.not.equal(undefined); });
+      pm.test("평가 오류 없음", () => pm.expect(surge && surge.health).to.not.eql("err"));
+      pm.test("이름표 source=logs", () => pm.expect(surge && surge.labels.source).to.eql("logs"));

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 860" width="1600" height="860" font-family="'Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',sans-serif">
-  <title>bank-transfer 실행 구성도 — Kubernetes(kind) · P9b 기준</title>
+  <title>bank-transfer 실행 구성도 — Kubernetes(kind) · P9c 기준</title>
   <defs>
     <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker>
     <marker id="arrB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b45309"/></marker>
@@ -8,6 +8,7 @@
     <marker id="arrS" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker>
     <marker id="arrM" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#047857"/></marker>
     <marker id="arrT" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#be185d"/></marker>
+    <marker id="arrG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#92400e"/></marker>
     <style>
       .t{font-size:20px;font-weight:700;fill:#0f172a}
       .st{font-size:12px;fill:#475569}
@@ -22,8 +23,8 @@
   <rect x="0" y="0" width="1600" height="860" fill="#ffffff"/>
 
   <!-- 제목 · 범례 -->
-  <text class="t" x="20" y="34">bank-transfer 실행 구성도 — Kubernetes(kind) 3노드 · P9b 기준</text>
-  <text class="st" x="20" y="56">2026-11-18 · 실선 = 요청 · 전문 / 점선 상자 = Service(가상 주소, 노드에 속하지 않음) / 파랑 점선 = Lease 갱신 · 획득 / 보라 점선 = 전문번호 구간 예약 / 초록 점선 = 지표 수집 (Prometheus → Pod 직접 5초) / 분홍 점선 = 추적 보내기 (OTLP HTTP, 앱 → Tempo 직접)</text>
+  <text class="t" x="20" y="34">bank-transfer 실행 구성도 — Kubernetes(kind) 3노드 · P9c 기준</text>
+  <text class="st" x="20" y="56">2026-11-19 · 실선 = 요청 · 전문 / 점선 상자 = Service(가상 주소, 노드에 속하지 않음) / 파랑 점선 = Lease 갱신 · 획득 / 보라 점선 = 전문번호 구간 예약 / 초록 점선 = 지표 수집 (Pod 직접 5초) / 분홍 점선 = 추적 보내기 (OTLP HTTP) / 갈색 점선 = 로그 (노드마다 Alloy → Loki 3100)</text>
 
   <!-- PC -->
   <rect class="box" x="20" y="150" width="160" height="90" rx="10"/>
@@ -58,19 +59,21 @@
   <rect x="920" y="244" width="320" height="42" rx="6" fill="#f5f3ff" stroke="#6d28d9"/>
   <text x="1080" y="262" text-anchor="middle"><tspan class="h">Redis 7.4</tspan><tspan class="s" x="1080" dy="16">사용자 락 (redis 차감 전략 선택 시)</tspan></text>
 
-  <!-- P9a · P9b namespace monitoring (제어 노드) -->
+  <!-- P9a · P9b · P9c namespace monitoring (제어 노드) -->
   <rect x="1270" y="134" width="280" height="186" rx="8" fill="#ecfdf5" stroke="#047857" stroke-width="1.3" stroke-dasharray="6 4"/>
-  <text class="h" x="1282" y="153" fill="#065f46">namespace monitoring (P9a · P9b)</text>
+  <text class="h" x="1282" y="153" fill="#065f46">namespace monitoring (P9a · P9b · P9c)</text>
   <rect x="1280" y="160" width="126" height="46" rx="6" fill="#ffffff" stroke="#047857"/>
   <text x="1343" y="179" text-anchor="middle"><tspan class="h">Prometheus</tspan><tspan class="s" x="1343" dy="16">수집 5초 · 규칙 11</tspan></text>
   <rect x="1414" y="160" width="126" height="46" rx="6" fill="#ffffff" stroke="#047857"/>
   <text x="1477" y="179" text-anchor="middle"><tspan class="h">Alertmanager</tspan><tspan class="s" x="1477" dy="16">묶기 10초 · 억제</tspan></text>
   <rect x="1280" y="212" width="126" height="46" rx="6" fill="#ffffff" stroke="#047857"/>
-  <text x="1343" y="231" text-anchor="middle"><tspan class="h">Grafana</tspan><tspan class="s" x="1343" dy="16">대시보드 2 · Tempo</tspan></text>
+  <text x="1343" y="231" text-anchor="middle"><tspan class="h">Grafana</tspan><tspan class="s" x="1343" dy="16">대시 2 · Tempo · Loki</tspan></text>
   <rect x="1414" y="212" width="126" height="46" rx="6" fill="#ffffff" stroke="#047857"/>
   <text x="1477" y="231" text-anchor="middle"><tspan class="h">alert-sink</tspan><tspan class="s" x="1477" dy="16">받은 알림 = 로그</tspan></text>
-  <rect x="1280" y="264" width="260" height="46" rx="6" fill="#fdf2f8" stroke="#be185d"/>
-  <text x="1410" y="283" text-anchor="middle"><tspan class="h">Tempo (P9b)</tspan><tspan class="s" x="1410" dy="16">OTLP HTTP 4318 · 조회 3200 · 보관 2일</tspan></text>
+  <rect x="1280" y="264" width="126" height="46" rx="6" fill="#fdf2f8" stroke="#be185d"/>
+  <text x="1343" y="283" text-anchor="middle"><tspan class="h">Tempo (P9b)</tspan><tspan class="s" x="1343" dy="16">4318 · 3200 · 2일</tspan></text>
+  <rect x="1414" y="264" width="126" height="46" rx="6" fill="#fef3c7" stroke="#92400e"/>
+  <text x="1477" y="283" text-anchor="middle"><tspan class="h">Loki (P9c)</tspan><tspan class="s" x="1477" dy="16">3100 · 2일 · 규칙 1</tspan></text>
   <line x1="1406" y1="183" x2="1412" y2="183" stroke="#047857" stroke-width="1.6" marker-end="url(#arrM)"/>
   <line x1="1477" y1="206" x2="1477" y2="210" stroke="#047857" stroke-width="1.6" marker-end="url(#arrM)"/>
   <!-- 수집: Pod 직접 (워커 2 의 api · 대기 게이트웨이로 대표 — 워커 1 도 같다) -->
@@ -142,4 +145,14 @@
   <polyline points="1210,690 1272,690 1272,535" fill="none" stroke="#be185d" stroke-width="1.5" stroke-dasharray="2 3"/>
   <text class="s" x="1280" y="526" fill="#be185d">분홍 점선 = 추적 (OTLP 4318, 5초 묶음)</text>
   <text class="s" x="1280" y="542" fill="#be185d">워커 1 의 Pod 도 같다 · Collector 없음</text>
+  <!-- P9c Alloy DaemonSet: 노드마다 1개가 /var/log/pods 를 읽어 Loki 로 (가린 뒤) -->
+  <rect x="430" y="290" width="170" height="30" rx="6" fill="#fffbeb" stroke="#92400e" stroke-dasharray="4 3"/>
+  <text x="515" y="309" text-anchor="middle" class="s">Alloy · /var/log/pods</text>
+  <rect x="250" y="556" width="190" height="34" rx="6" fill="#fffbeb" stroke="#92400e" stroke-dasharray="4 3"/>
+  <text x="345" y="577" text-anchor="middle" class="s">Alloy · 가린 뒤 → Loki</text>
+  <rect x="790" y="556" width="190" height="34" rx="6" fill="#fffbeb" stroke="#92400e" stroke-dasharray="4 3"/>
+  <text x="885" y="577" text-anchor="middle" class="s">Alloy · 가린 뒤 → Loki</text>
+  <polyline points="980,573 1256,573 1256,316 1477,316 1477,312" fill="none" stroke="#92400e" stroke-width="1.5" stroke-dasharray="6 3" marker-end="url(#arrG)"/>
+  <text class="s" x="1280" y="706" fill="#92400e">갈색 점선 = 로그 (Alloy → Loki 3100)</text>
+  <text class="s" x="1280" y="722" fill="#92400e">노드 3대 모두 · 계좌 · 금액은 보내기 전 가림</text>
 </svg>

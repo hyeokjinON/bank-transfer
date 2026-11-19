@@ -1,0 +1,8 @@
+{"run":"steady-2","jsonlog":"on","rate":20,"duration_s":60,"settle_s":1,"transfers":1200,
+ "completed_per_s":19.67,"accept_p95_ms":27.884405449999996,"complete_p95_s":0.4631933706445869,"api_cpu_avg":0.05014572077699376,"gw_cpu_avg":0.010253022119603744,
+ "log_lines_per_s":{"api":20.10,"bank-gateway":19.52,"mock-bank":19.50},"log_bytes_per_s":{"api":11111.17,"bank-gateway":9580.02,"mock-bank":3822.00},"loki_cpu_avg":0.026,"loki_rss_max_mb":219,"alloy_cpu_avg":0.030,"alloy_rss_max_mb":234,
+ "l1_samples":20,"l1_p50_ms":1073,"l1_p95_ms":2535,"l1_missing":0,
+ "loss_pod":null,"file_lines":null,"loki_lines":null,"lost_lines":null,"dup_lines":null,
+ "err5m_max":0,"err5m_max_with_dlt":0,"surge_n":10,"surge_cross_s":null,"surge_fired_s":null,"expected_min_s":null,"expected_max_s":null,
+ "api5xx_fired":null,"probe_codes":"","inhibit_ok":null,"surge_sink_firing":0,
+ "forbidden_lines":0,"masked_account_lines":1098,"masked_code_lines":0,"masked_amount_lines":1063}

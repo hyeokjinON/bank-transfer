@@ -1,0 +1,53 @@
+# P9c Loki (스펙 §4, 결정 F3) — 단일 바이너리 1대 + 설정 · 규칙 ConfigMap. Alloy(DaemonSet)가 3100 으로 보내고, Grafana · 스모크 · 실험이 같은 포트로 묻는다.
+# PC 는 port-forward 만. 제어 노드 고정 (P9a 감시 · Tempo 와 같은 자리). emptyDir — Pod 가 바뀌면 로그가 사라진다 (위험 R4, 실험 L4)
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  labels: {app: loki}
+spec:
+  selector: {app: loki}
+  ports:
+    - {name: http, port: 3100}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+spec:
+  replicas: 1
+  strategy: {type: Recreate}   # 한 대 · emptyDir — 겹칠 이유가 없다
+  selector:
+    matchLabels: {app: loki}
+  template:
+    metadata:
+      labels: {app: loki}
+    spec:
+      automountServiceAccountToken: false   # 쿠버네티스 API 를 쓰지 않는다
+      nodeSelector: {bank-transfer/role: infra}
+      tolerations:
+        - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+      securityContext: {runAsUser: 10001, runAsGroup: 10001, runAsNonRoot: true, fsGroup: 10001}
+      containers:
+        - name: loki
+          image: grafana/loki   # 태그 = versions.env LOKI_VERSION (apply_overlay)
+          args: [-config.file=/etc/loki/config/loki.yml, -target=all]
+          ports:
+            - {name: http, containerPort: 3100}
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            periodSeconds: 5
+          resources:
+            requests: {memory: 128Mi, cpu: 50m}
+            limits: {memory: 512Mi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/loki/config}
+            - {name: rules, mountPath: /etc/loki/rules/fake}   # 테넌트 디렉터리 자체에 마운트 — 하위 경로(items)로 두면 심볼릭 링크 디렉터리가 된다
+            - {name: data, mountPath: /var/loki}
+      volumes:
+        - name: config
+          configMap: {name: loki-config}
+        - name: rules
+          configMap: {name: loki-rules}
+        - name: data
+          emptyDir: {sizeLimit: 2Gi}

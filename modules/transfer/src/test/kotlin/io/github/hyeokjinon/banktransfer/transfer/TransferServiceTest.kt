@@ -35,13 +35,13 @@ class TransferServiceTest {
             raceWinner?.let { winner ->
                 raceWinner = null
                 transfers[winner.id] = winner
-                throw StoreConflict.DuplicateIdempotencyKey(transfer.idempotencyKey)
+                throw StoreConflict.DuplicateIdempotencyKey()
             }
             if (referenceConflicts > 0) {
                 referenceConflicts--
                 throw StoreConflict.DuplicateReference(transfer.reference)
             }
-            if (transfer.amount > balance) throw StoreConflict.InsufficientBalance(transfer.userId!!, transfer.amount)
+            if (transfer.amount > balance) throw StoreConflict.InsufficientBalance()
             balance -= transfer.amount
             transfers[transfer.id] = transfer
             events += event
@@ -251,7 +251,7 @@ class TransferServiceTest {
 
     @Test
     fun `저장소가 잔고를 지금 잡지 못하면 WalletBusy 이고 출금 기록 · 이벤트를 남기지 않는다`() {
-        store.failure = StoreConflict.WalletBusy(USER)
+        store.failure = StoreConflict.WalletBusy()
 
         assertFailsWith<TransferException.WalletBusy> { service.request(command()) }
 
@@ -261,7 +261,7 @@ class TransferServiceTest {
 
     @Test
     fun `동시 변경으로 저장소가 포기하면 ConcurrentUpdate - 같은 요청을 다시 보내면 새로 접수된다`() {
-        store.failure = StoreConflict.ConcurrentUpdate(USER)
+        store.failure = StoreConflict.ConcurrentUpdate()
 
         assertFailsWith<TransferException.ConcurrentUpdate> { service.request(command(key = "k-retry")) }
         val retried = service.request(command(key = "k-retry"))   // Retry-After 뒤 같은 요청 — 앞 시도는 아무것도 남기지 않았다

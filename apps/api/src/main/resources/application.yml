@@ -210,3 +210,9 @@ info:
     maximum-pool-size: ${spring.datasource.hikari.maximum-pool-size}
   threads:
     virtual: ${spring.threads.virtual.enabled}   # 지금 가상 스레드 여부 (P7, load/verification · load/consumer run.sh 가 측정 전에 확인)
+
+logging:
+  level:
+    # P9c (결정 F6 ①): Hibernate 7 은 제약 위반을 WARN 두 줄로 찍으며 값을 싣는다 — Duplicate entry '<사용자 id>-<Idempotency-Key>'.
+    # 저장소(JpaTransferStore)가 도메인 예외(DuplicateIdempotencyKey · DuplicateReference)로 바꿔 처리하므로 ERROR 만 남긴다 (모든 환경)
+    org.hibernate.orm.jdbc.error: ERROR

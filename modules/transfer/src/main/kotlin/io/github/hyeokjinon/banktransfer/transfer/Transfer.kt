@@ -58,10 +58,12 @@ data class Transfer(
         return copy(status = next, updatedAt = at, sendingAt = if (next == TransferStatus.SENDING) at else sendingAt)
     }
 
-    /** 로그에 계좌번호 · 적요가 그대로 남지 않게 한다 (data class 기본 toString 은 모든 필드를 찍는다). */
+    /**
+     * 로그에 계좌번호 · 적요 · 사용자 id · 금액이 남지 않게 한다 (data class 기본 toString 은 모든 필드를 찍는다, P9c 결정 F6 ①).
+     * 찾기는 id · reference(거래번호)로 — 정리 작업의 WARN · ERROR 줄이 이 문자열을 찍는다.
+     */
     override fun toString(): String =
-        "Transfer(id=$id, userId=$userId, reference=$reference, status=$status, bankCode=$bankCode, accountNo=${maskAccountNo(accountNo)}, " +
-            "amount=$amount, bankResponseCode=$bankResponseCode)"
+        "Transfer(id=$id, reference=$reference, status=$status, bankCode=$bankCode, accountNo=${maskAccountNo(accountNo)}, bankResponseCode=$bankResponseCode)"
 }
 
 /** 뒤 4자리만 남긴다: 1002123456789 -> *********6789 */
@@ -208,22 +210,25 @@ interface TransferStore {
     fun fail(id: UUID, from: TransferStatus, at: Instant, bankResponseCode: String, sentWithin: OpenEndRange<Instant>? = null): Boolean
 }
 
-/** 저장소가 UNIQUE 제약 위반을 도메인 말로 알려 줄 때 쓴다. */
+/**
+ * 저장소가 UNIQUE 제약 위반을 도메인 말로 알려 줄 때 쓴다.
+ * 메시지에는 사용자 id · Idempotency-Key · 금액을 싣지 않는다 — 처리되지 않은 예외로 올라가면 메시지 · 스택이 로그에 찍힌다 (P9c 결정 F6 ①).
+ */
 sealed class StoreConflict(message: String) : RuntimeException(message) {
-    class DuplicateIdempotencyKey(key: String) : StoreConflict("idempotency key '$key' already exists")
+    class DuplicateIdempotencyKey : StoreConflict("idempotency key already exists")
     class DuplicateReference(reference: String) : StoreConflict("reference '$reference' already exists")
 
     /** 잔고가 출금액보다 적다 (지갑이 없으면 잔고 0). 저장소는 아무것도 남기지 않고 롤백한다 (P4-1). */
-    class InsufficientBalance(userId: String, amount: Long) : StoreConflict("balance of '$userId' is less than $amount")
+    class InsufficientBalance : StoreConflict("balance is less than the amount")
 
     /**
      * 지금 잔고를 잡지 못했다 — 락 대기 한도 초과 · 데드락 · 분산락 대기 초과 · 분산락 저장소 장애 (P4-2).
      * 어떤 락인지는 저장소만 안다. 아무것도 남기지 않았고, 잠시 뒤 다시 하면 될 수 있다.
      */
-    class WalletBusy(userId: String) : StoreConflict("wallet of '$userId' is busy, try again later")
+    class WalletBusy : StoreConflict("wallet is busy, try again later")
 
     /** 다른 변경과 계속 부딪혀 저장소가 정한 횟수만큼 다시 하고도 포기했다 (P4-2, 낙관적 락). 아무것도 남기지 않았다. */
-    class ConcurrentUpdate(userId: String) : StoreConflict("wallet of '$userId' kept changing concurrently, try again later")
+    class ConcurrentUpdate : StoreConflict("wallet kept changing concurrently, try again later")
 }
 
 /**

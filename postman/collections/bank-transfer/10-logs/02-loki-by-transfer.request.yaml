@@ -1,0 +1,35 @@
+$kind: http-request
+name: 10-2 출금 id 로 api 처리 줄 찾기 → trace_id 저장
+method: GET
+url: 'http://127.0.0.1:3100/loki/api/v1/query_range?query={namespace="bank-transfer", app="api"} |= "{{p9cTransferId}}" |= "processed"&since=15m&limit=20'
+order: 2000
+queryParams:
+  - key: query
+    value: '{namespace="bank-transfer", app="api"} |= "{{p9cTransferId}}" |= "processed"'
+  - key: since
+    value: 15m
+  - key: limit
+    value: '20'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // 3100 port-forward 창이 꺼져 있으면 연결 오류. 수집은 보통 몇 초 — 러너는 5초 간격 최대 6번 다시 묻는다
+      const result = (pm.response.json().data || {}).result || [];
+      const hit = result.find(r => r.stream && r.stream.trace_id);
+      const tries = Number(pm.collectionVariables.get("p9cTries") || "0");
+      if (!hit && tries < 6) {
+        pm.collectionVariables.set("p9cTries", String(tries + 1));
+        console.log("아직 수집 전 — 5초 뒤 다시 (" + (tries + 1) + "/6)");
+        pm.execution.setNextRequest(pm.info.requestName);
+        setTimeout(() => {}, 5000);
+      } else {
+        pm.collectionVariables.set("p9cTries", "0");
+        pm.test("api 처리 줄이 Loki 에 있다", () => pm.expect(result.length).to.be.above(0));
+        pm.test("그 줄에 trace_id 메타데이터가 있다 (JSON 의 traceId 를 Alloy 가 꺼냈다)", () => pm.expect(hit).to.not.equal(undefined));
+        pm.test("라벨은 namespace · app · container (+ 메타데이터) — filename 라벨 없음", () => pm.expect(hit && hit.stream.filename).to.equal(undefined));
+        if (hit) {
+          pm.collectionVariables.set("p9cTraceId", hit.stream.trace_id);
+          console.log("trace_id = " + hit.stream.trace_id + " — 10-3 또는 Grafana Explore → Tempo");
+        }
+      }

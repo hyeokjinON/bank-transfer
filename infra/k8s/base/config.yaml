@@ -13,6 +13,9 @@ data:
   # P9b: 추적 보내기 — kind 에만 (결정 E3 · E5). 앱 기본은 주소 없음 = 보내지 않음. 샘플링 끔 실험(T1)은 load/k8s/p9b.sh 가 0.0 으로 바꿨다 되돌린다
   MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://tempo.monitoring.svc.cluster.local:4318/v1/traces
   MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
+  # P9c: 구조화 로그(JSON, Spring Boot ECS) — kind 에만 (결정 F4). 로컬 · IntelliJ · Compose 는 텍스트 그대로.
+  # Alloy 가 log.level · traceId 를 정규식 없이 꺼낸다. JSON 끔 실험(L2)은 load/k8s/p9c.sh 가 이 키를 지웠다 되돌린다
+  LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
   MYSQL_HOST: mysql
   MYSQL_PORT: "3306"
   KAFKA_BOOTSTRAP_SERVERS: kafka-0.kafka.bank-transfer.svc.cluster.local:9092

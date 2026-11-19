@@ -1,0 +1,31 @@
+$kind: http-request
+name: 10-1 출금 1만 원 → 202 (출금 id 저장)
+method: POST
+url: 'http://127.0.0.1:8000/api/v1/transfers'
+order: 1000
+headers:
+  - key: Content-Type
+    value: application/json
+  - key: X-User-Id
+    value: '{{userId}}'
+  - key: Idempotency-Key
+    value: '{{$guid}}'
+body:
+  type: json
+  content: |-
+    {
+      "bankCode": "090",
+      "accountNo": "{{accountNo}}",
+      "amount": 10000,
+      "memo": "P9c"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("202 RECEIVED", () => pm.response.to.have.status(202));
+      if (pm.response.code === 202) {
+        pm.collectionVariables.set("p9cTransferId", pm.response.json().id);
+        pm.collectionVariables.set("p9cTries", "0");
+        console.log("출금 id = " + pm.response.json().id + " — 몇 초 뒤 10-2");
+      }

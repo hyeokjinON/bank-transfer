@@ -11,6 +11,7 @@ resources:
   - bank-gateway.yaml
   - rbac-gateway.yaml   # ConfigMap bank-gateway-tran-no 는 일부러 없다 — 다시 apply 하면 reservedTo 가 되돌아가 전문번호가 겹친다 (처음 예약자가 만든다)
   - rbac-prometheus.yaml   # P9a: Prometheus 가 이 namespace 의 Pod 를 찾는다 (Role — ClusterRole 아님)
+  - rbac-alloy.yaml   # P9c: Alloy 가 이 namespace 의 Pod 를 찾는다 (Role — ClusterRole 아님)
   - api.yaml
   - gateway.yaml
   - networkpolicy.yaml

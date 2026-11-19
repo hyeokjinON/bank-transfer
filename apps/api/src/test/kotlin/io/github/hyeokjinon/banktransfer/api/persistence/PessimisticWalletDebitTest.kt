@@ -7,7 +7,10 @@ import io.github.hyeokjinon.banktransfer.transfer.StoreConflict
 import io.github.hyeokjinon.banktransfer.transfer.Transfer
 import io.github.hyeokjinon.banktransfer.transfer.TransferEvent
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.transaction.support.TransactionTemplate
@@ -21,10 +24,12 @@ import javax.sql.DataSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** 비관적 락 전략 (P4-2): SELECT … FOR UPDATE 로 지갑 행을 잡고, 읽은 값에서 빼 쓴다. 락 대기 한도를 넘으면 WalletBusy(503). */
+@ExtendWith(OutputCaptureExtension::class)
 class PessimisticWalletDebitTest : ApiIntegrationTest() {
 
     @Autowired private lateinit var transfers: TransferJpaRepository
@@ -87,7 +92,7 @@ class PessimisticWalletDebitTest : ApiIntegrationTest() {
     }
 
     @Test
-    fun `다른 트랜잭션이 지갑 행을 잡고 놓지 않으면 락 대기 한도 뒤 WalletBusy, 출금 · 원장 · 아웃박스 없음`() {
+    fun `다른 트랜잭션이 지갑 행을 잡고 놓지 않으면 락 대기 한도 뒤 WalletBusy, 출금 · 원장 · 아웃박스 없음`(output: CapturedOutput) {
         val user = fundedUser(30_000)
         val locked = CountDownLatch(1)
         val release = CountDownLatch(1)
@@ -127,5 +132,7 @@ class PessimisticWalletDebitTest : ApiIntegrationTest() {
         assertEquals(emptyList(), ledgerTypes(t.id))
         assertEquals(0, outbox.countByAggregateId(t.id.toString()))
         assertEquals(30_000L, wallets.balanceOf(user))
+        assertTrue("is busy (lock wait timeout or deadlock)" in output.out, "WALLET_BUSY 로그가 없다")
+        assertFalse(user in output.out, "로그에 사용자 id 가 있다 (P9c 결정 F6 ①)")
     }
 }

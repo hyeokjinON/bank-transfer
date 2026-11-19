@@ -1,4 +1,5 @@
 # P9a Grafana 데이터소스 (프로비저닝 — 손으로 만들지 않는다). uid 를 고정해 대시보드 JSON 이 이 이름으로 찾는다
+# 값 안의 $ 는 Grafana 가 환경변수로 바꾸므로 $$ 로 쓴다 (P9c 의 ${__value.raw} · ${__span.traceId})
 apiVersion: 1
 datasources:
   - name: Prometheus
@@ -13,10 +14,35 @@ datasources:
       exemplarTraceIdDestinations:          # P9b (덤): 지표 점 → Tempo trace (Micrometer 의 exemplar 라벨 이름 trace_id)
         - name: trace_id
           datasourceUid: tempo
-  # P9b: Explore 에서 TraceQL (예 { span.transfer.id = "<출금 id>" }). 서비스 맵 · 로그 연결은 범위 밖 (P9c)
+  # P9b: Explore 에서 TraceQL (예 { span.transfer.id = "<출금 id>" }). P9c: trace → 로그 — 같은 traceId 의 Loki 줄, 구간 앞뒤 1분 (결정 F7)
   - name: Tempo
     uid: tempo
     type: tempo
     access: proxy
     url: http://tempo.monitoring.svc.cluster.local:3200
     editable: false
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: -1m
+        spanEndTimeShift: 1m
+        filterByTraceID: false
+        filterBySpanID: false
+        customQuery: true
+        query: '{namespace="bank-transfer"} | trace_id="$${__span.traceId}"'
+  # P9c: 로그. 줄의 구조화 메타데이터 trace_id → Tempo (파생 필드, 결정 F7). 라벨은 namespace · app · container 뿐 (F5)
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki.monitoring.svc.cluster.local:3100
+    editable: false
+    jsonData:
+      maxLines: 1000
+      derivedFields:
+        - name: trace_id
+          matcherType: label
+          matcherRegex: trace_id
+          datasourceUid: tempo
+          url: '$${__value.raw}'
+          urlDisplayLabel: Tempo 에서 trace 보기

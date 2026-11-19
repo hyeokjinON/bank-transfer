@@ -132,6 +132,8 @@ jobs:
           echo "$(curl -fsSL "https://dl.k8s.io/release/$KUBECTL_VERSION/bin/linux/amd64/kubectl.sha256")  kubectl" | sha256sum -c -
           chmod +x kind kubectl && sudo mv kind kubectl /usr/local/bin/
           kind version && kubectl version --client
+      - name: inotify 한도 올리기 (kind 권장 — 노드 3개가 러너 커널을 같이 쓴다)
+        run: sudo sysctl -w fs.inotify.max_user_instances=512 fs.inotify.max_user_watches=524288
       - name: 매니페스트 빌드 (모든 overlay)
         run: for o in infra/k8s/overlays/*/; do kubectl kustomize "$o" > /dev/null && echo "ok $o"; done
       - uses: docker/setup-buildx-action@v4
@@ -180,7 +182,8 @@ jobs:
           kubectl --context kind-bank-transfer -n envoy-gateway-system logs -l app.kubernetes.io/name=envoy --all-containers --tail=200 || true
           kubectl --context kind-bank-transfer get events -A --sort-by=.lastTimestamp | tail -50 || true
           kubectl --context kind-bank-transfer -n bank-transfer get gateways.gateway.networking.k8s.io,httproutes -o yaml || true
-          for a in prometheus alertmanager alert-sink grafana tempo; do echo "=== monitoring/$a"; kubectl --context kind-bank-transfer -n monitoring logs deploy/$a --tail=200 || true; done
+          for a in prometheus alertmanager alert-sink grafana tempo loki; do echo "=== monitoring/$a"; kubectl --context kind-bank-transfer -n monitoring logs deploy/$a --tail=200 || true; done
+          echo "=== monitoring/alloy"; kubectl --context kind-bank-transfer -n monitoring logs -l app=alloy --prefix --tail=100 || true
           kubectl --context kind-bank-transfer -n monitoring get pods -o wide || true
       - name: Stop
         if: always()

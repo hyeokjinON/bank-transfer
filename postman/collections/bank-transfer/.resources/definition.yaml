@@ -21,6 +21,11 @@ variables:
   p9bTransferId: ""
   p9bTraceId: ""
   p9bTries: "0"
+  p9cTransferId: ""
+  p9cTraceId: ""
+  p9cReference: ""
+  p9cTries: "0"
+  p9cForbiddenQuery: ""
   userId: user-1
   accountNo: "1002123456789"
   code: ""

@@ -15,3 +15,6 @@ Dockerfile text eol=lf
 infra/k8s/monitoring/**/*.json text eol=lf
 # 실험 분석 Python (P9b) — Windows(autocrlf) 체크아웃에서도 LF
 *.py text eol=lf
+# Alloy 설정 · 가리기 표본 (P9c) — ConfigMap 으로 싣거나 CI 컨테이너가 읽는 파일. Windows(autocrlf) 체크아웃에서도 LF
+*.alloy text eol=lf
+infra/k8s/monitoring/alloy/sample/*.txt text eol=lf

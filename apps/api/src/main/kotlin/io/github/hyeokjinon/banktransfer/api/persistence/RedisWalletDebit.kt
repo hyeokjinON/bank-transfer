@@ -35,40 +35,42 @@ class RedisWalletDebit(
         val acquired = try {
             lock.tryLock(waitTime.toMillis(), TimeUnit.MILLISECONDS)
         } catch (e: RedisException) {
-            // 클라이언트에게는 락 경합과 같은 503 이지만 운영자는 구분해야 한다 → ERROR
-            log.error("redis unavailable for wallet lock of {}, rejecting (fail-closed)", userId, e)
-            throw StoreConflict.WalletBusy(userId)
+            // 클라이언트에게는 락 경합과 같은 503 이지만 운영자는 구분해야 한다 → ERROR.
+            // 사용자 id 도, 예외 메시지 · 스택도 싣지 않는다 — Redisson 시간 초과 메시지는 명령 인자(락 이름 = lock:wallet:<사용자 id>)를 싣는다 (P9c 결정 F6 ①)
+            log.error("redis unavailable for wallet lock, rejecting (fail-closed): {}", e.javaClass.name)
+            throw StoreConflict.WalletBusy()
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
-            throw StoreConflict.WalletBusy(userId)
+            throw StoreConflict.WalletBusy()
         }
         if (!acquired) {
-            // 핫스팟에서는 흔한 결과라 INFO (부하 측정은 WARN 으로 돌린다)
-            log.info("wallet lock of {} not acquired within {}, answering WALLET_BUSY", userId, waitTime)
-            throw StoreConflict.WalletBusy(userId)
+            // 핫스팟에서는 흔한 결과라 INFO (부하 측정은 WARN 으로 돌린다). 같은 줄의 traceId 로 요청을 찾는다 (P9c)
+            log.info("wallet lock not acquired within {}, answering WALLET_BUSY", waitTime)
+            throw StoreConflict.WalletBusy()
         }
         try {
             // 접수 트랜잭션은 이 안에서 시작 · 커밋된다 → 아래 unlock 은 커밋 뒤다 (JpaTransferStore 가 바깥 트랜잭션을 거부해 보장한다)
             return transaction()
         } finally {
-            unlockQuietly(lock, userId)
+            unlockQuietly(lock)
         }
     }
 
     override fun withdraw(userId: String, transferId: UUID, amount: Long, at: Instant): Boolean =
         inner.withdraw(userId, transferId, amount, at)
 
-    private fun unlockQuietly(lock: RLock, userId: String) {
+    /** 해제 실패는 결과를 바꾸지 않는다. 로그에는 예외 클래스 이름만 — 메시지에 락 이름(사용자 id)이 실릴 수 있다 (P9c). */
+    private fun unlockQuietly(lock: RLock) {
         try {
             lock.unlock()
         } catch (e: RedisException) {
-            log.error("failed to unlock wallet lock of {} after commit; it expires by lease", userId, e)
+            log.error("failed to unlock wallet lock after commit; it expires by lease: {}", e.javaClass.name)
         } catch (e: IllegalMonitorStateException) {
             // 연장이 끊겨(긴 GC 멈춤 등) 이미 만료됐다. 안쪽이 조건부 UPDATE 라 잔고는 틀리지 않았다 (ADR-0009)
-            log.error("wallet lock of {} expired before unlock", userId, e)
+            log.error("wallet lock expired before unlock: {}", e.javaClass.name)
         } catch (e: RuntimeException) {
             // 알려진 두 경우 말고도 finally 에서 던지면 커밋된 접수가 500 이 되거나 트랜잭션의 진짜 예외를 가린다 → 로그만 남기고 삼킨다
-            log.error("unexpected failure while unlocking wallet lock of {}; it expires by lease", userId, e)
+            log.error("unexpected failure while unlocking wallet lock; it expires by lease: {}", e.javaClass.name)
         }
     }
 
