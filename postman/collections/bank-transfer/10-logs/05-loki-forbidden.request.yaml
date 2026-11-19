@@ -1,0 +1,22 @@
+$kind: http-request
+name: 10-5 금지 패턴 (가리지 않은 계좌 · 적요 코드 · 금액) 지난 1시간 → 0
+method: GET
+url: 'http://127.0.0.1:3100/loki/api/v1/query?query={{p9cForbiddenQuery}}'
+order: 5000
+queryParams:
+  - key: query
+    value: '{{p9cForbiddenQuery}}'
+scripts:
+  - type: beforeRequest
+    language: text/javascript
+    code: |-
+      // 정규식 글자(| ` \ ^ $)를 Postman 이 그대로 보내지 않게 미리 인코딩한다. '원' 은 \x{C6D0}
+      const q = 'sum(count_over_time({namespace="bank-transfer"} |~ `(^|\\\\[nrtbf]|\\\\u[0-9A-Fa-f]{4}|[^0-9A-Za-z])[0-9]{10,14}([^0-9A-Za-z]|$)|BT[0-9]{4}|[0-9]\\x{C6D0}` [1h]))';
+      pm.collectionVariables.set("p9cForbiddenQuery", encodeURIComponent(q));
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      const body = pm.response.json();
+      const result = (body.data || {}).result || [];
+      pm.test("질의 성공", () => pm.expect(body.status).to.eql("success"));
+      pm.test("금지 패턴 0줄 (빈 결과 = 0)", () => pm.expect(result.length === 0 || result[0].value[1] === "0").to.be.true);

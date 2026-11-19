@@ -1,0 +1,10 @@
+$kind: collection
+name: 10. 로그 (P9c, kind)
+description: |-
+  P9c 머지 전 Postman 직접 확인. kind 전용 — 주소는 요청에 직접 적었다 (입구 http://127.0.0.1:8000 · Loki http://127.0.0.1:3100).
+  먼저 Git Bash 창에 port-forward 를 켜 둔다:
+    kubectl --context kind-bank-transfer -n monitoring port-forward svc/loki 3100:3100
+    kubectl --context kind-bank-transfer -n monitoring port-forward svc/grafana 3000:3000
+  10-1 출금 → 10-2 (수집까지 몇 초 — Run folder 면 5초 간격 최대 6번 스스로 다시 묻는다) → 10-3 ~ 10-6.
+  userId 는 kind 에서 accountNo 를 1원인증한 사용자여야 한다 (아니면 10-1 이 422 ACCOUNT_NOT_VERIFIED — 8. 관측 폴더 설명 참고).
+order: 10000

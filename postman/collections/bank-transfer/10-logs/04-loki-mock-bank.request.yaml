@@ -1,0 +1,23 @@
+$kind: http-request
+name: 10-4 거래번호로 모의 은행 통장 줄 → 계좌 · 금액이 가려져 있다
+method: GET
+url: 'http://127.0.0.1:3100/loki/api/v1/query_range?query={namespace="bank-transfer", app="mock-bank"} |= "{{p9cReference}}"&since=15m&limit=5'
+order: 4000
+queryParams:
+  - key: query
+    value: '{namespace="bank-transfer", app="mock-bank"} |= "{{p9cReference}}"'
+  - key: since
+    value: 15m
+  - key: limit
+    value: '5'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      // 모의 은행 콘솔(kubectl logs)에는 원래 모양이 그대로 있다 — Loki 사본만 Alloy 가 가린다 (결정 F6)
+      const lines = ((pm.response.json().data || {}).result || []).flatMap(r => r.values.map(v => v[1]));
+      const line = lines.find(l => l.includes("거래번호=" + pm.collectionVariables.get("p9cReference"))) || "";
+      pm.test("통장 줄이 있다", () => pm.expect(line).to.not.equal(""));
+      pm.test("계좌는 끝 4자리만", () => pm.expect(line).to.include("*********6789"));
+      pm.test("금액은 ***원", () => pm.expect(line).to.include("***원"));
+      pm.test("계좌번호 전체가 없다", () => pm.expect(line).to.not.include(pm.collectionVariables.get("accountNo")));
