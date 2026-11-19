@@ -86,7 +86,7 @@ class BankConnectionOwner(
         withClient(BankRequestType.INQUIRY, reference) { it.inquire(reference) }
 
     /**
-     * 은행 호출은 모두 여기를 지난다 — 지표(P9a) · 추적 구간(P9b)도 여기 한 곳. 돌려주는 future 는 원래 것 그대로다:
+     * 은행 호출은 모두 여기를 지난다 — 지표(P9a) · 추적 구간(P9b) · 호출 로그 한 줄(P9c)도 여기 한 곳. 돌려주는 future 는 원래 것 그대로다:
      * whenComplete 는 옆가지라 취소 · 완료 의미를 바꾸지 않는다 (GatewayEndpoints 의 "취소가 원본으로 번지지 않는다" 그대로).
      * 구간은 지금 구간(서버 요청)의 자식으로 열고, 완료 콜백(은행 Netty 이벤트 루프)에서 객체를 직접 들고 닫는다.
      * 추적 호출은 BankRequestTracing 안에서 던지지 않게 막혀 있다 (E10) — 은행 호출은 정확히 한 번, 결과 그대로.
@@ -99,6 +99,9 @@ class BankConnectionOwner(
             // 구간을 먼저 닫는다 — 지표가 던져도 구간이 열린 채 남지 않게 (E10). 지표 실패는 은행 호출 결과에 번지지 않는다
             runCatching { tracing.end(span, value, error) }.onFailure { log.warn("bank.request 구간 닫기 실패 — {}", it.javaClass.name) }
             runCatching { metrics.recordBankCall(type, System.nanoTime() - startedAt, value, error) }.onFailure { log.warn("은행 호출 지표 기록 실패 — {}", it.javaClass.name) }
+            // P9c: 결과 한 줄을 구간 문맥에서 — traceId 로 게이트웨이 줄을 찾고, 그 줄의 reference 로 모의 은행 통장 줄을 찾는다
+            runCatching { tracing.inScope(span) { BankCallLog.write(type, reference, value, error, System.nanoTime() - startedAt) } }
+                .onFailure { log.warn("은행 호출 로그 실패 — {}", it.javaClass.name) }
         }
         return result
     }

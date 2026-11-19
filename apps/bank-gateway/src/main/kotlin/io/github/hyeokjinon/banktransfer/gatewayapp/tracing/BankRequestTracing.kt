@@ -40,6 +40,19 @@ class BankRequestTracing(private val tracer: Tracer) {
         runCatching { span.end() }.onFailure { warnOnce("end", it) }   // 속성이 실패해도 구간은 닫는다
     }
 
+    /**
+     * [block] 을 [span] 의 문맥에서 돌린다 — MDC 에 그 구간의 traceId · spanId 가 실린다 (P9c: 완료 콜백은 은행 Netty 스레드라 문맥이 없다).
+     * 범위를 못 열어도 [block] 은 돈다 (E10 — 추적 · 로그 실패가 은행 결과에 번지지 않는다).
+     */
+    fun inScope(span: Span, block: () -> Unit) {
+        val scope = runCatching { tracer.withSpan(span) }.onFailure { warnOnce("scope", it) }.getOrNull()
+        try {
+            block()
+        } finally {
+            runCatching { scope?.close() }.onFailure { warnOnce("scope close", it) }
+        }
+    }
+
     private fun unwrap(e: Throwable?): Throwable? = if (e is CompletionException && e.cause != null) e.cause else e
 
     private fun warnOnce(what: String, e: Throwable) {
