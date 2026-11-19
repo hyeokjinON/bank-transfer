@@ -171,12 +171,14 @@ class TransferProcessorTest {
     }
 
     @Test
-    fun `toString 은 계좌번호 뒤 4자리만, 적요는 찍지 않는다`() {
-        val text = received().toString()
+    fun `toString 은 계좌번호 뒤 4자리만, 적요 · 사용자 id · 금액은 찍지 않는다`() {
+        val text = received().copy(userId = "user-secret-7", amount = 7_654_321).toString()
 
         assertTrue("*********6789" in text, text)
         assertFalse("1002123456789" in text, text)
         assertFalse("출금" in text, text)
+        assertFalse("user-secret-7" in text, text)   // 정리 작업의 WARN · ERROR 가 이 문자열을 찍는다 (P9c 결정 F6 ①)
+        assertFalse("7654321" in text, text)
     }
 
     @Test

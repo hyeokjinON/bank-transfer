@@ -9,7 +9,10 @@ import io.github.hyeokjinon.banktransfer.transfer.TransferStatus
 import org.redisson.Redisson
 import org.redisson.api.RLock
 import org.redisson.api.RedissonClient
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.transaction.support.TransactionSynchronizationManager
@@ -33,6 +36,7 @@ import kotlin.test.assertTrue
  * Redis 분산락 전략 (P4-2): 락은 DB 앞에서 같은 사용자 요청을 줄 세우는 문으로만 쓰고, 정확성은 안쪽의 조건부 UPDATE + CHECK 가 지킨다.
  * 락은 접수 트랜잭션 바깥에서 잡고 커밋이 끝난 뒤 푼다 — 먼저 풀면 다음 요청이 커밋 전 잔고를 보고 줄 세우기가 무너진다.
  */
+@ExtendWith(OutputCaptureExtension::class)
 class RedisWalletDebitTest : ApiIntegrationTest() {
 
     @Autowired private lateinit var transfers: TransferJpaRepository
@@ -105,7 +109,7 @@ class RedisWalletDebitTest : ApiIntegrationTest() {
     }
 
     @Test
-    fun `다른 쪽이 락을 쥐고 있으면 대기 시간 뒤 WalletBusy, 아무것도 남지 않는다`() {
+    fun `다른 쪽이 락을 쥐고 있으면 대기 시간 뒤 WalletBusy, 아무것도 남지 않는다`(output: CapturedOutput) {
         val user = fundedUser(30_000)
         val key = RedisWalletDebit.lockKey(user)
         // 다른 스레드가 쥔다 — 같은 스레드면 Redisson 락은 재진입이라 바로 잡혀 버린다
@@ -125,6 +129,8 @@ class RedisWalletDebitTest : ApiIntegrationTest() {
         assertNull(transfers.findById(t.id.toString()).orElse(null))
         assertEquals(30_000L, wallets.balanceOf(user))
         assertEquals(emptyList(), ledgerTypes(t.id))
+        assertTrue("wallet lock not acquired within" in output.out, "WALLET_BUSY 로그가 없다")
+        assertFalse(user in output.out, "로그에 사용자 id 가 있다 (P9c 결정 F6 ①)")
     }
 
     @Test
@@ -148,7 +154,7 @@ class RedisWalletDebitTest : ApiIntegrationTest() {
     }
 
     @Test
-    fun `unlock 이 Redis 예외가 아닌 예외로 실패해도 이미 커밋된 접수는 그대로 반환된다`() {
+    fun `unlock 이 Redis 예외가 아닌 예외로 실패해도 이미 커밋된 접수는 그대로 반환된다`(output: CapturedOutput) {
         val user = fundedUser(30_000)
         val t = newTransfer(user)
         // onUnlock 이 던지면 진짜 unlock 은 불리지 않는다 → 락이 남으므로 끝에서 직접 푼다
@@ -164,10 +170,12 @@ class RedisWalletDebitTest : ApiIntegrationTest() {
         assertEquals(1, transfers.findById(t.id.toString()).map { 1 }.orElse(0))
         assertEquals(20_000L, wallets.balanceOf(user))
         assertEquals(listOf("WITHDRAW"), ledgerTypes(t.id))
+        assertTrue("unexpected failure while unlocking wallet lock" in output.out, "해제 실패 로그가 없다")
+        assertFalse(user in output.out, "로그에 사용자 id 가 있다 (P9c 결정 F6 ①)")
     }
 
     @Test
-    fun `Redis 에 닿지 않으면 WalletBusy (fail-closed) 이고 아무것도 남지 않는다`() {
+    fun `Redis 에 닿지 않으면 WalletBusy (fail-closed) 이고 아무것도 남지 않는다`(output: CapturedOutput) {
         // 아무것도 듣지 않는 포트. lazyInitialization 이라 만들 때는 붙지 않고 첫 명령(tryLock)에서 실패한다
         val unreachable = Redisson.create(redissonConfig("redis://127.0.0.1:1"))
         val user = fundedUser(30_000)
@@ -184,5 +192,7 @@ class RedisWalletDebitTest : ApiIntegrationTest() {
         }
         assertNull(transfers.findById(t.id.toString()).orElse(null))
         assertEquals(30_000L, wallets.balanceOf(user))
+        assertTrue("redis unavailable for wallet lock" in output.out, "Redis 장애 로그가 없다")
+        assertFalse(user in output.out, "로그에 사용자 id 가 있다 — Redisson 예외 메시지에는 락 이름(lock:wallet:<사용자 id>)이 실린다")
     }
 }

@@ -6,7 +6,10 @@ import io.github.hyeokjinon.banktransfer.transfer.StoreConflict
 import io.github.hyeokjinon.banktransfer.transfer.Transfer
 import io.github.hyeokjinon.banktransfer.transfer.TransferEvent
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.transaction.support.TransactionTemplate
@@ -19,6 +22,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -26,6 +30,7 @@ import kotlin.test.assertTrue
  * 낙관적 락 전략 (P4-2): 락 없이 잔고 · version 을 읽고, version 이 그대로일 때만 쓴다. 바뀌었으면 트랜잭션 전체를 처음부터 다시.
  * 충돌은 훅(beforeWrite)에서 다른 트랜잭션이 version 을 올려 결정적으로 만든다. 재시도 대기는 주입한 sleeper 로 기록만 한다 (테스트가 실제로 자지 않게).
  */
+@ExtendWith(OutputCaptureExtension::class)
 class OptimisticWalletDebitTest : ApiIntegrationTest() {
 
     @Autowired private lateinit var transfers: TransferJpaRepository
@@ -83,7 +88,7 @@ class OptimisticWalletDebitTest : ApiIntegrationTest() {
     }
 
     @Test
-    fun `5번 모두 충돌하면 ConcurrentUpdate 이고 출금 · 원장 · 아웃박스 모두 남지 않는다 (대기 4번)`() {
+    fun `5번 모두 충돌하면 ConcurrentUpdate 이고 출금 · 원장 · 아웃박스 모두 남지 않는다 (대기 4번)`(output: CapturedOutput) {
         val user = fundedUser(30_000)
         var calls = 0
         val t = newTransfer(user)
@@ -98,6 +103,8 @@ class OptimisticWalletDebitTest : ApiIntegrationTest() {
         assertNull(transfers.findById(t.id.toString()).orElse(null))
         assertEquals(emptyList(), ledgerTypes(t.id))
         assertEquals(0, outbox.countByAggregateId(t.id.toString()))
+        assertTrue("wallet kept changing for 5 attempts" in output.out, "CONCURRENT_UPDATE 로그가 없다")
+        assertFalse(user in output.out, "로그에 사용자 id 가 있다 (P9c 결정 F6 ①)")
     }
 
     @Test

@@ -58,10 +58,12 @@ data class Transfer(
         return copy(status = next, updatedAt = at, sendingAt = if (next == TransferStatus.SENDING) at else sendingAt)
     }
 
-    /** 로그에 계좌번호 · 적요가 그대로 남지 않게 한다 (data class 기본 toString 은 모든 필드를 찍는다). */
+    /**
+     * 로그에 계좌번호 · 적요 · 사용자 id · 금액이 남지 않게 한다 (data class 기본 toString 은 모든 필드를 찍는다, P9c 결정 F6 ①).
+     * 찾기는 id · reference(거래번호)로 — 정리 작업의 WARN · ERROR 줄이 이 문자열을 찍는다.
+     */
     override fun toString(): String =
-        "Transfer(id=$id, userId=$userId, reference=$reference, status=$status, bankCode=$bankCode, accountNo=${maskAccountNo(accountNo)}, " +
-            "amount=$amount, bankResponseCode=$bankResponseCode)"
+        "Transfer(id=$id, reference=$reference, status=$status, bankCode=$bankCode, accountNo=${maskAccountNo(accountNo)}, bankResponseCode=$bankResponseCode)"
 }
 
 /** 뒤 4자리만 남긴다: 1002123456789 -> *********6789 */

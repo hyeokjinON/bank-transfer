@@ -44,7 +44,7 @@ class OptimisticWalletDebit(
             } catch (e: VersionConflict) {
                 if (attempt >= maxAttempts) {
                     // 핫스팟에서는 흔한 결과라 INFO (부하 측정은 WARN 으로 돌린다 — 요청마다 로그를 쓰면 측정이 흐려진다)
-                    log.info("wallet of {} kept changing for {} attempts, answering CONCURRENT_UPDATE", userId, maxAttempts)
+                    log.info("wallet kept changing for {} attempts, answering CONCURRENT_UPDATE", maxAttempts)
                     throw StoreConflict.ConcurrentUpdate(userId)
                 }
                 sleeper(nextBackoff())

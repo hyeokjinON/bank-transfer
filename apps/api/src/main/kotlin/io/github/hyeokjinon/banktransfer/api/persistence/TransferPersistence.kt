@@ -257,7 +257,7 @@ class JpaTransferStore(
             }
         } catch (e: PessimisticLockingFailureException) {
             // 드물고 운영자가 알아야 하는 일이라 WARN (부하 측정은 WARN 으로 돌리므로 요청마다 찍히는 로그는 두지 않는다)
-            log.warn("wallet of {} is busy (lock wait timeout or deadlock), answering WALLET_BUSY: {}", userId, e.mostSpecificCause.message)
+            log.warn("wallet is busy (lock wait timeout or deadlock), answering WALLET_BUSY: {}", e.mostSpecificCause.message)
             throw StoreConflict.WalletBusy(userId)
         }
     }

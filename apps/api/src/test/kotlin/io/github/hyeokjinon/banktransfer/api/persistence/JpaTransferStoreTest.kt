@@ -7,7 +7,10 @@ import io.github.hyeokjinon.banktransfer.transfer.Transfer
 import io.github.hyeokjinon.banktransfer.transfer.TransferEvent
 import io.github.hyeokjinon.banktransfer.transfer.TransferStatus
 import io.github.hyeokjinon.banktransfer.transfer.TransferStore
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.dao.CannotAcquireLockException
 import org.springframework.dao.PessimisticLockingFailureException
 import org.springframework.jdbc.core.JdbcTemplate
@@ -28,6 +31,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+@ExtendWith(OutputCaptureExtension::class)
 class JpaTransferStoreTest : ApiIntegrationTest() {
 
     @Autowired private lateinit var store: TransferStore
@@ -80,13 +84,16 @@ class JpaTransferStoreTest : ApiIntegrationTest() {
     }
 
     @Test
-    fun `같은 키면 DuplicateIdempotencyKey 이고 두 번째 이벤트는 남지 않는다`() {
+    fun `같은 키면 DuplicateIdempotencyKey 이고 두 번째 이벤트는 남지 않는다`(output: CapturedOutput) {
         val first = newTransfer()
         store.saveWithEvent(first, requested(first))
         val second = newTransfer(key = first.idempotencyKey)
 
         assertFailsWith<StoreConflict.DuplicateIdempotencyKey> { store.saveWithEvent(second, requested(second)) }
         assertEquals(0, outbox.countByAggregateId(second.id.toString()))
+        // Hibernate 7 은 제약 위반을 WARN 으로 찍으며 값(사용자 id-멱등키)을 싣는다 — 도메인 예외로 이미 처리하므로 끈다 (P9c)
+        assertFalse("Duplicate entry" in output.out, "Hibernate 제약 위반 로그가 남았다")
+        assertFalse(first.idempotencyKey in output.out, "로그에 Idempotency-Key 가 있다")
     }
 
     @Test
