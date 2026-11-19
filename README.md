@@ -225,10 +225,10 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
   - [x] P8-3a Kubernetes(kind) 로 옮기기: Envoy Gateway 입구 · 프로브 · preStop · 게이트웨이 readiness 에 은행 연결 · NetworkPolicy · PDB · 노드 실험 → [ADR-0017](docs/adr/0017-kubernetes-kind.md) · [실험 결과](docs/perf/p8-3a-k8s.md)
   - [x] P8-3b 게이트웨이 이중화 (active-standby · K8s Lease 리더 선출 · 전문번호 ConfigMap 구간 예약 · 리더 라벨 + 둘 다 Ready) → [ADR-0018](docs/adr/0018-gateway-ha-leader-election.md) · [실험 결과](docs/perf/p8-3b-gateway-ha.md)
   - [x] P8-3c 게이트웨이 필수 분산 (`DoNotSchedule` — 두 대는 반드시 다른 워커) — [#33](https://github.com/hyeokjinON/bank-transfer/pull/33) · [ADR-0019](docs/adr/0019-gateway-required-spread.md) · [실험 결과](docs/perf/p8-3c-gateway-spread.md)
-- [ ] **P9** 관측성: Micrometer, Prometheus, Grafana
+- [x] **P9** 관측성: Micrometer, Prometheus, Grafana
   - [x] P9a 지표 · 대시보드 · 알림 (Micrometer · Prometheus · Alertmanager · Grafana, kind) → [ADR-0020](docs/adr/0020-observability-metrics-alerts.md) · [실험 결과](docs/perf/p9a-metrics.md)
   - [x] P9b 분산 추적 (Micrometer Tracing · OpenTelemetry · Tempo, kind) — [#37](https://github.com/hyeokjinON/bank-transfer/pull/37) · [ADR-0021](docs/adr/0021-distributed-tracing.md) · [실험 결과](docs/perf/p9b-tracing.md)
-  - [ ] P9c 로그 모으기 (Grafana Alloy · Loki, kind) → [ADR-0022](docs/adr/0022-log-collection.md) · [실험 결과](docs/perf/p9c-logs.md)
+  - [x] P9c 로그 모으기 (Grafana Alloy · Loki, kind) — [#39](https://github.com/hyeokjinON/bank-transfer/pull/39) · [ADR-0022](docs/adr/0022-log-collection.md) · [실험 결과](docs/perf/p9c-logs.md)
 
 ## 기술 스택
 

@@ -1067,6 +1067,7 @@ kubectl --context kind-bank-transfer -n monitoring port-forward svc/loki 3100:31
 - trace_id 가 없다 → 구조화 로그를 껐나 (`kubectl --context kind-bank-transfer -n bank-transfer get cm app-config -o jsonpath='{.data.LOGGING_STRUCTURED_FORMAT_CONSOLE}'` = `ecs`). 텍스트면 `[traceId-spanId]` 정규식으로 꺼낸다. 요청 밖(스케줄러) 줄은 비어 있는 게 정상.
 - 금지 패턴이 0 이 아니다 → `infra/k8s/monitoring/alloy/pipeline.alloy` 의 순서 · 식 (`bash infra/k8s/monitoring/check.sh` [6/6] 표본으로 재현).
 - Loki 재시작 뒤 옛 로그가 없다 → emptyDir 이라 정상 (보관 2일도 Pod 가 살아 있을 때만).
+- Alloy 가 `couldn't initialize inotify: too many open files` 로 재시작을 반복한다 → 노드(kind 는 호스트 커널)의 `fs.inotify.max_user_instances` 가 작다 (GitHub 러너 128 — kind 노드 3개가 같이 쓴다). 모듈 감시는 이미 폴링(`detector = "poll"`)이다. 호스트에서 kind 권장 값 `sudo sysctl -w fs.inotify.max_user_instances=512 fs.inotify.max_user_watches=524288` (CI `k8s-smoke` 의 첫 단계와 같다).
 - 라벨이 늘었다 → Alloy `stage.label_keep` · Loki `discover_service_name` · `discover_log_levels` 설정.
 
 ### 19-5. `ErrorLogSurge` 할 일 (runbook — `loki/rules.yml` 이 가리키는 곳)
@@ -1080,7 +1081,7 @@ api 또는 게이트웨이의 ERROR 로그가 5분에 **10줄**(N)을 넘고 2�
 - 세 규칙: 계좌(영문 · 숫자에 붙지 않은 10 ~ 16자리 → 앞부분 `*`, 끝 4자리만) · 1원인증 코드(`BT` + 숫자 4 → `BT****`) · 금액(`숫자원` → `***원`).
 - **과한 가리기**: 10 ~ 16자리 숫자는 모두 가려진다 — epoch 밀리초 · Kafka 오프셋 · 스냅숏 id 의 숫자 덩어리, `1원인증` → `***원인증`. 진단에 숫자가 필요하면 `kubectl logs` 원본으로.
 - **출금 id 로 Loki 검색이 드물게 안 된다**: 출금 id(UUID)의 끝 12자리가 모두 숫자면(약 0.36%) 계좌 규칙에 걸려 `…-********9012` 처럼 가려진다 — 출금 id 로 안 나오면 `trace_id` 로 찾는다 (스모크 [12] 도 가려진 모양을 받는다). 같은 이유로 ECS 줄의 `spanId`(16진 16자)가 모두 숫자면(약 0.05%) 가려진다 — 잇기는 가리기 전에 꺼낸 `trace_id` 로 하므로 링크는 그대로다.
-- **앱 알림(`ALERT` 로거)의 로그 사본**: 금액에 '원' 이 없어 Alloy 규칙에 안 걸리므로 앱이 로그 사본에서만 가린다 — `amount=` · `balance=` · `ledgerSum=` 뒤 숫자, 대사 항목 `우리=` · `은행=` 값의 금액 → `***`. 거래번호 · 출금 id · `issue #` · 날짜 · 줄 번호는 남는다(찾기 키). 텔레그램 본문은 금액 그대로(운영자 조치용) — 금액은 텔레그램 · DB(`recon_issue`)에서 본다.
+- **앱 알림(`ALERT` 로거)의 로그 사본**: 금액에 '원' 이 없어 Alloy 규칙에 안 걸리므로 앱이 로그 사본에서만 가린다 — `amount=` · `balance=` · `ledgerSum=` 뒤 숫자, 대사 항목 `우리=` · `은행=` 값의 금액 → `***`. 거래번호 · 출금 id · `issue #` · 날짜 · 줄 번호는 남는다(찾기 키). 텔레그램 본문은 금액 그대로(운영자 조치용) — 금액은 텔레그램 · DB(`recon_issue`)에서 본다. 한계: 10자리 이상 금액(은행 파일 줄 · 아주 큰 잔고)은 알림 문구가 먼저 `1234****7890` 처럼 계좌 모양으로 가려 두어 이 식에 안 걸리고 앞 4 · 뒤 4자리가 남는다 (출금 금액은 최대 8자리라 해당 없음).
 - **안 가리는 것**: 앱이 이미 가린 계좌(`*********6789`)는 그대로.
 - 모의 은행 콘솔(`kubectl logs deploy/mock-bank`)은 원본이다 — 개발 중 1원인증 코드를 읽는 통로. Loki 사본만 가려진다.
 

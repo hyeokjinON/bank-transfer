@@ -9,7 +9,7 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
-## [P9c] 로그 모으기 — Grafana Alloy · Loki — 2026-11-19 (PR 번호는 PR 을 만든 뒤 채운다)
+## [P9c] 로그 모으기 — Grafana Alloy · Loki — 2026-11-19 ([#39](https://github.com/hyeokjinON/bank-transfer/pull/39), 머지 후 정리 PR #40)
 ### Added
 - kind: Loki 3.7.9 (`monitoring/loki.yaml` · `loki/loki.yml` · `loki/rules.yml`, 제어 노드 · emptyDir · 보관 2일, 라벨 `namespace` · `app` · `container` 셋 · 구조화 메타데이터 `pod` · `node` · `level` · `trace_id`) · Grafana Alloy v1.21.3 DaemonSet 3개 (`monitoring/alloy.yaml` · `alloy/{config,pipeline,check}.alloy` · `base/rbac-alloy.yaml` — `bank-transfer` namespace Pod 읽기 Role) · `versions.env` `LOKI_VERSION` · `ALLOY_VERSION`.
 - 처리 모듈 `pipeline.alloy` (꺼내기 level · trace_id → 가리기): 수집 설정과 CI 표본 설정이 같이 import. 가리기 = 계좌(10 ~ 16자리) · 1원인증 코드 `BT****` · 금액 `***원`, 같은 규칙 두 번 · 영숫자 경계 · JSON 이스케이프 경계. 금지 패턴(가리지 않은 모양) 0건을 Loki 질의로 증명.
@@ -18,7 +18,7 @@
 - 게이트웨이 은행 호출 한 줄 `bank call type= outcome= reason= tranNo= reference= ms=` (`bank.request` 문맥의 traceId) · kind 구조화 로그(ECS JSON) 계약 테스트 (별도 JVM).
 - 검사 · 스모크: `check.sh` [5/6] Loki 설정 · LogQL · [6/6] Alloy 가리기 표본 실제 실행, 스모크 [12] 로그 (traceId 로 api · 게이트웨이 줄, 모의 은행 줄 가림, 금지 패턴 0, ErrorLogSurge 규칙 · Grafana Loki).
 - 실험 도구 `PHASE=p9c` (`load/k8s/p9c.sh` — 수집 지연 표지 · `JSONLOG=on|off` · `podkill` · `lokizero` · `alloykill` · `errfault`(1원인증 저장 실패 트리거) · 억제 시험 · 가리기 확인) · [측정 결과](docs/perf/p9c-logs.md) · 원자료 `docs/perf/raw/p9c/`. Postman `10. 로그 (P9c, kind)` 폴더 (10-1 ~ 10-6).
-- [ADR-0022](docs/adr/0022-log-collection.md) (제안 — 머지 뒤 정리 PR 에서 채택), OPERATION §19, ARCHITECTURE 로그 절, 구성도 두 장 갱신 (`runtime-k8s.svg` 에 Loki · Alloy · 갈색 점선, `app-architecture.svg` 에 ● L), `infra/k8s/README.md`.
+- [ADR-0022](docs/adr/0022-log-collection.md) (정리 PR #40 에서 채택), OPERATION §19, ARCHITECTURE 로그 절, 구성도 두 장 갱신 (`runtime-k8s.svg` 에 Loki · Alloy · 갈색 점선, `app-architecture.svg` 에 ● L), `infra/k8s/README.md`.
 ### Changed
 - kind 의 api · 게이트웨이 로그를 ECS JSON 으로 (`app-config` `LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs`, 게이트웨이 env 는 optional). Compose · IntelliJ 는 텍스트 그대로.
 - 로그에서 사용자 id · 멱등키 · 금액 빼기: 지갑 로그 · `Transfer.toString` · `StoreConflict` · 지갑 낙관적 차감 충돌 예외 메시지, 앱 알림의 로그 사본(`ALERT` 로거)도 금액 · 잔고를 가린다 (`AlertLogMask` — 텔레그램 본문은 그대로), Redisson 시간 초과 예외는 클래스 이름만, Hibernate 제약 위반 로그(`org.hibernate.orm.jdbc.error`)는 ERROR 로 (api `application.yml`, 모든 환경).
@@ -28,10 +28,12 @@
 - JSON 비용 (L2): 접수 p95 켬 평균 27.19ms / 끔 26.86ms → **+1.2%** (기준 ≤ +10%), 완료 /s 19.68 / 19.69 → **−0.05%** (기준 ≥ −5%). 바이트는 약 두 배 (api 11.1 대 5.7 KB/s, 게이트웨이 9.6 대 5.1 KB/s). Loki CPU 0.015 ~ 0.027 코어 · RSS 192 ~ 242MB, Alloy CPU 0.026 ~ 0.066 코어 · RSS 231 ~ 239MB.
 - 잃는 줄 (L3 · L5): api Pod 강제 종료 **940/940**, Alloy 재시작 **506/506**, 중복 0. Loki 0대 60초 (L4): 회차 중 기록은 813줄 중 270줄 도착(543 미도착)이었지만 약 19분 뒤 재계수 **830 ≥ 813** — 최종 잃음 0, 도착 지연만 (Alloy 가 나중에 다시 넣음 — 지수 백오프 재시도인지는 추정, 코드로 확인하지 않음. `loki.write` 가 막히면 읽기가 멈추는 역압일 수도 있다. 도구의 기다림이 더 짧았음 — 543 은 도구 한계). 꺼지기 전 데이터는 emptyDir 이라 사라짐.
 - ErrorLogSurge (L6): 정상 상태 5분 ERROR 최대 0 → N = 10 그대로. 1원인증 저장 실패 주입 → 500 응답 58건 = api ERROR 58줄, `ApiHigh5xx` 안 울림. **도착은 계산 구간 [186, 256]초보다 18초 늦은 273.9초 — 성공 기준 6 은 "부분"** (원인 후보: 묶음 `group_interval` 대기 · ruler 의 다음 평가, 둘 다 추정). 은행 2분 끊김: 억제 확인 (`inhibit_ok` true), 새 ErrorLogSurge 0, DLT 를 포함하면 5분 ERROR 가 773줄 — 식에서 뺀 결정이 실측으로 맞음.
-- 가리기 (L7): 모든 회차 금지 패턴 **0**, 가린 줄은 실제로 있음 (계좌 703 ~ 11468줄, 1원인증 코드 58줄 = 주입 58건).
+- 가리기 (L7): 모든 회차 금지 패턴 **0** (실험은 계좌 10 ~ 14자리 식 · 최종 리뷰 수정 전 이미지 `dev-6cafa40` — 16자리로 넓힌 식은 CI 표본 · 스모크 [12] 로 확인), 가린 줄은 실제로 있음 (계좌 703 ~ 11468줄, 1원인증 코드 58줄 = 주입 58건).
 - 발견: 측정 도구의 L4 기다림이 Alloy 가 다시 넣기까지보다 짧아 유실처럼 보인 것(→ 재계수), 로그 알림은 넘은 뒤 약 3 ~ 4.5분(지표 알림 50초보다 느림), Loki 3.7 자동 라벨 · `detected_level` 끄기, 계좌 가리기 경계에 JSON 이스케이프 추가.
 ### CI · 사람 확인
-- CI `k8s-smoke` 20분 제한 (성공 기준 7) — PR CI 에서 기록한다. Grafana 화면 클릭 이동 · 캡처 · Postman `10. 로그 (P9c, kind)` 는 Postman 직접 확인으로 남김.
+- CI (#39): 첫 실행 `9adea98` — `build` 10m27s · `infra-smoke` 48s · `app-smoke` 3m57s · `k8s-smoke` 11m26s **실패** (제어 노드 Alloy 가 `inotify: too many open files` 로 CrashLoopBackOff — GitHub 러너의 `max_user_instances=128` 을 kind 노드 3개가 같이 씀 → Alloy `import.file` 감시를 폴링으로 + CI 에 inotify 한도 올리는 단계, `c57b0b1`). `c57b0b1` — `k8s-smoke` 7m51s **실패** (CI `mysql:8.4` 의 소켓이 `/var/lib/mysql/mysql.sock` 이라 스모크 [12] 의 `sql()` 이 못 붙음 → kind 의 `sql()` · `sql_root()` 를 TCP `127.0.0.1` 로, `18b133c`). 머지 직전 `18b133c` — `build` 10m29s · `infra-smoke` 51s · `app-smoke` 3m51s · **`k8s-smoke` 5m32s** (20분 제한, 성공 기준 7 통과).
+- Postman 직접 확인 (2026-11-20): 새 폴더 `10. 로그 (P9c, kind)` Run folder 10-1 ~ 10-6 **16/16** 통과 — 출금 202 → 출금 id 로 api 줄 · trace_id → 같은 trace_id 로 api · 게이트웨이 줄 (`bank call … outcome=ok`) → 거래번호로 모의 은행 줄 가려짐 → 금지 패턴 0 → `ErrorLogSurge` 규칙. Grafana Explore 로그 → Tempo → "Logs for this span". (10-3 만 따로 보내면 앞 Run 의 trace_id 가 15분 밖이라 빈 결과 — 폴더를 처음부터.)
+- 정리 PR #40: ADR-0022 채택, README P9c · P9 `[x]`, ARCHITECTURE 기준 줄 · "(제안)" 떼기, 측정 결과에 CI 시간 · Postman 확인 · 알림 로그 사본의 10자리 이상 금액 한계, OPERATION §19-4 inotify · §19-6 그 한계, HANDOVER P9 완료. 구성도 두 장은 #39 에서 이미 갱신.
 
 ## [P9b] 분산 추적 — Micrometer Tracing · OpenTelemetry · Tempo — 2026-11-18 ([#37](https://github.com/hyeokjinON/bank-transfer/pull/37), 머지 후 정리 PR #38)
 ### Added

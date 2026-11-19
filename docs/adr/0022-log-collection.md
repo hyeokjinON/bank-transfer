@@ -1,6 +1,6 @@
 # ADR-0022: 로그 모으기 — Grafana Alloy · Loki · 수집 직전 가리기 (kind 에만)
 
-- 상태: 제안 (2026-11-19) — 머지 뒤 정리 PR 에서 `채택`
+- 상태: 채택 (2026-11-20, [#39](https://github.com/hyeokjinON/bank-transfer/pull/39) 머지 · 정리 PR #40 — 제안 2026-11-19)
 - 관련: [ADR-0017](0017-kubernetes-kind.md) (kind) · [ADR-0020](0020-observability-metrics-alerts.md) (관측 · 알림) · [ADR-0021](0021-distributed-tracing.md) (추적) · [스펙](../superpowers/specs/2026-11-19-p9c-logs-design.md) (§14 계획 · 실험 단계에서 고친 점 포함) · [측정 결과](../perf/p9c-logs.md) · [OPERATION §19](../../OPERATION.md#19-로그-모으기--loki--alloy-p9c)
 
 ## 맥락
@@ -28,9 +28,9 @@
 - **L4 Loki 0대 60초**: 회차 중 기록은 api 가 쓴 813줄 중 270줄만 들어와 543줄 미도착이었지만, 약 19분 뒤 다시 세니 Loki 에 **830줄**(≥ 813) — **최종 잃음 0**, 도착 지연만 있었다. Alloy 가 보내기 실패를 다시 시도해 나중에 넣었고 도구의 기다림이 더 짧았다(원자료의 543 은 도구 한계, 유실 아님). 다시 시도하는 방식(지수 백오프)은 **추정 — 코드로 확인하지 않음. `loki.write` 가 막히면 읽기가 멈추는 역압일 수도 있다**. 꺼지기 전 데이터는 emptyDir 이라 사라졌다.
 - **L6 ErrorLogSurge — 부분**: 억제 ✅(`inhibit_ok` true, 은행 끊김 중 새 ErrorLogSurge 0), 지표로 못 잡는 오류 ✅(`api5xx_fired` false, 500 응답 58건 = api ERROR 58줄), **도착은 계산 구간 [186, 256]초보다 18초 늦은 273.9초**(firing 에서 받는 곳까지 60초 — 원인 후보는 묶음 `group_interval` 대기 또는 ruler 의 다음 평가, 둘 다 **추정**, 가리지 않음). 통과로 올리지 않는다. 로그 알림은 넘은 뒤 약 3 ~ 4.5분 걸린다(지표 알림 50초보다 느림) — 급한 신호는 지표로, 로그 알림은 "놓치지 않기" 용.
 - **DLT 제외의 실측 근거**: `bank-1` 에서 DLT 를 포함한 5분 ERROR 가 **773줄**(03:48 ~ 03:52) — 빼지 않았다면 은행 복구 뒤 억제 밖에서 울렸을 것. 제외한 `err5m_max` 는 40(앞 회차 errfault 의 꼬리).
-- **L7 가리기**: 모든 회차 금지 패턴 **0**. 가린 줄은 실제로 있었다 — 계좌 703 ~ 11468줄, 금액 634 ~ 7081줄, 1원인증 코드 58줄(errfault 주입 58건).
+- **L7 가리기**: 모든 회차 금지 패턴 **0** (실험은 계좌 10 ~ 14자리 식 · 최종 리뷰 수정 전 이미지 `dev-6cafa40` 으로 쟀다 — 16자리로 넓힌 식은 CI 표본(16자리 줄) · 스모크 [12] 로 확인). 가린 줄은 실제로 있었다 — 계좌 703 ~ 11468줄, 금액 634 ~ 7081줄, 1원인증 코드 58줄(errfault 주입 58건).
 - **실험 · 구현 중에 찾은 것**: Loki 3.7 의 자동 라벨(`service_name`)과 `detected_level` 끄기, 계좌 가리기 경계에 JSON 이스케이프 추가(ECS 예외 메시지 · `stack_trace` 의 `\n` 뒤 계좌가 샜다 — 리뷰), Redisson 예외 메시지의 사용자 id, Hibernate 제약 위반 WARN 의 멱등키, 게이트웨이가 trace 안에서 로그를 안 쓰는 것, 측정 도구의 L4 기다림 한계.
-- **CI**: `k8s-smoke` 20분 제한 — **PR CI 에서 기록**(성공 기준 7). Grafana 화면 클릭 이동(로그 ↔ trace)과 캡처는 사람 확인(Postman 직접 확인)으로 남긴다.
+- **CI** ([#39](https://github.com/hyeokjinON/bank-transfer/pull/39)): `k8s-smoke` **5분 32초** (20분 제한, 스모크 [12] 포함 — 성공 기준 7 통과). 앞 두 실행은 CI 환경 차이로 실패해 고쳤다: ① GitHub 러너의 `fs.inotify.max_user_instances=128` 을 kind 노드 3개가 같이 써서 제어 노드 Alloy 가 "too many open files" 로 죽음 → `import.file` 감시를 폴링(`detector = "poll"`)으로 + CI 에 sysctl 단계, ② CI 의 `mysql:8.4` 소켓 경로가 달라 스모크 [12] 의 `sql()` 이 붙지 못함 → TCP(`127.0.0.1`)로. Postman 직접 확인 `10. 로그 (P9c, kind)` 16/16 · Grafana 로그 ↔ trace 클릭 이동 통과 (2026-11-20). 자세히는 [측정 결과](../perf/p9c-logs.md) "CI".
 
 ## 위험 · 다음
 - **Loki emptyDir**: Loki Pod 가 바뀌면 이전 로그가 모두 사라진다 (L4 에서 확인). 수집이 밀리는 동안은 Loki 로 장애를 보면 그 구간이 비어 보인다 — "로그가 없다" 를 "일이 없었다" 로 읽지 않는다.
