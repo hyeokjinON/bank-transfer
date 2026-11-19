@@ -56,6 +56,7 @@ images:
   - {name: busybox, newTag: "$BUSYBOX_VERSION"}
   - {name: grafana/tempo, newTag: "$TEMPO_VERSION"}
   - {name: grafana/loki, newTag: "$LOKI_VERSION"}
+  - {name: grafana/alloy, newTag: "$ALLOY_VERSION"}
 YAML
   ka apply -k "$dir"
 }
@@ -84,7 +85,7 @@ np_probe() {   # $1 = 호스트, $2 = 포트
 
 # --- P9a 관측 (monitoring namespace) ---
 km() { MSYS_NO_PATHCONV=1 kubectl --context "$CTX" -n monitoring "$@"; }
-wait_monitoring() { local dpl; for dpl in prometheus alertmanager alert-sink grafana tempo loki; do km rollout status "deploy/$dpl" --timeout=300s; done; }
+wait_monitoring() { local dpl; for dpl in prometheus alertmanager alert-sink grafana tempo loki; do km rollout status "deploy/$dpl" --timeout=300s; done; km rollout status ds/alloy --timeout=300s; }
 # PromQL 을 URL 에 넣는다 (PromQL 은 ASCII — jq · python 없이)
 urlenc() {
   local s=$1 out= c i

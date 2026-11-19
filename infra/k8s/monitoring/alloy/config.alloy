@@ -1,0 +1,74 @@
+// P9c Alloy 수집 (스펙 §4, 결정 F1 · F2) — DaemonSet: 노드마다 1개가 자기 노드의 bank-transfer Pod 로그 파일만 읽는다.
+// 처리(꺼내기 · 가리기)는 pipeline.alloy 한 곳 — CI 표본 검사(check.alloy)도 같은 파일을 쓴다. 위치 기록은 --storage.path (hostPath — 재시작해도 이어 읽는다)
+import.file "p9c" {
+	filename = "/etc/alloy/pipeline.alloy"
+}
+
+discovery.kubernetes "pods" {
+	role = "pod"
+
+	namespaces {
+		names = ["bank-transfer"]
+	}
+
+	selectors {
+		role  = "pod"
+		field = "spec.nodeName=" + sys.env("NODE_NAME")
+	}
+}
+
+discovery.relabel "pods" {
+	targets = discovery.kubernetes.pods.targets
+
+	rule {
+		source_labels = ["__meta_kubernetes_namespace"]
+		target_label  = "namespace"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_label_app"]
+		target_label  = "app"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_container_name"]
+		target_label  = "container"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_name"]
+		target_label  = "pod"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_node_name"]
+		target_label  = "node"
+	}
+
+	// /var/log/pods/<ns>_<pod>_<uid>/<container>/0.log (kind 노드에서 확인)
+	rule {
+		source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+		separator     = "/"
+		target_label  = "__path__"
+		replacement   = "/var/log/pods/*$1/*.log"
+	}
+}
+
+local.file_match "pods" {
+	path_targets = discovery.relabel.pods.output
+}
+
+p9c.bank_transfer "main" {
+	forward_to = [loki.write.default.receiver]
+}
+
+loki.source.file "pods" {
+	targets    = local.file_match.pods.targets
+	forward_to = [p9c.bank_transfer.main.receiver]
+}
+
+loki.write "default" {
+	endpoint {
+		url = "http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+	}
+}

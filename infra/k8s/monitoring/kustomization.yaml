@@ -11,6 +11,7 @@ resources:
   - grafana.yaml
   - tempo.yaml   # P9b 추적
   - loki.yaml    # P9c 로그 저장 · 로그 알림
+  - alloy.yaml   # P9c 로그 수집 (DaemonSet)
 configMapGenerator:
   - name: prometheus-config
     files:
@@ -41,3 +42,7 @@ configMapGenerator:
   - name: loki-rules
     files:
       - loki/rules.yml
+  - name: alloy-config
+    files:
+      - alloy/config.alloy
+      - alloy/pipeline.alloy

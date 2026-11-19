@@ -1,0 +1,75 @@
+// P9c 로그 처리 (스펙 §5, 결정 F5 · F6) — 수집 설정(config.alloy)과 CI 표본 검사(check.alloy)가 같은 파일을 import 한다.
+// 순서가 중요하다: ① 꺼내기(level · trace_id) → ② 메타데이터 · 라벨 → ③ 가리기. trace_id 를 가린 뒤에 꺼내면 로그 → trace 링크가 깨진다 (위험 R2)
+declare "bank_transfer" {
+	argument "forward_to" {
+		comment = "가린 줄을 받을 곳 (loki.write 또는 loki.echo)"
+	}
+
+	loki.process "logs" {
+		forward_to = argument.forward_to.value
+
+		// kind(containerd) 로그 파일 한 줄 = "<시각> <stdout|stderr> <F|P> <본문>" — 줄 시각은 이 시각, 잘린(P) 줄은 이어 붙인다
+		stage.cri { }
+
+		// ① JSON (kind 의 api · 게이트웨이 — Spring Boot ECS): log.level · traceId(MDC)
+		stage.match {
+			selector = `{namespace="bank-transfer"} |~ "^\\{"`
+
+			stage.json {
+				expressions = {level = "log.level", trace_id = "traceId"}
+			}
+		}
+
+		// ① 텍스트 (모의 은행 · Kafka · MySQL · Redis, 구조화 로그를 끈 api · 게이트웨이): 머리의 수준 낱말 · Spring 상관 [traceId-spanId]
+		stage.match {
+			selector = `{namespace="bank-transfer"} !~ "^\\{"`
+
+			stage.regex {
+				expression = `(?:^|[\s\[])(?P<level>TRACE|DEBUG|INFO|WARN|ERROR|FATAL)(?:[\s\]]|$)`
+			}
+
+			stage.regex {
+				expression = `\[(?P<trace_id>[0-9a-f]{32})-[0-9a-f]{16}\]`
+			}
+		}
+
+		// ② pod · node · level · trace_id 는 구조화 메타데이터 (라벨이면 값마다 스트림이 생긴다).
+		//    라벨은 namespace · app · container 셋 — loki.source.file 이 붙이는 filename 도 여기서 버린다
+		stage.structured_metadata {
+			values = {pod = "", node = "", level = "", trace_id = ""}
+		}
+
+		stage.label_keep {
+			values = ["namespace", "app", "container"]
+		}
+
+		// ③ 가리기 (결정 F6 ②, 스펙 §5-3) — 모든 줄, 보내기 직전.
+		// 계좌: 영문 · 숫자에 붙지 않은 10 ~ 14자리 숫자 → 끝 4자리만 남기고 같은 길이의 *. 거래번호(T + 날짜 + 영숫자) · traceId 의 숫자 덩어리는 영문에 붙어 그대로.
+		// Go 정규식은 앞뒤 보기가 없어 경계 글자를 같이 먹는다 → "A B" 처럼 붙은 두 번째가 첫 판에서 빠진다. 같은 규칙을 두 번 (가린 값은 숫자 4개라 다시 안 걸린다)
+		stage.replace {
+			expression = `(?:^|[^0-9A-Za-z])([0-9]{6,10})[0-9]{4}(?:[^0-9A-Za-z]|$)`
+			replace    = `{{ repeat (len .Value) "*" }}`
+		}
+
+		stage.replace {
+			expression = `(?:^|[^0-9A-Za-z])([0-9]{6,10})[0-9]{4}(?:[^0-9A-Za-z]|$)`
+			replace    = `{{ repeat (len .Value) "*" }}`
+		}
+
+		// 1원인증 코드 (적요 BT + 4자리)
+		stage.replace {
+			expression = `BT([0-9]{4})`
+			replace    = "****"
+		}
+
+		// 금액 (숫자 + 원). "1원인증" 도 "***원인증" 이 된다 — 더 가리는 쪽 (위험 R2)
+		stage.replace {
+			expression = `([0-9][0-9,]*)원`
+			replace    = "***"
+		}
+	}
+
+	export "receiver" {
+		value = loki.process.logs.receiver
+	}
+}

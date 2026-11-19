@@ -1,0 +1,20 @@
+// P9c CI 표본 검사 (monitoring/check.sh [6/6]) — 수집 설정과 같은 처리(pipeline.alloy)를 표본 파일에 돌려 loki.echo 로 찍는다.
+// 표본 라벨은 kind 의 discovery.relabel 이 붙이는 것과 같은 이름 (namespace · app · container · pod · node)
+import.file "p9c" {
+	filename = "/m/alloy/pipeline.alloy"
+}
+
+local.file_match "sample" {
+	path_targets = [{"__path__" = "/m/alloy/sample/*.txt", "namespace" = "bank-transfer", "app" = "api", "container" = "api", "pod" = "api-check", "node" = "check"}]
+}
+
+p9c.bank_transfer "check" {
+	forward_to = [loki.echo.out.receiver]
+}
+
+loki.source.file "sample" {
+	targets    = local.file_match.sample.targets
+	forward_to = [p9c.bank_transfer.check.receiver]
+}
+
+loki.echo "out" { }
