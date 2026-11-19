@@ -1,7 +1,7 @@
 # P9c 로그 모으기 실험 결과
 
 > 설계 [스펙](../superpowers/specs/2026-11-19-p9c-logs-design.md) (§14 계획 단계 · 실험 단계에서 고친 점 포함) · 결정 [ADR-0022](../adr/0022-log-collection.md) · 도구 `load/k8s/run.sh` (`PHASE=p9c`, 수집 `load/k8s/p9c.sh`) · 원자료 `raw/p9c/` (`<동작>-<회차>.json` 판정 · `.k6.json` · `.timeline.txt` · `.rebalance.txt` · `.p9c.json` 로그 요약 · `.l1.txt` 수집 지연 표본 · `.res.txt` Loki · Alloy 자원 · `.loki-*.json` Loki 지표 질의 결과 · `.alert-sink.txt` 받은 알림 · `.inhibit.txt` 억제 시험 · `.errfault-probes.txt` 주입 확인 요청)
-> 환경: kind 3노드(제어 1 · 워커 2), 실행 2026-11-19 12:17 ~ 12:53 KST (UTC 03:17 ~ 03:53), Loki 3.7.9 (단일 바이너리 · 보관 2일 · emptyDir · 제어 노드), Grafana Alloy v1.21.3 DaemonSet 3개 (노드마다 1개, 제어 노드 포함), 라벨 3개(`namespace` · `app` · `container`) · 구조화 메타데이터 4개(`pod` · `node` · `level` · `trace_id`), `ErrorLogSurge` 임계값 N = 10. 앱 이미지 태그는 원자료에 기록하지 않았다 (`up.sh` 가 이 브랜치 HEAD 에서 빌드 — 앱 코드는 `6cafa40` 이후 바뀐 것이 없다).
+> 환경: kind 3노드(제어 1 · 워커 2), 실행 2026-11-19 12:17 ~ 12:53 KST (UTC 03:17 ~ 03:53), Loki 3.7.9 (단일 바이너리 · 보관 2일 · emptyDir · 제어 노드), Grafana Alloy v1.21.3 DaemonSet 3개 (노드마다 1개, 제어 노드 포함), 라벨 3개(`namespace` · `app` · `container`) · 구조화 메타데이터 4개(`pod` · `node` · `level` · `trace_id`), `ErrorLogSurge` 임계값 N = 10. 앱 이미지 태그 `dev-6cafa40` (실험 뒤 `lib.sh` 의 `deployed_tag` · `api_tag` 로 확인 — 원자료의 `new_tag` 는 비어 있음).
 > 부하 · 판정: 이전 단계와 같다 — k6 출금 20건/s, 판정은 돈 정확성(접수된 키 = 출금 행 = 거래번호, 전부 `COMPLETED`, 은행 빠짐 0 · 이중 0, 환불 0, 잔고 = 원장 합). **9회 전부 통과** (실패 `.json.invalid` 없음). `JSONLOG=off` 회차 뒤 스모크 [12/12] 를 다시 돌려 구조화 로그가 되돌아온 것까지 확인했다.
 
 ## 요약 — 성공 기준 (스펙 §1)
@@ -110,7 +110,7 @@ MySQL 트리거(`p9c_fault_verification`)로 1원인증 저장을 5초마다 실
 - `lokizero-1` 의 기록값(543)은 도구 기다림 한계 — 재계수(830)로 보정했고 줄 단위 비교는 하지 않았다.
 - 텍스트 여러 줄 스택(Kafka · 모의 은행)은 줄마다 따로 수집된다 (JSON 쪽 api · 게이트웨이는 한 줄).
 - 알림 본문의 `amount=` 는 가리지 않는다 (Alertmanager → alert-sink 경로이지 로그 경로가 아니다).
-- L1 해상도 약 1초 (`kubectl exec` 왕복 · 0.5초 간격). 앱 이미지 태그는 원자료에 남기지 않았다.
+- L1 해상도 약 1초 (`kubectl exec` 왕복 · 0.5초 간격).
 - Redis 차감 전략 로그는 kind 기본(conditional)에서 남지 않아 실험에서 보지 못했다.
 - `dup_lines` 는 Loki 가 시각 · 내용이 같은 줄을 버려서 구조상 0 에 가깝고, `lost_lines` · `dup_lines` 는 순차(net) 값이다.
 - `podkill-1.rebalance.txt` 는 도구가 남기는 Kafka 컨슈머 리밸런스 줄(로거 `ConsumerRebalanceListenerInvoker` · `KafkaMessageListenerContainer`, 파티션 배정 · Pod 이름만)이다 — 계좌 · 금액 · 코드는 없음을 확인했다.
