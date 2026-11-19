@@ -122,4 +122,18 @@ monitoring · kube-system 로그, Loki 객체 저장소 · 분산 모드 · 멀�
 인프라(Loki · Alloy · 라벨 · 가리기) → 앱(구조화 로그 · 사용자 id) → 잇기(데이터 소스) → 대시보드 · 알림 → 검사 · 스모크 [12] → 실험 도구 · 실험 → Postman → 문서 · 구성도 → PR.
 
 ## 14. 계획 단계에서 고친 점
-(계획을 쓰면서 채운다.)
+계획(`docs/superpowers/plans/2026-11-19-p9c-logs.md`)을 쓰면서 코드 · 라이브러리 · 이미지로 확인해 스펙과 다르게 정한 것. 자세한 근거는 계획의 "확인한 사실" · "계획에서 정한 것".
+
+1. **ECS 줄 모양 · 필드 지정 없음 (§3)** — Boot 4.1.1 의 ECS 는 중첩 객체다: `log.level` · `log.logger` · `error.{type,message,stack_trace}`, MDC 는 맨 위 `traceId` · `spanId`. `service.name` 은 `spring.application.name` 이 자동으로 채우고 환경 필드는 없다 → 따로 지정하지 않는다. Alloy 는 `log.level` · `traceId` 를 읽는다 (계약 테스트로 못 박음).
+2. **`ErrorLogSurge` 식에서 Spring Kafka DLT 발행 줄을 뺀다 (§6 · F9)** — P9b 원자료: 은행 2분 끊김에 api ERROR 742 · 771줄이 모두 `DeadLetterPublishingRecovererFactory` 이고 재접속 26초 뒤까지 이어진다. 5분 창 · `for: 2m` 이면 `BankDisconnected` 가 풀린 뒤 울려 억제 밖이다 (성공 기준 6 을 못 지킨다). 식에 `!= "DeadLetterPublishingRecovererFactory"` 를 더한다 — DLT 는 지표 알림 `TransferDeadLettered` 가 맡는다 (F9 원칙). 억제 규칙은 그대로 두고, L6 ③ 은 시험 알림을 넣어 억제를 확인한다.
+3. **N 시작값 10 (§6)** — kind 정상 상태 ERROR 는 일마감 대사 파일 없음(Spring Batch `AbstractStep`, 대사 회차마다 Pod 당 1줄)뿐, steady 회차는 0. N = max(10, L6 ① 정상 5분 최대 × 3) 으로 확정한다 (실험 뒤 이 절에 값을 덧붙인다).
+4. **L6 ② 장애 = 1원인증 저장 실패 (§7)** — MySQL 트리거로 `account_verification` INSERT 를 거부 → 요청마다 api ERROR + 500, 1원인증을 출금의 약 1% 로 두면 `ApiHigh5xx`(5% · 2분)가 울리지 않는다. 다른 ERROR 자리는 kind 에서 안 나거나 이미 지표 알림이 있다.
+5. **게이트웨이 은행 호출 한 줄 추가 (§3 에 없음)** — 정상 출금에서 게이트웨이는 trace 안에서 로그를 한 줄도 쓰지 않아 성공 기준 2 를 못 맞춘다. `withClient` 완료 때 `bank call type= outcome= reason= tranNo= reference= ms=` 를 `bank.request` 구간 문맥에서 남긴다 (계좌 · 금액 · 예금주 · 적요 없음).
+6. **모의 은행 줄은 `bank.tran_no` 가 아니라 거래번호로 (§1 기준 2)** — 통장 줄의 `거래번호=` 는 이용기관 거래번호(구간 속성 `transfer.reference`)다. 경로: traceId → 게이트웨이 줄의 `reference=` → 모의 은행 통장 줄.
+7. **사용자 id 빼기 범위 (§3)** — 지갑 3곳에 더해 `Transfer.toString`(정리 작업 WARN · ERROR 3곳이 찍는다)에서 사용자 id · 금액을 뺀다. Redisson 4.8.0 시간 초과 예외 메시지는 락 이름(`lock:wallet:<사용자 id>`)을 싣는다 → 그 ERROR 는 예외 클래스 이름만. Hibernate 7 의 `org.hibernate.orm.jdbc.error` 가 WARN 으로 `Duplicate entry '<사용자 id>-<Idempotency-Key>'` 를 찍는다 → api 설정에서 이 로거를 ERROR 로 (도메인 예외로 이미 처리, 모든 환경).
+8. **Alloy 권한은 Role (§4 "ClusterRole")** — 발견이 `bank-transfer` namespace 만 보고 노드 정보를 쓰지 않으므로 그 namespace 의 Pod 읽기 Role 로 충분하다 (Prometheus 와 같은 모양). Alloy 는 root 로 돈다 — kind 노드 로그 파일이 `root:root 0640` 이다. capability 는 모두 버린다.
+9. **Loki 가 스스로 붙이는 라벨을 끈다 (§5-1 · F5)** — Loki 3.7 은 `service_name` 라벨 · `detected_level` 메타데이터를 만든다 → `discover_service_name: []` · `discover_log_levels: false`. `loki.source.file` 의 `filename` 라벨은 Alloy `stage.label_keep` 으로 버린다.
+10. **가리기 식 (§5-3)** — 계좌 규칙은 영문 · 숫자에 붙지 않은 10 ~ 14자리만 (거래번호 `T` + 날짜 + 영숫자 · traceId 의 숫자 덩어리를 지키려고), 같은 길이의 `*` 로. Go 정규식에 앞뒤 보기가 없어 붙은 두 계좌 중 하나가 빠지므로 같은 규칙을 두 번 돌린다. 금지 패턴 LogQL 의 '원' 은 `\x{C6D0}` (URL 에 한글을 싣지 않는다).
+11. **Alloy 가리기를 CI 에서 실제로 돌린다 (§8 "가능하면")** — 처리를 Alloy 모듈 하나(`pipeline.alloy`)로 두고 수집 설정과 CI 표본 설정이 같이 import 한다. check.sh 가 표본 CRI 파일에 10초 돌려 `loki.echo` 출력으로 라벨 · 금지 패턴 · trace_id · level 을 단언한다. Loki 이미지에는 lint 도구가 없어 규칙 · LogQL 은 Loki 를 잠깐 띄워 API 로 검사한다 (`-verify-config` 는 있음).
+12. **자원 (§4)** — Alloy 표본 실행 RSS 약 200MiB → 요청 128Mi · 상한 512Mi (Tempo 보다 크다). L2 로 확인.
+13. **작업 순서 (§13)** — 앱 변경을 인프라 앞으로 당긴다: 첫 배포에서 구조화 로그 · 게이트웨이 한 줄 · 사용자 id 빼기가 이미지에 있어야 한 번에 확인된다.
