@@ -67,7 +67,7 @@
   <rect x="1414" y="160" width="126" height="46" rx="6" fill="#ffffff" stroke="#047857"/>
   <text x="1477" y="179" text-anchor="middle"><tspan class="h">Alertmanager</tspan><tspan class="s" x="1477" dy="16">묶기 10초 · 억제</tspan></text>
   <rect x="1280" y="212" width="126" height="46" rx="6" fill="#ffffff" stroke="#047857"/>
-  <text x="1343" y="231" text-anchor="middle"><tspan class="h">Grafana</tspan><tspan class="s" x="1343" dy="16">대시보드 2 · Tempo · Loki</tspan></text>
+  <text x="1343" y="231" text-anchor="middle"><tspan class="h">Grafana</tspan><tspan class="s" x="1343" dy="16">대시 2 · Tempo · Loki</tspan></text>
   <rect x="1414" y="212" width="126" height="46" rx="6" fill="#ffffff" stroke="#047857"/>
   <text x="1477" y="231" text-anchor="middle"><tspan class="h">alert-sink</tspan><tspan class="s" x="1477" dy="16">받은 알림 = 로그</tspan></text>
   <rect x="1280" y="264" width="126" height="46" rx="6" fill="#fdf2f8" stroke="#be185d"/>

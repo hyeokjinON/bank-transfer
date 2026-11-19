@@ -1032,3 +1032,75 @@ kubectl --context kind-bank-transfer -n monitoring port-forward svc/tempo 3200:3
 - 도구는 인자를 먼저 검사한 뒤에 이전 출력을 지운다. 끝나면 `bash load/k8s/run.sh cleanup` (§15-7).
 - `gwroll` 뒤에는 게이트웨이가 새 이미지 태그(`dev-…-r<epoch>`)에 남아 다음 실험의 사전 확인이 거부한다 (api ≠ 게이트웨이 태그) — 다음 실험 전에 `bash -c '. infra/k8s/lib.sh; apply_overlay local <api 태그>'` 를 먼저 돌린다.
 - 스모크 [11]: `bash infra/k8s/smoke.sh` — Tempo Ready · 스모크 출금의 trace 가 Tempo 에서 검색되고 서비스 둘 · 구간 5개 이상 · api 로그에 그 traceId · `/actuator` 구간 0.
+
+## 19. 로그 모으기 — Loki · Alloy (P9c)
+> [ADR-0022](docs/adr/0022-log-collection.md) (제안, 2026-11-19). 설계 [스펙](docs/superpowers/specs/2026-11-19-p9c-logs-design.md) (§14 계획 · 실험 단계에서 고친 점), 실험 숫자 [측정 결과](docs/perf/p9c-logs.md). kind(K8s) 에만 있다 — Compose · IntelliJ 실행은 콘솔 텍스트 그대로다. 앱은 표준 출력에만 쓰고, 노드마다 Alloy 가 읽어 계좌 · 금액을 **가린 뒤** Loki 로 보낸다.
+
+### 19-1. 열기
+```bash
+kubectl --context kind-bank-transfer -n monitoring port-forward svc/grafana 3000:3000   # Explore → 데이터 소스 Loki · 대시보드 ① 4행
+kubectl --context kind-bank-transfer -n monitoring port-forward svc/loki 3100:3100      # API: /loki/api/v1/query_range?query=… · /prometheus/api/v1/rules
+```
+수집 지연은 보통 p95 약 2.5초(L1)지만 Loki 가 막혔다 풀리면 몇 분 늦게 들어온다 (19-4).
+
+### 19-2. 찾는 법 (LogQL — Grafana Explore → Loki)
+| 무엇 | 질의 |
+|---|---|
+| 출금 한 건의 모든 줄 (api · 게이트웨이) | `{namespace="bank-transfer"} \| trace_id="<traceId>"` |
+| 출금 id 로 (traceId 를 모를 때) | `{namespace="bank-transfer", app="api"} \|= "<출금 id>"` → 줄의 trace_id |
+| 게이트웨이 은행 호출 | `{app="bank-gateway"} \|= "bank call"` (outcome · reason · tranNo · reference) |
+| 모의 은행 통장 줄 | `{app="mock-bank"} \|= "<거래번호 T…>"` (계좌 · 금액 · 적요는 가려져 있다 — 원본은 `kubectl logs deploy/mock-bank`) |
+| ERROR 만 | `{namespace="bank-transfer"} \| level="ERROR"` |
+| 서비스별 양 | `sum by (app, level) (count_over_time({namespace="bank-transfer"} [1m]))` |
+| 가리기 확인 (0 이어야) | `` {namespace="bank-transfer"} \|~ `(^\|\\[nrtbf]\|\\u[0-9A-Fa-f]{4}\|[^0-9A-Za-z])[0-9]{10,14}([^0-9A-Za-z]\|$)\|BT[0-9]{4}\|[0-9]\x{C6D0}` `` (가리지 않은 계좌 · 코드 · 금액 모양. '원' 은 `\x{C6D0}`) |
+
+라벨은 `namespace` · `app` · `container` 셋뿐이다. `pod` · `node` · `level` · `trace_id` 는 구조화 메타데이터라 `{…} | level="ERROR"` 처럼 `|` 뒤에서 거른다 (`{level="ERROR"}` 는 안 된다).
+
+### 19-3. 잇기
+- **로그 → trace**: 줄을 펼쳐 `trace_id` 옆 "Tempo 에서 trace 보기".
+- **trace → 로그**: trace 의 구간 → "Logs for this span" (앞뒤 1분, `trace_id` 로 질의).
+- **지표 → trace**: P9b exemplar (§18).
+- 경로: traceId → 게이트웨이 `bank call` 줄의 `reference=` → 모의 은행 통장 줄 (`거래번호=`).
+
+### 19-4. 막히는 곳
+- 로그가 없다 → Alloy 가 3개 다 떴나 (`kubectl --context kind-bank-transfer -n monitoring get pods -l app=alloy -o wide`), 오류 (`kubectl --context kind-bank-transfer -n monitoring logs -l app=alloy --tail=200 | grep level=error`), Loki Ready (`/ready`). 429 는 수집 한도 — 처음 읽을 때 잠깐은 정상. **Loki 가 죽었다 살아나면 그동안의 줄이 몇 분 늦게 들어온다** (Alloy 가 다시 보낸다, L4 — 1분 죽은 뒤 줄이 모두 도착했다). 그 사이 "로그가 없다" 를 "일이 없었다" 로 읽지 않는다. 단 꺼지기 **전** 로그는 emptyDir 이라 없다.
+- trace_id 가 없다 → 구조화 로그를 껐나 (`kubectl --context kind-bank-transfer -n bank-transfer get cm app-config -o jsonpath='{.data.LOGGING_STRUCTURED_FORMAT_CONSOLE}'` = `ecs`). 텍스트면 `[traceId-spanId]` 정규식으로 꺼낸다. 요청 밖(스케줄러) 줄은 비어 있는 게 정상.
+- 금지 패턴이 0 이 아니다 → `infra/k8s/monitoring/alloy/pipeline.alloy` 의 순서 · 식 (`bash infra/k8s/monitoring/check.sh` [6/6] 표본으로 재현).
+- Loki 재시작 뒤 옛 로그가 없다 → emptyDir 이라 정상 (보관 2일도 Pod 가 살아 있을 때만).
+- 라벨이 늘었다 → Alloy `stage.label_keep` · Loki `discover_service_name` · `discover_log_levels` 설정.
+
+### 19-5. `ErrorLogSurge` 할 일 (runbook — `loki/rules.yml` 이 가리키는 곳)
+api 또는 게이트웨이의 ERROR 로그가 5분에 **10줄**(N)을 넘고 2분 이어졌다 — 지표 알림이 없는 예상 밖 오류다.
+1. 대시보드 ① 4행 ERROR 패널 → 줄의 로거 · 메시지 확인.
+2. 줄의 `trace_id` → Tempo trace → 같은 시각 지표 (19-3).
+3. 은행 끊김 · 리더 없음이면 이 알림은 **억제되어 오지 않는다** (`BankDisconnected` · `GatewayNoLeader` 가 먼저). Spring Kafka DLT 발행 줄은 식에서 뺐다 — DLT 는 `TransferDeadLettered` 가 맡는다.
+- 임계 N = 10: 정상 상태 5분 ERROR 최대가 0 이었다 (실험 L6 ①). 도착은 ERROR 가 넘은 뒤 **약 3 ~ 4.5분** 걸린다 (5분 창 · `for` 2분 · 1분 평가 — 실험에서는 계산 구간보다 18초 더 걸렸다, 지표 알림 50초보다 느림). 급한 신호는 지표 알림으로 본다.
+
+### 19-6. 가리기 규칙 · 한계
+- 세 규칙: 계좌(영문 · 숫자에 붙지 않은 10 ~ 14자리 → 앞부분 `*`, 끝 4자리만) · 1원인증 코드(`BT` + 숫자 4 → `BT****`) · 금액(`숫자원` → `***원`).
+- **과한 가리기**: 10 ~ 14자리 숫자는 모두 가려진다 — epoch 밀리초 · Kafka 오프셋 · 스냅숏 id 의 숫자 덩어리, `1원인증` → `***원인증`. 진단에 숫자가 필요하면 `kubectl logs` 원본으로.
+- **안 가리는 것**: 알림 본문의 `amount=`(Alertmanager → alert-sink 경로, '원' 이 없다), 앱이 이미 가린 계좌(`*********6789`)는 그대로.
+- 모의 은행 콘솔(`kubectl logs deploy/mock-bank`)은 원본이다 — 개발 중 1원인증 코드를 읽는 통로. Loki 사본만 가려진다.
+
+### 19-7. 끄기 · 켜기
+- 구조화 로그 끄기: `app-config` 의 `LOGGING_STRUCTURED_FORMAT_CONSOLE` 키를 지우고 api · 게이트웨이를 재시작한다 (`kubectl --context kind-bank-transfer -n bank-transfer rollout restart deploy/api deploy/bank-gateway`). Alloy 가 텍스트 정규식으로 이어서 꺼낸다. 되돌리기 = `bash -c '. infra/k8s/lib.sh; apply_overlay local "$(deployed_tag)"'` + 재시작 (스모크 [12] 로 확인).
+- 수집만 멈추기: `kubectl --context kind-bank-transfer -n monitoring delete ds alloy` — 앱은 그대로(결정 F10), 되돌리기 `bash infra/k8s/up.sh`.
+
+### 19-8. 실험 재현 (L1 ~ L7, 도구 `PHASE=p9c`)
+먼저 `bash infra/k8s/up.sh`. 결과는 `docs/perf/raw/p9c/<동작>-<회차>.json`(판정) · `.p9c.json`(로그 요약) · `.l1.txt` · `.res.txt` · `.loki-*.json` · `.alert-sink.txt` 등. 숫자 · 해석은 [측정 결과](docs/perf/p9c-logs.md).
+
+| 실험 | 명령 (저장소 루트, Git Bash) | 볼 것 |
+|---|---|---|
+| L1 · L2 켬 | `PHASE=p9c bash load/k8s/run.sh steady 1` · `steady 2` | `l1_p50_ms` · `l1_p95_ms`, 서비스별 `log_lines_per_s` · `log_bytes_per_s`, `accept_p95_ms` · `completed_per_s` |
+| L2 끔 | `PHASE=p9c JSONLOG=off bash load/k8s/run.sh steady 3` · `steady 4` (**steady 에만**) | 켬 대비 접수 p95 ≤ +10% · 완료 /s ≥ −5%, 바이트 차이 |
+| L3 api Pod 강제 종료 | `PHASE=p9c bash load/k8s/run.sh podkill 1` | `lost_lines` 0 |
+| L4 Loki 0대 60초 | `PHASE=p9c LOKI_DOWN_S=60 bash load/k8s/run.sh lokizero 1` | 기록값은 도구 기다림 한계 — 몇 분 뒤 같은 구간을 다시 세어 보정 (실험: 543 → 재계수 830 ≥ 813) |
+| L5 Alloy 재시작 | `PHASE=p9c bash load/k8s/run.sh alloykill 1` | `lost_lines` 0 · `dup_lines` |
+| L6 ① 정상 상태 | 위 회차들의 `err5m_max` | N = max(10, 최대 × 3) |
+| L6 ② ERROR 주입 | `PHASE=p9c bash load/k8s/run.sh errfault 1` | `surge_fired_s` vs `expected_min_s` ~ `expected_max_s`, `api5xx_fired` false, `probe_codes` 500 |
+| L6 ③ 은행 2분 끊김 | `PHASE=p9c BANK_DOWN_S=120 DURATION=180s SETTLE=900 bash load/k8s/run.sh bank 1` | `inhibit_ok` true, `surge_sink_firing` 0, `err5m_max_with_dlt` vs `err5m_max` |
+| L7 가리기 | 모든 회차의 `forbidden_lines` · `masked_*` | `forbidden_lines` 0 |
+
+- 도구는 인자를 먼저 검사한 뒤에 이전 출력을 지운다. 끝나면 `bash load/k8s/run.sh cleanup` (§15-7). `errfault` 는 MySQL 트리거를 만들었다 지운다 — 끝나면 남지 않았는지 확인 (`SHOW TRIGGERS` 에 `p9c_fault` 없음).
+- 스모크 [12]: `bash infra/k8s/smoke.sh` — traceId 로 api · 게이트웨이 줄, 모의 은행 줄 가림, 금지 패턴 0, `ErrorLogSurge` 규칙 · Grafana Loki 데이터 소스.
+- 검사 `bash infra/k8s/monitoring/check.sh` — 6단계 (규칙 · 설정 · 대시보드 · Loki 설정 · LogQL · Alloy 가리기 표본 [6/6]).

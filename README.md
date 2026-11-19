@@ -126,6 +126,7 @@ sequenceDiagram
 
 > 관측 (P9a): Grafana · Prometheus · Alertmanager 는 port-forward 로 연다 — [OPERATION §17](OPERATION.md#17-관측--지표--대시보드--알림-p9a). 입구로 /actuator/prometheus 는 404.
 > 추적 (P9b): Grafana Explore → Tempo 에서 출금 id 로 검색 — [OPERATION §18](OPERATION.md#18-분산-추적--tempo-p9b).
+> 로그 (P9c): Grafana Explore → Loki 에서 traceId · 출금 id 로 — 계좌 · 금액은 수집 때 가려진다. [OPERATION §19](OPERATION.md#19-로그-모으기--loki--alloy-p9c).
 
 > 디버깅 추천 위치: `BankGatewayClient.send` (요청 등록), `ClientHandler.channelRead0` (전문번호로 응답 매칭), `AccountVerificationService.request` (성명조회 → 1원 이체 연결).
 
@@ -227,7 +228,7 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
 - [ ] **P9** 관측성: Micrometer, Prometheus, Grafana
   - [x] P9a 지표 · 대시보드 · 알림 (Micrometer · Prometheus · Alertmanager · Grafana, kind) → [ADR-0020](docs/adr/0020-observability-metrics-alerts.md) · [실험 결과](docs/perf/p9a-metrics.md)
   - [x] P9b 분산 추적 (Micrometer Tracing · OpenTelemetry · Tempo, kind) — [#37](https://github.com/hyeokjinON/bank-transfer/pull/37) · [ADR-0021](docs/adr/0021-distributed-tracing.md) · [실험 결과](docs/perf/p9b-tracing.md)
-  - [ ] P9c 로그 모으기
+  - [ ] P9c 로그 모으기 (Grafana Alloy · Loki, kind) → [ADR-0022](docs/adr/0022-log-collection.md) · [실험 결과](docs/perf/p9c-logs.md)
 
 ## 기술 스택
 
