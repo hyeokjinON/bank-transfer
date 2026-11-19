@@ -12,7 +12,8 @@ ka() { MSYS_NO_PATHCONV=1 kubectl --context "$CTX" "$@"; }
 d() { MSYS_NO_PATHCONV=1 docker "$@"; }
 kindc() { MSYS_NO_PATHCONV=1 kind "$@"; }
 # 비밀번호는 mysql Pod 가 이미 가진 환경변수로만 (PC 명령행에 나오지 않게 — P8-2 와 같은 방식)
-sql() { k exec -i mysql-0 -- sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" exec mysql -u"$MYSQL_USER" "$MYSQL_DATABASE" --default-character-set=utf8mb4 -N'; }
+# 소켓이 아니라 TCP(127.0.0.1)로 붙는다 — 같은 mysql:8.4 태그라도 이미지마다 서버 · 클라이언트 소켓 경로가 달라 CI 에서 "Can't connect … mysqld.sock" 이 났다 (PR #39)
+sql() { k exec -i mysql-0 -- sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" exec mysql --protocol=TCP -h127.0.0.1 -u"$MYSQL_USER" "$MYSQL_DATABASE" --default-character-set=utf8mb4 -N'; }
 ok() { printf '  \033[32mOK\033[0m %s\n' "$1"; }
 fail() { printf '  \033[31mFAIL\033[0m %s\n' "$1" >&2; exit 1; }
 port_open() { timeout 1 bash -c "exec 3<>/dev/tcp/127.0.0.1/$1" 2>/dev/null; }

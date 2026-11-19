@@ -126,7 +126,7 @@ p9c_l1_summary() {
 
 # --- L6 ② 1원인증 저장 실패 주입 ---
 # 비밀번호는 mysql Pod 가 이미 가진 환경변수로만 (명령행 · 출력에 나오지 않게 — lib.sh sql() 과 같은 방식). 트리거 생성은 binlog 때문에 root 로
-sql_root() { k exec -i mysql-0 -- sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot "$MYSQL_DATABASE" -N'; }
+sql_root() { k exec -i mysql-0 -- sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql --protocol=TCP -h127.0.0.1 -uroot "$MYSQL_DATABASE" -N'; }   # TCP — lib.sh sql() 과 같은 까닭
 p9c_fault_on() {
   sql_root <<'SQL'
 DROP TRIGGER IF EXISTS p9c_fault_verification;
