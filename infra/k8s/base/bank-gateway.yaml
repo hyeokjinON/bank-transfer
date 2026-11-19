@@ -71,6 +71,8 @@ spec:
               valueFrom: {configMapKeyRef: {name: app-config, key: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT}}
             - name: MANAGEMENT_TRACING_SAMPLING_PROBABILITY
               valueFrom: {configMapKeyRef: {name: app-config, key: MANAGEMENT_TRACING_SAMPLING_PROBABILITY}}
+            - name: LOGGING_STRUCTURED_FORMAT_CONSOLE   # P9c 구조화 로그 (api 와 같은 값 — 한 곳). L2 끔 실험이 키를 지워도 뜨게 optional
+              valueFrom: {configMapKeyRef: {name: app-config, key: LOGGING_STRUCTURED_FORMAT_CONSOLE, optional: true}}
           ports:
             - {name: http, containerPort: 8082}
           # preStop 없음 (결정 12): 호출자(api)는 "안 보냄"(503 · 연결 거부)을 안전하게 재시도한다 — SIGTERM 에 바로 물러나는 편이 교대 공백이 짧다
