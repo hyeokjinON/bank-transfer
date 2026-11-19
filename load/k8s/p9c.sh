@@ -14,7 +14,7 @@
 P9C_N=${P9C_N:-10}   # ErrorLogSurge 임계 — infra/k8s/monitoring/loki/rules.yml 의 "> 10" 과 같은 값 (L6 ① 뒤 바꾸면 둘 다)
 P9C_SURGE='{namespace="bank-transfer", app=~"api|bank-gateway"} | level="ERROR" != "DeadLetterPublishingRecovererFactory"'
 P9C_ERR_ALL='{namespace="bank-transfer", app=~"api|bank-gateway"} | level="ERROR"'
-P9C_FORBID='{namespace="bank-transfer"} |~ `(^|\\[nrtbf]|\\u[0-9A-Fa-f]{4}|[^0-9A-Za-z])[0-9]{10,14}([^0-9A-Za-z]|$)|BT[0-9]{4}|[0-9]\x{C6D0}`'
+P9C_FORBID='{namespace="bank-transfer"} |~ `(^|\\[nrtbf]|\\u[0-9A-Fa-f]{4}|[^0-9A-Za-z])[0-9]{10,16}([^0-9A-Za-z]|$)|BT[0-9]{4}|[0-9]\x{C6D0}`'
 P9C_PIDS=; P9C_TAIL=; P9C_INHIBIT=; P9C_VICTIM=; P9C_LOSS_POD=; P9C_NODE=
 
 p9c_tag() {
@@ -327,7 +327,7 @@ p9c_capture() {
   # L7 가리기 — 금지 패턴 0 + 가린 모양이 실제로 있다 (양성 대조)
   local forb m_acct m_code m_amt
   forb=$(loki_count "$P9C_FORBID" "$win_s")
-  m_acct=$(loki_count '{namespace="bank-transfer"} |~ `\*{6,10}[0-9]{4}`' "$win_s")
+  m_acct=$(loki_count '{namespace="bank-transfer"} |~ `\*{6,12}[0-9]{4}`' "$win_s")
   m_code=$(loki_count '{namespace="bank-transfer"} |= "BT****"' "$win_s")
   m_amt=$(loki_count '{namespace="bank-transfer"} |~ `\*\*\*\x{C6D0}`' "$win_s")
 

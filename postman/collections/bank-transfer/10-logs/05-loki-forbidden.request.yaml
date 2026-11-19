@@ -11,7 +11,7 @@ scripts:
     language: text/javascript
     code: |-
       // 정규식 글자(| ` \ ^ $)를 Postman 이 그대로 보내지 않게 미리 인코딩한다. '원' 은 \x{C6D0}
-      const q = 'sum(count_over_time({namespace="bank-transfer"} |~ `(^|\\\\[nrtbf]|\\\\u[0-9A-Fa-f]{4}|[^0-9A-Za-z])[0-9]{10,14}([^0-9A-Za-z]|$)|BT[0-9]{4}|[0-9]\\x{C6D0}` [1h]))';
+      const q = 'sum(count_over_time({namespace="bank-transfer"} |~ `(^|\\\\[nrtbf]|\\\\u[0-9A-Fa-f]{4}|[^0-9A-Za-z])[0-9]{10,16}([^0-9A-Za-z]|$)|BT[0-9]{4}|[0-9]\\x{C6D0}` [1h]))';
       pm.collectionVariables.set("p9cForbiddenQuery", encodeURIComponent(q));
   - type: afterResponse
     language: text/javascript

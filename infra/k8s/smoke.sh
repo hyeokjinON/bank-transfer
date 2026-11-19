@@ -305,7 +305,10 @@ for _ in $(seq 30); do
   sleep 2
 done
 [ "$APPS" = "api bank-gateway " ] || fail "60초 동안 Loki 에서 traceId $TRACE_ID 의 줄을 api · bank-gateway 둘 다 찾지 못했다 (찾은 app: '${APPS}' — OPERATION §19-4)"
-grep -q "transfer $TID processed" <<<"$RESP" || fail "traceId $TRACE_ID 의 api 줄에 'transfer $TID processed' 가 없다"
+# 출금 id(UUID)의 끝 12자리가 모두 숫자면(약 0.36%) Alloy 의 계좌 규칙이 앞 8자리를 * 로 가린다 (위험 R2) — 그 모양도 받는다
+TID_LOKI=$TID
+[[ "${TID##*-}" =~ ^[0-9]{12}$ ]] && TID_LOKI="${TID%-*}-********${TID: -4}"
+grep -qF "transfer $TID_LOKI processed" <<<"$RESP" || fail "traceId $TRACE_ID 의 api 줄에 'transfer $TID_LOKI processed' 가 없다"
 grep -q 'bank call type=transfer outcome=ok' <<<"$RESP" || fail "traceId $TRACE_ID 의 게이트웨이 줄에 'bank call type=transfer outcome=ok' 가 없다 (BankCallLog)"
 # [2] 출금의 거래번호 → 모의 은행 통장 줄 (가려진 채로). 계좌 · 금액은 Alloy 가 가렸다 — 콘솔(kubectl logs)에는 원래 모양이 있다
 REF=$(sql <<<"SELECT reference FROM transfer WHERE id = '$TID'" | tr -d '\r')
@@ -326,17 +329,20 @@ N_CODE=$(loki_count "{namespace=\"bank-transfer\"} |= \"BT$VCODE\"" 3600)
 N_MASKED=$(loki_count '{namespace="bank-transfer", app="mock-bank"} |= "BT****"' 3600)
 [ "${N_MASKED:-0}" -gt 0 ] || fail "가린 적요(BT****) 줄이 Loki 에 없다 — [1] 의 1원인증 통장 줄이 수집되지 않았다"
 # 금지 패턴 0 (결정 F6 ③). 양성 대조: 콘솔에는 계좌번호 전체가 있다 — 0 이 '질의가 틀려서' 가 아니다
-N_FORBID=$(loki_count '{namespace="bank-transfer"} |~ `(^|\\[nrtbf]|\\u[0-9A-Fa-f]{4}|[^0-9A-Za-z])[0-9]{10,14}([^0-9A-Za-z]|$)|BT[0-9]{4}|[0-9]\x{C6D0}`' 3600)
+N_FORBID=$(loki_count '{namespace="bank-transfer"} |~ `(^|\\[nrtbf]|\\u[0-9A-Fa-f]{4}|[^0-9A-Za-z])[0-9]{10,16}([^0-9A-Za-z]|$)|BT[0-9]{4}|[0-9]\x{C6D0}`' 3600)
 [ "$N_FORBID" = 0 ] || fail "Loki 에 금지 패턴(가리지 않은 계좌 · 적요 코드 · 금액) 줄이 ${N_FORBID:-?}개 (빈 값 = 질의 실패 — OPERATION §19-4)"
 MBLOGS=$(k logs deploy/mock-bank --tail=-1 2>/dev/null || true)
 RAW=$({ grep -c "$ACCOUNT" <<<"$MBLOGS" || true; })
 [ "${RAW:-0}" -gt 0 ] || fail "양성 대조 실패: 모의 은행 콘솔에 계좌번호 $ACCOUNT 줄이 없다 (금지 패턴 0 을 믿을 수 없다)"
+# 같은 금지 패턴(grep -E 판 — '원' 은 글자 그대로)이 콘솔 원본에서는 걸려야 한다: 식이 아무것도 못 맞혀 생기는 헛 0 을 막는다
+RAW_FORBID=$({ grep -cE '(^|\\[nrtbf]|\\u[0-9A-Fa-f]{4}|[^0-9A-Za-z])[0-9]{10,16}([^0-9A-Za-z]|$)|BT[0-9]{4}|[0-9]원' <<<"$MBLOGS" || true; })
+[ "${RAW_FORBID:-0}" -gt 0 ] || fail "양성 대조 실패: 금지 패턴이 모의 은행 콘솔 원본에서도 0줄이다 (식이 아무것도 맞히지 못한다)"
 # 로그 알림 규칙 · Grafana 데이터 소스
 RULES=$({ loki_get /prometheus/api/v1/rules 2>/dev/null || true; } | tr -d '\r')
 grep -q '"name":"ErrorLogSurge"' <<<"$RULES" || fail "Loki ruler 에 ErrorLogSurge 가 없다 (kubectl -n monitoring logs deploy/loki | grep -i rule)"
 ! grep -q '"health":"err"' <<<"$RULES" || fail "ErrorLogSurge 평가 오류: $(grep -o '"lastError":"[^"]*"' <<<"$RULES" | head -1)"
 GH=$(km exec deploy/prometheus -- wget -qO- http://grafana.monitoring.svc.cluster.local:3000/api/datasources/uid/loki/health 2>/dev/null || true)
 grep -q '"status":"OK"' <<<"$GH" || fail "Grafana Loki 데이터 소스 health 가 OK 가 아니다: $GH"
-ok "Loki Ready · Alloy 3/3, 라벨 3개, traceId $TRACE_ID → api · 게이트웨이 줄, 모의 은행 줄(거래번호 $REF) 가려짐, 적요 코드 0 · 금지 패턴 0 (콘솔 원본 ${RAW}줄), ErrorLogSurge 적재, Grafana Loki OK"
+ok "Loki Ready · Alloy 3/3, 라벨 3개, traceId $TRACE_ID → api · 게이트웨이 줄, 모의 은행 줄(거래번호 $REF) 가려짐, 적요 코드 0 · 금지 패턴 0 (콘솔 원본 계좌 ${RAW}줄 · 금지 패턴 ${RAW_FORBID}줄), ErrorLogSurge 적재, Grafana Loki OK"
 
 echo "k8s smoke 통과"
