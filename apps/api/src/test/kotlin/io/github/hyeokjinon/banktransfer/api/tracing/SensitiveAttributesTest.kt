@@ -60,7 +60,7 @@ class SensitiveAttributesTest : ApiIntegrationTest() {
             relay.publishPending()
             assertEquals(TransferStatus.COMPLETED, store.findById(id)!!.status)
         }
-        // 2) 잔고 부족 — StoreConflict.InsufficientBalance 메시지 = "balance of '<사용자 id>' is less than 7777771"
+        // 2) 잔고 부족 — StoreConflict.InsufficientBalance 메시지에는 값이 없다 (P9c)
         assertEquals(422, postTransfer(payer, poorKey, account, 7_777_771).first.value())
         // 3) 입력 검증 실패 — 거절된 값이 예외 메시지에 들어간다
         assertEquals(400, postTransfer(payer, "idem-bad-" + UUID.randomUUID(), "SECRET778899", 1_000).first.value())

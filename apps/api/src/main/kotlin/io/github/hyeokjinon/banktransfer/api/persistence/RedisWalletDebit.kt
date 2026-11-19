@@ -38,15 +38,15 @@ class RedisWalletDebit(
             // 클라이언트에게는 락 경합과 같은 503 이지만 운영자는 구분해야 한다 → ERROR.
             // 사용자 id 도, 예외 메시지 · 스택도 싣지 않는다 — Redisson 시간 초과 메시지는 명령 인자(락 이름 = lock:wallet:<사용자 id>)를 싣는다 (P9c 결정 F6 ①)
             log.error("redis unavailable for wallet lock, rejecting (fail-closed): {}", e.javaClass.name)
-            throw StoreConflict.WalletBusy(userId)
+            throw StoreConflict.WalletBusy()
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
-            throw StoreConflict.WalletBusy(userId)
+            throw StoreConflict.WalletBusy()
         }
         if (!acquired) {
             // 핫스팟에서는 흔한 결과라 INFO (부하 측정은 WARN 으로 돌린다). 같은 줄의 traceId 로 요청을 찾는다 (P9c)
             log.info("wallet lock not acquired within {}, answering WALLET_BUSY", waitTime)
-            throw StoreConflict.WalletBusy(userId)
+            throw StoreConflict.WalletBusy()
         }
         try {
             // 접수 트랜잭션은 이 안에서 시작 · 커밋된다 → 아래 unlock 은 커밋 뒤다 (JpaTransferStore 가 바깥 트랜잭션을 거부해 보장한다)

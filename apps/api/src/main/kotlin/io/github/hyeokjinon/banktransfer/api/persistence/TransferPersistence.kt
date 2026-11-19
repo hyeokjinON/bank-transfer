@@ -240,7 +240,7 @@ class JpaTransferStore(
                     val saved = transfers.saveAndFlush(TransferEntity.from(transfer))
                     if (!debit.withdraw(userId, transfer.id, transfer.amount, transfer.createdAt)) {
                         // false = 잔고 부족 또는 지갑 없음. 예외로 트랜잭션 전체(방금 INSERT 한 출금 포함)를 롤백한다
-                        throw StoreConflict.InsufficientBalance(userId, transfer.amount)
+                        throw StoreConflict.InsufficientBalance()
                     }
                     outbox.saveAndFlush(outboxRow(event))
                     saved.toDomain()
@@ -251,14 +251,14 @@ class JpaTransferStore(
             // V3 에서 이름이 바뀌었다. 옛 이름(uk_transfer_idempotency)은 새 이름의 부분 문자열이 아니라 함께 고쳐야 했다
             val message = e.mostSpecificCause.message.orEmpty()
             when {
-                "uk_transfer_user_idempotency" in message -> throw StoreConflict.DuplicateIdempotencyKey(transfer.idempotencyKey)
+                "uk_transfer_user_idempotency" in message -> throw StoreConflict.DuplicateIdempotencyKey()
                 "uk_transfer_reference" in message -> throw StoreConflict.DuplicateReference(transfer.reference)
                 else -> throw e
             }
         } catch (e: PessimisticLockingFailureException) {
             // 드물고 운영자가 알아야 하는 일이라 WARN (부하 측정은 WARN 으로 돌리므로 요청마다 찍히는 로그는 두지 않는다)
             log.warn("wallet is busy (lock wait timeout or deadlock), answering WALLET_BUSY: {}", e.mostSpecificCause.message)
-            throw StoreConflict.WalletBusy(userId)
+            throw StoreConflict.WalletBusy()
         }
     }
 
