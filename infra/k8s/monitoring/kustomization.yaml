@@ -10,6 +10,7 @@ resources:
   - alert-sink.yaml
   - grafana.yaml
   - tempo.yaml   # P9b 추적
+  - loki.yaml    # P9c 로그 저장 · 로그 알림
 configMapGenerator:
   - name: prometheus-config
     files:
@@ -34,3 +35,9 @@ configMapGenerator:
   - name: tempo-config
     files:
       - tempo/tempo.yml
+  - name: loki-config
+    files:
+      - loki/loki.yml
+  - name: loki-rules
+    files:
+      - loki/rules.yml

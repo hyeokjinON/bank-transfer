@@ -55,6 +55,7 @@ images:
   - {name: grafana/grafana, newTag: "$GRAFANA_VERSION"}
   - {name: busybox, newTag: "$BUSYBOX_VERSION"}
   - {name: grafana/tempo, newTag: "$TEMPO_VERSION"}
+  - {name: grafana/loki, newTag: "$LOKI_VERSION"}
 YAML
   ka apply -k "$dir"
 }
@@ -83,7 +84,7 @@ np_probe() {   # $1 = 호스트, $2 = 포트
 
 # --- P9a 관측 (monitoring namespace) ---
 km() { MSYS_NO_PATHCONV=1 kubectl --context "$CTX" -n monitoring "$@"; }
-wait_monitoring() { local dpl; for dpl in prometheus alertmanager alert-sink grafana tempo; do km rollout status "deploy/$dpl" --timeout=300s; done; }
+wait_monitoring() { local dpl; for dpl in prometheus alertmanager alert-sink grafana tempo loki; do km rollout status "deploy/$dpl" --timeout=300s; done; }
 # PromQL 을 URL 에 넣는다 (PromQL 은 ASCII — jq · python 없이)
 urlenc() {
   local s=$1 out= c i
@@ -104,3 +105,15 @@ prom_value() { { prom_query "$1" "${2:-}" || true; } | { grep -o '"value":\[[^]]
 # --- P9b 추적 ---
 # Tempo HTTP API — Prometheus Pod 의 busybox wget 으로 (PC 포트를 열지 않는다). 검색 결과의 traceID 는 앞 0 이 빠질 수 있다 — 쓰는 쪽이 32자로 채운다
 tempo_get() { km exec deploy/prometheus -- wget -qO- "http://tempo.monitoring.svc.cluster.local:3200$1"; }
+
+# --- P9c 로그 ---
+# Loki HTTP API — Prometheus Pod 의 busybox wget 으로 (PC 포트를 열지 않는다). LogQL 은 ASCII 로 쓴다 (urlenc 이 한글을 바이트로 못 바꾼다 — '원' 은 \x{C6D0})
+loki_get() { km exec deploy/prometheus -- wget -qO- "http://loki.monitoring.svc.cluster.local:3100$1"; }
+# 줄 수 = sum(count_over_time(<$1> [<$2>s])) 즉시 질의, $3 = 시각(epoch 초, 없으면 지금) → 범위 (시각 − $2, 시각].
+# 질의 실패면 빈 값 (0 으로 위장하지 않는다), 줄이 없으면 0 (Loki 는 빈 결과를 준다)
+loki_count() {
+  local out
+  out=$({ loki_get "/loki/api/v1/query?query=$(urlenc "sum(count_over_time($1 [$2s]))")${3:+&time=$3}" 2>/dev/null || true; } | tr -d '\r')
+  grep -q '"status":"success"' <<<"$out" || return 0
+  { grep -o '"value":\[[^]]*\]' <<<"$out" || echo '"value":[0,"0"]'; } | head -1 | sed -E 's/.*,"([^"]*)"\]$/\1/'
+}

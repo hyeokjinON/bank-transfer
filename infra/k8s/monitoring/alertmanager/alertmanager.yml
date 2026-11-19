@@ -17,3 +17,7 @@ inhibit_rules:
   # 원인 하나 · 알림 하나 — 리더가 없으면 은행 회선도 당연히 없다
   - source_matchers: [alertname="GatewayNoLeader"]
     target_matchers: [alertname="BankDisconnected"]
+  # P9c: 은행 끊김 · 리더 없음 동안 그 장애가 낳는 ERROR 로그 알림은 억제 (결정 F9 — 같은 장애 두 번 울리지 않기).
+  #      은행 끊김의 DLT 발행 ERROR 는 규칙 식에서 이미 뺐다 (loki/rules.yml) — 이 억제는 그 밖의 ERROR 몫
+  - source_matchers: [alertname=~"BankDisconnected|GatewayNoLeader"]
+    target_matchers: [alertname="ErrorLogSurge"]
