@@ -8,12 +8,12 @@
 | # | 기준 | 결과 | 근거 |
 |---|---|---|---|
 | 1 | 돈 정확성 — 모든 실험 판정 | **통과** | 9회 전부 `통과` + 실험 앞 · 뒤 스모크 2회 |
-| 2 | traceId 하나로 api · 게이트웨이 · (거래번호로) 모의 은행 줄 | **통과** (Grafana 화면 클릭 이동은 사람 확인으로 남김) | 스모크 [12/12] 2회, Postman 10 CLI 실행(7 요청 · 16 단언). Grafana 에서 줄 → Tempo → "Logs for this span" 클릭 이동과 캡처 3장(`l-logs-to-trace.png` 등)은 사람 몫 — Postman 직접 확인 · 가이드에서 |
+| 2 | traceId 하나로 api · 게이트웨이 · (거래번호로) 모의 은행 줄 | **통과** (Grafana 화면 클릭 이동은 Postman 직접 확인에서 통과 — 이 문서 끝 "CI") | 스모크 [12/12] 2회, Postman 10 CLI 실행(7 요청 · 16 단언). Grafana 에서 줄 → Tempo → "Logs for this span" 클릭 이동과 캡처 3장(`l-logs-to-trace.png` 등)은 사람 몫 — Postman 직접 확인 · 가이드에서 |
 | 3 | 금지 패턴 0건 | **통과** | 모든 회차 `forbidden_lines` **0**. 가린 줄은 실제로 있다 — 계좌 703 ~ 11468줄, 금액 634 ~ 7081줄, errfault 의 1원인증 코드 `BT****` 58줄(= 주입 58건). `lokizero-1` 은 Loki 가 새로 떠서 복구 뒤 기간만 본 부분 기간 |
 | 4 | 비용: 접수 p95 ≤ +10%, 처리량 ≥ −5% | **통과** | 접수 p95 켬 평균 27.19 / 끔 평균 26.86 ms → **+1.2%**, 완료 /s 19.68 / 19.69 → **−0.05%** |
 | 5 | 잃은 줄 0 (Pod 강제 종료 · Alloy 재시작) | **통과** | L3 `podkill-1` 940/940, L5 `alloykill-1` 506/506, 중복 0 |
 | 6 | `ErrorLogSurge` 가 계산값 근처에 도착 · 은행 끊김 중 억제 | **부분** | 억제 ✅, 지표로 못 잡는 오류 ✅(`api5xx_fired` false), 도착 시각은 **계산 구간 [186, 256]초보다 18초 늦은 273.9초** — 원인은 추정(아래 L6 ②). 통과로 올림하지 않는다 |
-| 7 | CI `k8s-smoke` 20분 안 · 스모크 [12] | **PR CI 에서 기록** | 아직 PR 을 만들지 않았다 — 이 문서 끝 "CI" 에 PR 뒤 채운다 |
+| 7 | CI `k8s-smoke` 20분 안 · 스모크 [12] | **통과** — CI `k8s-smoke` 5분 32초 (20분 제한), 스모크 [12/12] | 이 문서 끝 "CI" (앞 두 실행은 CI 환경 차이로 실패 → 고침) |
 
 ## L1 · L2 — 수집 지연과 켬 / 끔 비용
 숫자는 `raw/p9c/steady-*.p9c.json` 그대로. "끔" = `app-config` 의 구조화 로그 키를 지워 api · 게이트웨이가 텍스트 로그를 쓰고 Alloy 가 정규식으로 이어서 꺼낸다 (계획에서 정한 것 17). L1 표지 줄 = api 컨테이너 PID 1 표준 출력에 직접 쓴 `p9c-l1 <회차> <i> end`, 회차마다 20표본.
@@ -92,7 +92,7 @@ MySQL 트리거(`p9c_fault_verification`)로 1원인증 저장을 5초마다 실
 | R3 | 수집 지연 | L1 p95 2.4 ~ 2.6초 — 스모크 · Postman 은 다시 묻기로 흡수 |
 | R4 | Loki emptyDir | L4: Loki 재시작 때 꺼지기 전 로그가 사라진다 (확인) |
 | R5 | JSON 비용 | L2 +1.2% (잡음 수준), 바이트 약 2배 (×1.88 ~ ×1.95) |
-| R6 | CI 시간 | 아직 — PR CI 에서 기록 |
+| R6 | CI 시간 | 5분 32초 — 20분 제한 안, 이미지 미리 받기 단계 불필요 |
 | R7 | ruler 비용 | Loki CPU 0.015 ~ 0.027 코어 (규칙 1개 포함, 회차 전체) |
 
 ## 해석 · 예상과 다른 점
@@ -111,6 +111,7 @@ MySQL 트리거(`p9c_fault_verification`)로 1원인증 저장을 5초마다 실
 - 텍스트 여러 줄 스택(Kafka · 모의 은행)은 줄마다 따로 수집된다 (JSON 쪽 api · 게이트웨이는 한 줄).
 - 앱 알림(`ALERT` 로거)의 로그 사본은 '원' 이 없는 금액(`amount=` · `balance=` · `ledgerSum=` · 대사 항목 값)을 실었다 — Alloy 규칙 · 금지 패턴 식이 보지 않는 모양이다. 최종 리뷰에서 앱이 로그 사본에서만 가리게 고쳤다 (텔레그램 본문은 그대로, 스펙 §14). 이 실험은 그 수정 전 이미지(`dev-6cafa40`)로 돌았다.
 - L7 은 계좌 10 ~ 14자리 식(가리기 · 금지 패턴)으로 쟀다. 최종 리뷰에서 API 가 받는 계좌 길이(10 ~ 16자리)에 맞춰 넓혔고, 실험은 다시 돌리지 않았다 — 넓힌 식은 CI 표본(16자리 줄) · 스모크 [12] 로 확인한다.
+- 앱 알림 로그 사본의 10자리 이상 금액(은행 파일 줄 · 아주 큰 잔고)은 알림 문구가 먼저 계좌처럼 `1234****7890` 으로 가려 두어 `AlertLogMask` 의 숫자 식에 안 걸린다 — 앞 4 · 뒤 4자리가 남는다. 출금 금액은 최대 1천만 원(8자리)이라 출금 알림에는 해당 없음 (최종 리뷰에서 받아들인 한계).
 - L1 해상도 약 1초 (`kubectl exec` 왕복 · 0.5초 간격).
 - Redis 차감 전략 로그는 kind 기본(conditional)에서 남지 않아 실험에서 보지 못했다.
 - `dup_lines` 는 Loki 가 시각 · 내용이 같은 줄을 버려서 구조상 0 에 가깝고, `lost_lines` · `dup_lines` 는 순차(net) 값이다.
@@ -118,4 +119,16 @@ MySQL 트리거(`p9c_fault_verification`)로 1원인증 저장을 5초마다 실
 - **Grafana 화면 캡처 3장(logs → trace, trace → logs, 대시보드 4행)은 찍지 않았다** — 사람 확인(Postman 직접 확인 · 가이드 캡처)으로 남긴다. 이 문서에 그림이 없는 이유다.
 
 ## CI
-`k8s-smoke` 시간 (스모크 [12] · Alloy 이미지 받기 포함, 20분 제한) — **PR 을 만든 뒤 PR CI 에서 기록한다** (성공 기준 7 · 위험 R6). 20분을 넘기면 계획 "정한 것 24" 의 미리 받기 단계(러너에서 한 번 받아 `kind load`)를 더한다.
+`k8s-smoke` 시간 (스모크 [12] · Alloy 이미지 받기 포함, 20분 제한) — [#39](https://github.com/hyeokjinON/bank-transfer/pull/39) 의 PR CI:
+
+| 커밋 | `build` | `infra-smoke` | `app-smoke` | `k8s-smoke` |
+|---|---|---|---|---|
+| `9adea98` (첫 실행) | 10분 27초 | 48초 | 3분 57초 | 11분 26초 **실패** — 제어 노드 Alloy CrashLoopBackOff |
+| `c57b0b1` | 9분 19초 | 48초 | 3분 41초 | 7분 51초 **실패** — 스모크 [12] MySQL 연결 |
+| `18b133c` (머지 직전) | 10분 29초 | 51초 | 3분 51초 | **5분 32초** |
+
+- 첫 실패: 제어 노드 Alloy 가 `couldn't initialize inotify: too many open files` 로 죽었다. GitHub 러너는 `fs.inotify.max_user_instances=128` 이고 kind 노드 3개(컨테이너)가 러너 커널의 이 한도를 같이 쓴다 — 시스템 Pod 가 많은 제어 노드에서 Alloy 의 `import.file`(모듈 파일 감시)이 한도에 걸렸다 (추정 — 노드별 사용량은 재지 않았다). 로컬 Docker Desktop 에서는 나지 않았다. → `import.file` 에 `detector = "poll"` · `poll_frequency = "1m"` (모듈은 ConfigMap 이라 바뀔 일이 드물다) + CI 에 kind 권장 값 `sysctl -w fs.inotify.max_user_instances=512 fs.inotify.max_user_watches=524288` 단계 (`c57b0b1`).
+- 둘째 실패: 스모크 [12] 의 첫 MySQL 조회가 `Can't connect … through socket '/var/run/mysqld/mysqld.sock'`. CI 가 새로 받은 `mysql:8.4` 의 서버 소켓은 `/var/lib/mysql/mysql.sock` 이었다 (로컬 이미지는 클라이언트 기본 경로와 같았다). → kind 용 `sql()`(`infra/k8s/lib.sh`) · `sql_root()`(`load/k8s/p9c.sh`)가 `--protocol=TCP -h127.0.0.1` 로 붙게 (`18b133c`). 스모크 정리 단계도 같은 함수라 CI 에서 조용히 실패하고 있었다.
+- 20분까지 여유가 커서 이미지 미리 받기 단계(계획 "정한 것 24")는 넣지 않았다. P9b(#37) 의 4분 13초 · 4분 49초보다 약 1분 길다 — Loki · Alloy 이미지와 스모크 [12] 몫으로 추정 (단계별로 나누어 재지 않았다).
+
+Postman 직접 확인 (2026-11-20, 사용자): `10. 로그 (P9c, kind)` Run folder — 10-1 ~ 10-6 **16/16 통과** (10-2 는 수집 전이라 한 번 스스로 다시 물음). Grafana Explore → Loki 에서 `trace_id` 로 api 줄 → Tempo 버튼으로 같은 trace → "Logs for this span" 으로 api · 게이트웨이 줄. 겪은 것: 10-3 만 따로 보내면 앞 Run 의 trace_id 가 `since=15m` 밖이라 빈 결과 — 폴더를 처음부터 돌린다. Runner 결과 화면은 응답 본문을 저장하지 않아 비어 보인다 (단언 결과로 본다). Grafana 의 데이터 소스는 왼쪽 메뉴가 아니라 Explore 맨 위 상자에서 바꾼다.

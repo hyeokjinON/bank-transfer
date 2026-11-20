@@ -219,16 +219,16 @@ curl localhost:8080/api/v1/wallet -H 'X-User-Id: user-1'
   - [x] P6-1 컨슈머 코루틴: suspend 리스너 · 은행 지연별 처리량 · 용량 탐색 → [ADR-0012](docs/adr/0012-consumer-coroutines.md) · [측정 결과](docs/perf/p6-1-consumer-coroutines.md)
   - [x] P6-2 웹 1원인증 WebFlux 비교: 네 판 · 별도 앱 `apps/api-reactive` · 끊기면 취소 → [ADR-0013](docs/adr/0013-web-verification-webflux-comparison.md) · [측정 결과](docs/perf/p6-2-web-reactive.md)
 - [x] **P7** Virtual Thread 적용 비교: 설정 하나 · 진행 조건 실험(V1 · V2 · V3) · 같은 도구로 웹 · 컨슈머 비교, Java 21 냉시동 교착 → [ADR-0014](docs/adr/0014-virtual-threads.md) · [측정 결과](docs/perf/p7-virtual-threads.md)
-- [ ] **P8** 모듈 분리(MSA), Docker Compose → Kubernetes
+- [x] **P8** 모듈 분리(MSA), Docker Compose → Kubernetes
   - [x] P8-1 은행 게이트웨이 서비스 분리: HTTP · 실패 분류 유지 · 서버 2판 × 클라이언트 2판 · Toxiproxy → [ADR-0015](docs/adr/0015-bank-gateway-service.md) · [측정 결과](docs/perf/p8-1-gateway-split.md)
   - [x] P8-2 앱 이미지 · Compose 전체 실행 · api 2대: Dockerfile 타깃 3 · nginx · ShedLock · mode 기본 http → [ADR-0016](docs/adr/0016-app-images-compose.md) · [실험 결과](docs/perf/p8-2-compose.md)
   - [x] P8-3a Kubernetes(kind) 로 옮기기: Envoy Gateway 입구 · 프로브 · preStop · 게이트웨이 readiness 에 은행 연결 · NetworkPolicy · PDB · 노드 실험 → [ADR-0017](docs/adr/0017-kubernetes-kind.md) · [실험 결과](docs/perf/p8-3a-k8s.md)
   - [x] P8-3b 게이트웨이 이중화 (active-standby · K8s Lease 리더 선출 · 전문번호 ConfigMap 구간 예약 · 리더 라벨 + 둘 다 Ready) → [ADR-0018](docs/adr/0018-gateway-ha-leader-election.md) · [실험 결과](docs/perf/p8-3b-gateway-ha.md)
   - [x] P8-3c 게이트웨이 필수 분산 (`DoNotSchedule` — 두 대는 반드시 다른 워커) — [#33](https://github.com/hyeokjinON/bank-transfer/pull/33) · [ADR-0019](docs/adr/0019-gateway-required-spread.md) · [실험 결과](docs/perf/p8-3c-gateway-spread.md)
-- [ ] **P9** 관측성: Micrometer, Prometheus, Grafana
+- [x] **P9** 관측성: Micrometer, Prometheus, Grafana
   - [x] P9a 지표 · 대시보드 · 알림 (Micrometer · Prometheus · Alertmanager · Grafana, kind) → [ADR-0020](docs/adr/0020-observability-metrics-alerts.md) · [실험 결과](docs/perf/p9a-metrics.md)
   - [x] P9b 분산 추적 (Micrometer Tracing · OpenTelemetry · Tempo, kind) — [#37](https://github.com/hyeokjinON/bank-transfer/pull/37) · [ADR-0021](docs/adr/0021-distributed-tracing.md) · [실험 결과](docs/perf/p9b-tracing.md)
-  - [ ] P9c 로그 모으기 (Grafana Alloy · Loki, kind) → [ADR-0022](docs/adr/0022-log-collection.md) · [실험 결과](docs/perf/p9c-logs.md)
+  - [x] P9c 로그 모으기 (Grafana Alloy · Loki, kind) — [#39](https://github.com/hyeokjinON/bank-transfer/pull/39) · [ADR-0022](docs/adr/0022-log-collection.md) · [실험 결과](docs/perf/p9c-logs.md)
 
 ## 기술 스택
 
