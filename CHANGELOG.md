@@ -9,6 +9,9 @@
 - P3 설계 문서 (`docs/superpowers/specs/2026-10-19-p3-transfer-design.md`).
 - DB 문서 `docs/database.md`: ERD, 테이블 정의, 인덱스 용도, 잠금 방식, 시간대 정책(KST 저장), 마이그레이션 규칙, 운영 쿼리.
 
+### Fixed (문서)
+- `matchLabelKeys` 를 둔 이유를 바로잡음 (ADR-0019 결정 2 정정 · ARCHITECTURE ADR 표 · `bank-gateway.yaml` 주석): "옛 Pod 까지 세면 롤링이 멈춘다" 는 `maxSkew 1` 분산 규칙에서는 틀린 설명이다 (옛 Pod 옆 2 : 1 은 허용). 실제 이유는 롤링 뒤 새 리비전 두 대가 한 워커에 몰리는 것을 막는 것이고, 롤링이 멈추는 것은 필수 anti-affinity 쪽이다. 설정 값은 바뀌지 않았다.
+
 ## [P9c] 로그 모으기 — Grafana Alloy · Loki — 2026-11-19 ([#39](https://github.com/hyeokjinON/bank-transfer/pull/39), 머지 후 정리 PR #40)
 ### Added
 - kind: Loki 3.7.9 (`monitoring/loki.yaml` · `loki/loki.yml` · `loki/rules.yml`, 제어 노드 · emptyDir · 보관 2일, 라벨 `namespace` · `app` · `container` 셋 · 구조화 메타데이터 `pod` · `node` · `level` · `trace_id`) · Grafana Alloy v1.21.3 DaemonSet 3개 (`monitoring/alloy.yaml` · `alloy/{config,pipeline,check}.alloy` · `base/rbac-alloy.yaml` — `bank-transfer` namespace Pod 읽기 Role) · `versions.env` `LOKI_VERSION` · `ALLOY_VERSION`.

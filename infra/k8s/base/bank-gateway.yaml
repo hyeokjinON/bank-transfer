@@ -46,8 +46,8 @@ spec:
           nodeAffinityPolicy: Honor
           labelSelector:
             matchLabels: {app: bank-gateway}
-          # 같은 리비전끼리만 센다 (P8-3a 와 같다). DoNotSchedule 에서는 더 중요하다 — 옛 Pod 까지 세면 워커 2개가 모두 차 있어
-          # 롤링(maxSurge 1)의 새 Pod 가 갈 곳이 없어 배포가 멈춘다 (필수 anti-affinity 를 고르지 않은 이유)
+          # 같은 리비전끼리만 센다 (P8-3a 와 같다) — 옛 Pod 까지 세면 롤링이 끝난 뒤 새 리비전 두 대가 한 워커에 몰릴 수 있다.
+          # (롤링이 멈추는 것은 이 규칙이 아니라 필수 anti-affinity 다 — maxSkew 1 에서는 옛 Pod 옆 2:1 이 허용된다. ADR-0019 정정)
           matchLabelKeys: [pod-template-hash]
       containers:
         - name: bank-gateway
