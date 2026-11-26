@@ -10,7 +10,8 @@
 
 ## 결정
 1. **게이트웨이 `topologySpreadConstraints` 를 `whenUnsatisfiable: DoNotSchedule`** 로 바꾼다 (`maxSkew 1`, `topologyKey: kubernetes.io/hostname`). 나눌 수 없으면 같은 노드에 띄우지 않고 **Pending 으로 기다린다.**
-2. **`matchLabelKeys: [pod-template-hash]` 를 유지한다** — 같은 리비전끼리만 센다. 그래야 롤링(`maxSurge 1 · maxUnavailable 0`)의 새 Pod 가 옛 Pod 가 있는 워커에도 잠깐 뜰 수 있어 배포가 멈추지 않는다.
+2. **`matchLabelKeys: [pod-template-hash]` 를 유지한다** — 같은 리비전끼리만 센다. 그래야 롤링(`maxSurge 1 · maxUnavailable 0`)이 끝났을 때 새 리비전의 두 Pod 가 서로 다른 워커에 놓인다. 옛 Pod 까지 세면 새 Pod 의 자리가 옛 Pod 배치에 끌려가, 새 리비전 두 대가 한 워커에 몰린 채 롤링이 끝날 수 있다 (P8-3a 에서 api 가 실제로 세 번 몰렸다, ADR-0017 · 커밋 8aadd27).
+   > **정정 (2026-11-26)**: 처음에는 "옛 Pod 까지 세면 새 Pod 가 갈 곳이 없어 배포가 멈춘다" 를 이유로 적었다. `maxSkew 1` 에서는 틀린 설명이다 — 워커 둘에 옛 Pod 가 하나씩 있을 때 새 Pod 를 어느 쪽에 놓아도 개수는 2 대 1, 차이 1 이라 허용된다. 롤링이 멈추는 것은 옛 Pod 까지 세는 **필수 pod anti-affinity** 쪽이다 (아래 "버린 대안"). 결정 자체(유지)는 그대로다.
 3. **`nodeTaintsPolicy: Ignore` · `nodeAffinityPolicy: Honor` 를 명시한다** (둘 다 기본값 — 의도를 매니페스트에 남긴다). Ignore = cordon · 장애로 taint 가 붙은 워커도 "자리" 로 센다 → 대체 Pod 가 남은 워커로 몰리지 않고, 그 워커가 돌아오면 그곳에 뜬다. Honor = `nodeSelector` 에 맞는 워커만 자리로 센다 (제어 노드 제외).
 4. **스모크 [9] 에 "두 게이트웨이가 서로 다른 워커" 를 넣는다** — PR 마다 CI 가 확인한다.
 5. api 는 바꾸지 않는다 (`ScheduleAnyway` 유지). api 는 상태가 없고 몰려도 처리량 · 가용성만 줄어든다 — 은행 연결 주인 문제가 없다.

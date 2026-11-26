@@ -541,7 +541,7 @@ flowchart TB
 | [0016](docs/adr/0016-app-images-compose.md) | 루트 Dockerfile 하나 · 타깃 3 · nginx 앞 api 2대(보낸 POST 는 다시 보내지 않음), 하루 배치만 ShedLock, `mode` 기본 `http`, 파티션 3 유지 |
 | [0017](docs/adr/0017-kubernetes-kind.md) | 같은 구성을 kind(Kubernetes)로 — Envoy Gateway 입구(재시도 없음), preStop 10s · 프로브 3종, 게이트웨이 readiness 에만 은행 연결, NetworkPolicy 기본 거부, 인프라 · 모의 은행은 제어 노드, 연결 주인 하나는 P8-3b |
 | [0018](docs/adr/0018-gateway-ha-leader-election.md) | 게이트웨이 2대 active-standby — K8s Lease 리더 선출, 리더 라벨 + 둘 다 Ready, 전문번호 ConfigMap 구간 예약, 정상 교대 순서(종료 훅), 규격 v0.4 `3001` |
-| [0019](docs/adr/0019-gateway-required-spread.md) | 게이트웨이 두 복제본 필수 분산 — `DoNotSchedule` + `matchLabelKeys`(롤링 교착 방지) + `nodeTaintsPolicy Ignore`(빠진 워커로 복귀) |
+| [0019](docs/adr/0019-gateway-required-spread.md) | 게이트웨이 두 복제본 필수 분산 — `DoNotSchedule` + `matchLabelKeys`(새 리비전 몰림 방지) + `nodeTaintsPolicy Ignore`(빠진 워커로 복귀) |
 | [0020](docs/adr/0020-observability-metrics-alerts.md) | 관측 — 사건 Counter · Timer + DB 를 읽는 상태 Gauge, Prometheus 는 Operator 없이 Pod 직접 수집, 알림 규칙 11개 → Alertmanager → alert-sink(대역), 입구 HTTPRoute 허용 목록, 점검 시간은 앱 설정 한 곳 |
 | [0021](docs/adr/0021-distributed-tracing.md) | 분산 추적 — Micrometer Tracing + OpenTelemetry → Tempo(앱이 직접 보냄), 아웃박스 `trace_parent` 로 접수 → 발행 잇기, 정리 작업은 새 trace + `transfer.id`, 내보내기 앞 지우개 |
 | [0022](docs/adr/0022-log-collection.md) | 로그 모으기 — Alloy DaemonSet → Loki, kind 에만 ECS JSON, 수집 직전 가리기 + 앱에서 사용자 id 빼기, 로그 ↔ trace, 로그 알림 ErrorLogSurge 하나 |
